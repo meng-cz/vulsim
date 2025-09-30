@@ -7,6 +7,7 @@
 #include <set>
 #include <array>
 #include <list>
+#include <string>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ using std::unordered_map;
 using std::set;
 using std::array;
 using std::list;
+using std::string;
 
 typedef __uint128_t uint128; 
 typedef uint64_t    uint64; 
@@ -55,5 +57,8 @@ static_assert(sizeof(float) == 4, "sizeof(float) == 4");
 uint64 get_current_tick();
 uint64 get_current_time_us();
 uint64 get_wall_time_tick();
+
+vector<string> & get_cmdline_args(const char prefix);
+void init_cmdline_args(int argc, char ** argv);
 
 #endif
