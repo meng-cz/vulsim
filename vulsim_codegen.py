@@ -161,6 +161,28 @@ for filename in [f for f in os.listdir("lib") if f.endswith(".h") or f.endswith(
     shutil.copy(filepath, libout_dir)
     print("copy %s" % filepath)
 
+# 加载配置参数库
+print("加载配置参数库")
+
+configlibrary : dict[str, str] = {}
+config_xml_file = os.path.join(proj_dir, "config.xml")
+if os.path.isfile(config_xml_file):
+    tree = ET.parse(config_xml_file)
+    root = tree.getroot()
+
+    if root.tag != "configlib":
+        print("Wrong Format: config.xml does not start with tag \"configlib\"")
+        sys.exit(1)
+
+    for item in root.findall("configitem"):
+        name = item.find("name").text.strip()
+        value = item.find("value").text.strip()
+        configlibrary[name] = value
+else:
+    print("config.xml is Not Found")
+    exit(1)
+
+
 # 生成组合逻辑块代码
 print("生成组合逻辑块代码")
 
@@ -353,7 +375,7 @@ for xml_file in [f for f in os.listdir(combine_dir) if f.endswith(".xml")]:
         type = storage.find("type").text.strip()
         comment = storage.find("comment").text.strip() if storage.find("comment") is not None else ""
         member_field.append("/* %s */" % comment)
-        if storage.find("value"):
+        if storage.find("value") is not None:
             value = storage.find("value").text.strip()
             member_field.append("%s %s = %s;" % (type, name, value))
         elif type in basic_data_type:
@@ -367,7 +389,7 @@ for xml_file in [f for f in os.listdir(combine_dir) if f.endswith(".xml")]:
         type = storagenext.find("type").text.strip()
         argtype = type + " &" if type not in basic_data_type else type
         comment = storagenext.find("comment").text.strip() if storagenext.find("comment") is not None else ""
-        if storage.find("value"):
+        if storage.find("value") is not None:
             value = storage.find("value").text.strip()
             member_field.append("StorageNext<%s> _storagenext_%s = StorageNext<%s>(%s);" % (type, name, type, value))
         else:
@@ -391,9 +413,12 @@ for xml_file in [f for f in os.listdir(combine_dir) if f.endswith(".xml")]:
 
     for config in root.findall("config"):
         name = config.find("name").text.strip()
-        value = config.find("value").text.strip()
+        ref = config.find("ref").text.strip()
         comment = config.find("comment").text.strip() if config.find("comment") is not None else ""
-        member_field.append("const int64 %s = %s;" % (name, value))
+        if ref not in configlibrary.keys():
+            print("Config Item %s(%s) in Combine %s is Not Found" % (name, ref, cname))
+            exit(1)
+        member_field.append("const int64 %s = %s;" % (name, configlibrary[ref]))
         print("parsing config %s" % name)
 
     for init in root.findall("init"):

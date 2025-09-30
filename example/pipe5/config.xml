@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<configlib>
+
+    <configitem>
+        <name>AddrMap.BaseAddr</name>
+        <value>0x80000000UL</value>
+    </configitem>
+    <configitem>
+        <name>AddrMap.SizeMB</name>
+        <value>1024</value>
+    </configitem>
+    <configitem>
+        <name>AddrMap.DevBaseAddr</name>
+        <value>0xc00000000000UL</value>
+    </configitem>
+
+</configlib>

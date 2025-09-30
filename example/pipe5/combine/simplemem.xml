@@ -6,15 +6,15 @@
 
     <config>
         <name>SizeMB</name>
-        <value>1024</value>
+        <ref>AddrMap.SizeMB</ref>
     </config>
     <config>
         <name>BaseAddr</name>
-        <value>0x80000000UL</value>
+        <ref>AddrMap.BaseAddr</ref>
     </config>
     <config>
         <name>DevBaseAddr</name>
-        <value>0xc00000000000UL</value>
+        <ref>AddrMap.DevBaseAddr</ref>
     </config>
 
 
