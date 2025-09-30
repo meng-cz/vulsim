@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<combine>
+
+    <name>IDStage</name>
+
+    <pipein>
+        <name>id_in</name>
+        <type>IDData</type>
+    </pipein>
+
+    <pipeout>
+        <name>id_out</name>
+        <type>EXData</type>
+    </pipeout>
+
+    <request>
+        <name>decode</name>
+        <arg>
+            <name>rawinst</name>
+            <type>uint32</type>
+        </arg>
+        <return>
+            <name>decinst</name>
+            <type>RV64DecInst</type>
+        </return>
+    </request>
+
+    <request>
+        <name>cdecode</name>
+        <arg>
+            <name>rawinst</name>
+            <type>uint32</type>
+        </arg>
+        <return>
+            <name>decinst</name>
+            <type>RV64DecInst</type>
+        </return>
+    </request>
+
+    <tick>
+        <cppfunc>
+            <file>IDStage.cpp</file>
+            <name>IDStage_tick</name>
+        </cppfunc>
+    </tick>
+
+
+
+</combine>

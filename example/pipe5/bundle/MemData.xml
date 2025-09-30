@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<bundle>
+    <name>MemData</name>
+    <member>
+        <name>pc</name>
+        <type>uint64</type>
+    </member>
+    <member>
+        <name>arg0</name>
+        <type>uint64</type>
+        <comment></comment>
+    </member>
+    <member>
+        <name>arg1</name>
+        <type>uint64</type>
+    </member>
+    <member>
+        <name>vaddr</name>
+        <type>uint64</type>
+    </member>
+    <member>
+        <name>opcode</name>
+        <type>uint8</type>
+    </member>
+    <member>
+        <name>rd</name>
+        <type>uint8</type>
+    </member>
+    <member>
+        <name>funct3</name>
+        <type>uint8</type>
+    </member>
+    <member>
+        <name>funct7</name>
+        <type>uint8</type>
+    </member>
+    <member>
+        <name>instflag</name>
+        <type>uint32</type>
+    </member>
+    <member>
+        <name>rawinst</name>
+        <type>uint32</type>
+    </member>
+    <member>
+        <name>exception</name>
+        <type>uint32</type>
+    </member>
+</bundle>
+

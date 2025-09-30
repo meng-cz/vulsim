@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<combine>
+
+    <name>RV64SimpleMem</name>
+
+    <config>
+        <name>SizeMB</name>
+        <value>1024</value>
+    </config>
+    <config>
+        <name>BaseAddr</name>
+        <value>0x80000000UL</value>
+    </config>
+    <config>
+        <name>DevBaseAddr</name>
+        <value>0xc00000000000UL</value>
+    </config>
+
+
+    <storage>
+        <name>memory</name>
+        <type>vector&lt;uint64&gt;</type>
+    </storage>
+    <storage>
+        <name>reserved_addr</name>
+        <type>uint64</type>
+        <value>0</value>
+    </storage>
+
+    <init>
+        <cppfunc>
+            <code>memory.resize(SizeMB * 1024UL * 1024UL / 8UL);</code>
+        </cppfunc>
+    </init>
+
+    <request>
+        <name>devmem_read</name>
+        <arg>
+            <name>addr</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>len</name>
+            <type>uint8</type>
+        </arg>
+        <return>
+            <name>data</name>
+            <type>uint64</type>
+        </return>
+    </request>
+
+    <request>
+        <name>devmem_write</name>
+        <arg>
+            <name>addr</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>len</name>
+            <type>uint8</type>
+        </arg>
+        <arg>
+            <name>data</name>
+            <type>uint64</type>
+        </arg>
+    </request>
+
+    <service>
+        <name>read</name>
+        <arg>
+            <name>paddr</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>len</name>
+            <type>uint8</type>
+        </arg>
+        <return>
+            <name>data</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>error</name>
+            <type>uint32</type>
+        </return>
+        <cppfunc>
+            <file>RV64SimpleMem.cpp</file>
+            <name>RV64SimpleMem_read</name>
+        </cppfunc>
+    </service>
+
+    <service>
+        <name>write</name>
+        <arg>
+            <name>paddr</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>len</name>
+            <type>uint8</type>
+        </arg>
+        <arg>
+            <name>data</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>error</name>
+            <type>uint32</type>
+        </return>
+        <cppfunc>
+            <file>RV64SimpleMem.cpp</file>
+            <name>RV64SimpleMem_write</name>
+        </cppfunc>
+    </service>
+
+    <service>
+        <name>amo</name>
+        <arg>
+            <name>paddr</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>len</name>
+            <type>uint8</type>
+        </arg>
+        <arg>
+            <name>funct7</name>
+            <type>uint8</type>
+        </arg>
+        <arg>
+            <name>arg</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>ret</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>error</name>
+            <type>uint32</type>
+        </return>
+        <cppfunc>
+            <file>RV64SimpleMem.cpp</file>
+            <name>RV64SimpleMem_amo</name>
+        </cppfunc>
+    </service>
+
+
+
+</combine>

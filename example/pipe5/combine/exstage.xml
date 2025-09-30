@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<combine>
+
+    <name>EXStage</name>
+
+    <pipein>
+        <name>ex_in</name>
+        <type>EXData</type>
+    </pipein>
+
+    <pipeout>
+        <name>ex_out</name>
+        <type>MemData</type>
+    </pipeout>
+
+    <stallable/>
+    
+    <request>
+        <name>read_reg</name>
+        <arg>
+            <name>idx</name>
+            <type>uint16</type>
+        </arg>
+        <return>
+            <name>value</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>valid</name>
+            <type>bool</type>
+        </return>
+    </request>
+
+    <request>
+        <name>lock_reg</name>
+        <arg>
+            <name>idx</name>
+            <type>uint16</type>
+        </arg>
+    </request>
+    
+
+    <request>
+        <name>alu64</name>
+        <arg>
+            <name>funct73</name>
+            <type>uint32</type>
+        </arg>
+        <arg>
+            <name>s1</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>s2</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>result</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>invalidop</name>
+            <type>bool</type>
+        </return>
+    </request>
+
+    <request>
+        <name>alu32</name>
+        <arg>
+            <name>funct73</name>
+            <type>uint32</type>
+        </arg>
+        <arg>
+            <name>s1</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>s2</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>result</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>invalidop</name>
+            <type>bool</type>
+        </return>
+    </request>
+
+    <request>
+        <name>branch</name>
+        <arg>
+            <name>funct3</name>
+            <type>uint8</type>
+        </arg>
+        <arg>
+            <name>s1</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>s2</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>result</name>
+            <type>bool</type>
+        </return>
+        <return>
+            <name>invalidop</name>
+            <type>bool</type>
+        </return>
+    </request>
+
+    <request>
+        <name>fpu64</name>
+        <arg>
+            <name>funct5_rs2_funct3</name>
+            <type>uint32</type>
+        </arg>
+        <arg>
+            <name>s1</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>s2</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>result</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>invalidop</name>
+            <type>bool</type>
+        </return>
+        <return>
+            <name>fcsr_update</name>
+            <type>uint64</type>
+        </return>
+    </request>
+
+    <request>
+        <name>fpu32</name>
+        <arg>
+            <name>funct5_rs2_funct3</name>
+            <type>uint32</type>
+        </arg>
+        <arg>
+            <name>s1</name>
+            <type>uint64</type>
+        </arg>
+        <arg>
+            <name>s2</name>
+            <type>uint64</type>
+        </arg>
+        <return>
+            <name>result</name>
+            <type>uint64</type>
+        </return>
+        <return>
+            <name>invalidop</name>
+            <type>bool</type>
+        </return>
+        <return>
+            <name>fcsr_update</name>
+            <type>uint64</type>
+        </return>
+    </request>
+
+    <tick>
+        <cppfunc>
+            <file>EXStage.cpp</file>
+            <name>EXStage_tick</name>
+        </cppfunc>
+    </tick>
+
+
+
+</combine>
