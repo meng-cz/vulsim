@@ -8,10 +8,13 @@
 #include <array>
 #include <list>
 #include <string>
+#include <memory>
+#include <filesystem>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <inttypes.h>
 #include <assert.h>
@@ -26,6 +29,10 @@ using std::set;
 using std::array;
 using std::list;
 using std::string;
+using std::unique_ptr;
+using std::shared_ptr;
+using std::make_unique;
+using std::make_shared;
 
 typedef __uint128_t uint128; 
 typedef uint64_t    uint64; 
@@ -53,6 +60,17 @@ static_assert(sizeof(int8) == 1, "sizeof(int8_t) == 1");
 
 static_assert(sizeof(double) == 8, "sizeof(double) == 8");
 static_assert(sizeof(float) == 4, "sizeof(float) == 4");
+
+
+#define RAND(from, to) ((rand()%((to)-(from)))+(from))
+
+inline uint64_t rand_long() {
+    return ((uint64_t)rand() | ((uint64_t)rand() << 32UL));
+}
+
+#define CEIL_DIV(x,y) (((x) + (y) - 1) / (y))
+#define ALIGN(x,y) ((y)*CEIL_DIV((x),(y)))
+#define BOEQ(a, b) ((!(a))==(!(b)))
 
 uint64 get_current_tick();
 uint64 get_current_time_us();
