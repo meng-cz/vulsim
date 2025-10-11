@@ -101,7 +101,7 @@
     |-- reqport
       |-- instname
       |-- portname
-    |-- [servport]
+    |-- servport
       |-- instname
       |-- portname
     |-- visual
