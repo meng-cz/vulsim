@@ -58,4 +58,6 @@ venv.bak/
 
 .vscode
 
+build
+
 
