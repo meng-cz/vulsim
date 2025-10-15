@@ -1741,14 +1741,17 @@ string VulDesign::saveProject() {
     try {
         // .vul file
         fs::path origVul = proj / (project_name + ".vul");
+        if (fs::exists(origVul)) fs::remove(origVul);
         fs::copy_file(bakDir / (project_name + ".vul"), origVul, fs::copy_options::overwrite_existing);
 
         // design.xml
         fs::path origDesign = proj / "design.xml";
+        if (fs::exists(origDesign)) fs::remove(origDesign);
         fs::copy_file(bakDir / "design.xml", origDesign, fs::copy_options::overwrite_existing);
 
         // config.xml
         if (dirty_config_lib) {
+            if (fs::exists(proj / "config.xml")) fs::remove(proj / "config.xml");
             fs::copy_file(bakDir / "config.xml", proj / "config.xml", fs::copy_options::overwrite_existing);
             dirty_config_lib = false;
         }
@@ -1757,10 +1760,8 @@ string VulDesign::saveProject() {
         if (dirty_bundles) {
             fs::path origBundleDir = proj / "bundle";
             if (fs::exists(origBundleDir)) fs::remove_all(origBundleDir);
-            fs::create_directories(origBundleDir);
-            for (auto &ent : fs::directory_iterator(bakDir / "bundle")) {
-                fs::copy(ent.path(), origBundleDir / ent.path().filename(), fs::copy_options::overwrite_existing);
-            }
+            // copy directory
+            fs::copy(bakDir / "bundle", origBundleDir, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
             dirty_bundles = false;
         }
 
@@ -1768,10 +1769,8 @@ string VulDesign::saveProject() {
         if (dirty_combines) {
             fs::path origCombineDir = proj / "combine";
             if (fs::exists(origCombineDir)) fs::remove_all(origCombineDir);
-            fs::create_directories(origCombineDir);
-            for (auto &ent : fs::directory_iterator(bakDir / "combine")) {
-                fs::copy(ent.path(), origCombineDir / ent.path().filename(), fs::copy_options::overwrite_existing);
-            }
+            // copy directory
+            fs::copy(bakDir / "combine", origCombineDir, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
             dirty_combines = false;
         }
 
