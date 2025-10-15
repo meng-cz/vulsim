@@ -178,3 +178,10 @@
       |-- comment
 ```
 
+# project XML文件结构
+
+```
+|-- project
+  |-- version
+```
+
