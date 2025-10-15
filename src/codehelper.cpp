@@ -205,6 +205,36 @@ unique_ptr<vector<string>> codeGenerateHelperLines(VulCombine &vc) {
 }
 
 /**
+ * @brief Generate a C++ function argument signature from arguments and return values.
+ * @param args The vector of VulArgument representing the function arguments.
+ * @param rets The vector of VulArgument representing the function return values.
+ * @return The generated C++ function argument signature as a string.
+ */
+string codeGenerateFunctionArgumentSignature(const vector<VulArgument> &args, const vector<VulArgument> &rets) {
+    std::ostringstream oss;
+    bool first = true;
+    for (const VulArgument &a : args) {
+        if (!first) oss << ", ";
+        first = false;
+        if (isBasicVulType(a.type)) {
+            oss << a.type << " " << a.name;
+        } else {
+            oss << a.type << " & " << a.name;
+        }
+    }
+    for (const VulArgument &ret : rets) {
+        if (!first) oss << ", ";
+        first = false;
+        if (isBasicVulType(ret.type)) {
+            oss << ret.type << " * " << ret.name;
+        } else {
+            oss << ret.type << " * " << ret.name;
+        }
+    }
+    return oss.str();
+}
+
+/**
  * @brief Generate a C++ function signature from function name, arguments, and return values.
  * @param funcname The name of the function.
  * @param args The vector of VulArgument representing the function arguments.
@@ -212,24 +242,7 @@ unique_ptr<vector<string>> codeGenerateHelperLines(VulCombine &vc) {
  * @return The generated C++ function signature as a string.
  */
 string codeGenerateFunctionSignature(const string &funcname, const vector<VulArgument> &args, const vector<VulArgument> &rets) {
-    string sig = "void " + funcname + "(";
-    bool first = true;
-    for (const VulArgument &a : args) {
-        if (!first) sig += ", ";
-        if (isBasicVulType(a.type)) {
-            sig += a.type + " " + a.name;
-        } else {
-            sig += a.type + " & " + a.name;
-        }
-        first = false;
-    }
-    for (const VulArgument &r : rets) {
-        if (!first) sig += ", ";
-        sig += r.type + " * " + r.name;
-        first = false;
-    }
-    sig += ")";
-    return sig;
+    return "void " + funcname + "(" + codeGenerateFunctionArgumentSignature(args, rets) + ")";
 }
 
 /**

@@ -112,6 +112,7 @@ using std::shared_ptr;
  其它:
      genbundleh [<output-path>]                 # 导出 bundle.h，默认在项目cpp目录下
      validate                                   # 运行完整的设计检查并返回错误代码/说明
+     generate <output-dir> [<vulsim-lib-dir>]   # 生成设计的 C++ 代码文件，默认 vulsim-lib-dir 为程序同目录下的 lib
      help [subcommand]                          # 列出可用命令与简要说明
 
  错误与返回:

@@ -43,6 +43,14 @@ unique_ptr<vector<string>> codeGenerateBundleHeaderFile(unordered_map<string, Vu
 unique_ptr<vector<string>> codeGenerateHelperLines(VulCombine &vc);
 
 /**
+ * @brief Generate a C++ function argument signature from arguments and return values.
+ * @param args The vector of VulArgument representing the function arguments.
+ * @param rets The vector of VulArgument representing the function return values.
+ * @return The generated C++ function argument signature as a string.
+ */
+string codeGenerateFunctionArgumentSignature(const vector<VulArgument> &args, const vector<VulArgument> &rets);
+
+/**
  * @brief Generate a C++ function signature from function name, arguments, and return values.
  * @param funcname The name of the function.
  * @param args The vector of VulArgument representing the function arguments.

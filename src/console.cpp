@@ -1,5 +1,6 @@
 #include "console.h"
 #include "command.h"
+#include "codegen.h"
 
 #include <sstream>
 #include <algorithm>
@@ -342,6 +343,10 @@ unique_ptr<vector<string>> _consoleCombine(VulDesign &design, vector<string> &ar
     }
 
     if (sub == "updatecpps") {
+        if (design.dirty_combines) {
+            output->push_back("Error: design has unsaved combine changes. Save the project before updating combine C++ files.");
+            return output;
+        }
         if (args.size() < 2) { output->push_back("Error: missing args. Usage: combine updatecpps <combine>"); return output; }
         string comb = args[1]; vector<string> broken; string res = cmdUpdateCombineCppFileHelpers(design, comb, broken);
         if (!res.empty()) { output->push_back(res); return output; }
@@ -1142,6 +1147,9 @@ unique_ptr<vector<string>> _consoleHelp(vector<string> &args) {
         output->push_back("  pipe ...                     Manage pipes in the design");
         output->push_back("  connect ...                  Create connections between instances, pipes, requests, and services");
         output->push_back("  disconnect ...               Remove connections between instances, pipes, requests, and services");
+        output->push_back("  validate                     Validate the current design for consistency and correctness");
+        output->push_back("  generate <output-dir> [<vulsim-lib-dir>]");
+        output->push_back("                               Generate C++ code for the current design");
         return output;
     }
 }
@@ -1267,6 +1275,13 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
     if (cmd == "genbundleh") {
         auto output = std::make_unique<vector<string>>();
         if (!design) { output->push_back("Error: no design loaded"); return output; }
+
+        // must not be dirty
+        if (design->dirty_bundles) {
+            output->push_back("Error: design has unsaved bundle changes. Save the project before generating bundle header.");
+            return output;
+        }
+
         // generate bundle header lines
         auto lines = codeGenerateBundleHeaderFile(design->bundles);
         if (!lines) { output->push_back("Error: no bundles to generate"); return output; }
@@ -1296,14 +1311,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
             output->push_back(string("Error: exception writing file: ") + e.what());
             return output;
         }
-    }
-
-    if (cmd == "validate") {
-        auto output = std::make_unique<vector<string>>();
-        if (!design) { output->push_back("Error: no design loaded"); return output; }
-        string err = design->checkAllError();
-        if (err.empty()) output->push_back("OK: design validation passed"); else output->push_back(err);
-        return output;
     }
 
     // Commands that require a loaded design and dispatch to specific handlers
@@ -1352,6 +1359,43 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
     if (cmd == "disconnect") {
         vector<string> args = args_from(1);
         return _consoleDisconnect(*design, args);
+    }
+
+    if (cmd == "validate") {
+        auto output = std::make_unique<vector<string>>();
+        // must have a clean design
+        if (!design) { output->push_back("Error: no design loaded"); return output; }
+        // save it first
+        string res = design->saveProject();
+        if (!res.empty()) { output->push_back(res); return output; }
+        // validate
+        string err = design->checkAllError();
+        if (err.empty()) output->push_back("OK: design validation passed"); else output->push_back(err);
+        return output;
+    }
+
+    if (cmd == "generate") {
+        auto output = std::make_unique<vector<string>>();
+        // must have a clean design
+        if (!design) { output->push_back("Error: no design loaded"); return output; }
+        // save it first
+        {
+            string res = design->saveProject();
+            if (!res.empty()) { output->push_back(res); return output; }
+        }
+        string err = design->checkAllError();
+        if (!err.empty()) { output->push_back(string("Error: design validation failed: ") + err); return output; }
+        if (toks.size() < 2) { output->push_back("Error: missing output directory. Usage: generate <output-dir> [<vulsim-lib-dir>]"); return output; }
+        string outdir = toks[1];
+        string vulsimlibdir;
+        if (toks.size() >= 3) vulsimlibdir = toks[2];
+        auto res = codegenProject(*design, vulsimlibdir, outdir);
+        if (!res || res->empty()) output->push_back("OK: code generation completed");
+        else {
+            output->push_back("Code generation failed with issues:");
+            for (const auto &e : *res) output->push_back(e);
+        }
+        return output;
     }
 
     // unknown command

@@ -315,7 +315,7 @@ Member Field +：
 ```cpp
 bool _stalled = false;
 void (*_external_stall)();
-void stall() { _stalled = true; _external_stall(); }
+void stall() { _stalled = true; if(_external_stall) _external_stall(); }
 bool is_stalled() { return _stalled; }
 ```
 

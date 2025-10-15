@@ -1,4 +1,4 @@
 #pragma once
 
-#include "lib/pipe.hpp"
-#include "lib/storage.hpp"
+#include "pipe.hpp"
+#include "storage.hpp"
