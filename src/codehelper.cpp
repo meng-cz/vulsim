@@ -183,6 +183,16 @@ unique_ptr<vector<string>> codeGenerateHelperLines(VulCombine &vc) {
         _genFunc(s.name, s.arg, s.ret, s.comment);
     }
 
+    // Stallable
+    if( vc.stallable) {
+        code->push_back("");
+        code->push_back("// This combine is marked as stallable");
+        code->push_back("// You can check is_stalled() to see if the combine is currently stalled");
+        code->push_back("bool is_stalled();");
+        code->push_back("// You can call stall() mark the combine as stalled for this tick");
+        code->push_back("void stall();");
+    }
+
     code->push_back("");
     code->push_back("// Please do not modify the code outside the target function body");
     code->push_back("// End of helper code");

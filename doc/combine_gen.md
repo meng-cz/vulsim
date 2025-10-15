@@ -313,9 +313,10 @@ Constructor Field +:
 
 Member Field +：
 ```cpp
-bool stalled = false;
+bool _stalled = false;
 void (*_external_stall)();
-void stall() { stalled = true; _external_stall(); }
+void stall() { _stalled = true; _external_stall(); }
+bool is_stalled() { return _stalled; }
 ```
 
 Constructor Arguments Field +:
@@ -331,7 +332,7 @@ this->_external_stall = arg._external_stall;
 
 Helper Field +:
 ```cpp
-bool stalled = false;
+bool is_stalled();
 void stall();
 ```
 
