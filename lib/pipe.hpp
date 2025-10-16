@@ -79,7 +79,7 @@ static_assert(Depth >= 0, "Pipe depth must be non-negative");
             }
         }
         // 3. 更新输入端ready信号（fifo未满才可写）
-        uint32 valid_input = (Depth > fifo.size()) ? (Depth - fifo.size()) : 0;
+        uint32 valid_input = ((Depth + InNum) > fifo.size()) ? ((Depth + InNum) - fifo.size()) : 0;
         for(uint32 i = 0; i < InNum; i++) {
             inputs[i].ready = (i < valid_input);
         }

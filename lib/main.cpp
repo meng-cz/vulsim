@@ -33,7 +33,7 @@ void init_cmdline_args(int argc, char ** argv) {
 
     char prefix = 0;
 
-    for(int i = 0; i < argc; i++) {
+    for(int i = 1; i < argc; i++) {
         if(argv[i][0] == '-' && argv[i][1] >= 'a' && argv[i][1] <= 'z') {
             prefix = argv[i][1];
         } else if(argv[i][0] == '-' && argv[i][1] >= 'A' && argv[i][1] <= 'Z') {
@@ -41,7 +41,7 @@ void init_cmdline_args(int argc, char ** argv) {
                 args.args[argv[i][1] - 'A'].push_back(string(argv[n]));
             }
             break;
-        } else {
+        } else if (prefix >= 'a' && prefix <= 'z') {
             args.args[prefix - 'a'].push_back(string(argv[i]));
         }
     }
@@ -218,6 +218,12 @@ int main(int argc, char ** argv) {
             printf("tick format: <number>[k|m|g|t|K|M|G|T], e.g. 1000, 1k, 1M, 2G\n");
             return 1;
         }
+    }
+
+    if(target_tick > 0) {
+        printf("Running simulation for %llu ticks...\n", (unsigned long long)target_tick);
+    } else {
+        printf("Running simulation until interrupted...\n");
     }
 
     // initialize simulation
