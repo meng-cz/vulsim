@@ -4,6 +4,11 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
+#include <unordered_set>
+#include <unordered_map>
+#include <deque>
+
 namespace fs = std::filesystem;
 
 /**
@@ -388,6 +393,340 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
 
 /**
  * @brief Generate C++ code for simulating an entire design.
+ * @param design The VulDesign object containing the entire design.
+ * @param cpplines Output vector to hold the generated C++ source lines for simulation.
+ * @return A unique_ptr to a vector of strings containing any error messages encountered during generation.
+ *        Returns nullptr on success (no errors).
+ */
+unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &cpplines) {
+    unique_ptr<vector<string>> err = std::make_unique<vector<string>>();
+    cpplines.clear();
+
+    // headers
+    cpplines.push_back("#include \"simulation.h\"");
+    cpplines.push_back("#include \"common.h\"");
+    cpplines.push_back("#include \"global.h\"");
+    cpplines.push_back("#include \"bundle.h\"");
+    cpplines.push_back("#include \"vulsimlib.h\"");
+    cpplines.push_back("#include <memory>");
+    cpplines.push_back("using std::make_unique;");
+    cpplines.push_back("using std::unique_ptr;");
+    cpplines.push_back("");
+    for (const auto &combinepair : design.combines) {
+        cpplines.push_back("#include \"" + combinepair.first + ".h\"");
+    }
+    cpplines.push_back("");
+
+    // instance pointer declarations
+    // unique_ptr<$combine$> _instance_$name$;
+    for (const auto &instancepair : design.instances) {
+        const string &instname = instancepair.first;
+        const VulInstance &vi = instancepair.second;
+        cpplines.push_back("unique_ptr<" + vi.combine + "> _instance_" + instname + ";");
+    }
+    cpplines.push_back("");
+
+    // pipe pointer declarations
+    // unique_ptr<Pipe<$type$, $buf$, $in$, $out$>> _pipe_$name$;
+    for (const auto &pipepair : design.pipes) {
+        const string &pipename = pipepair.first;
+        const VulPipe &vp = pipepair.second;
+        cpplines.push_back("unique_ptr<Pipe<" +
+            vp.type + ", "
+            + std::to_string(vp.buffersize) + ", "
+            + std::to_string(vp.inputsize) + ", "
+            + std::to_string(vp.outputsize)
+            + ">> _pipe_" + pipename + ";");
+    }
+    cpplines.push_back("");
+
+    // Req Connection Field
+    // For each instance.request a global function is setup to call all connected service
+    // void _request_$instname$_$reqname$($argtype$ (&) $argname$, ... , $rettype$ * $retname$, ... ) {
+    //     _instance_$servinstname$->$servname$($argname$, ... , $retname$, ...);
+    //     ......
+    // }
+    unordered_map<string, unordered_map<string, vector<pair<string, string>>>> req_connect_map;
+    for (const auto &conn : design.req_connections) {
+        auto iter1 = req_connect_map.find(conn.req_instance);
+        if (iter1 == req_connect_map.end()) {
+            req_connect_map[conn.req_instance] = unordered_map<string, vector<pair<string, string>>>();
+            iter1 = req_connect_map.find(conn.req_instance);
+        }
+        auto iter2 = iter1->second.find(conn.req_name);
+        if (iter2 == iter1->second.end()) {
+            iter1->second[conn.req_name] = vector<pair<string, string>>();
+            iter2 = iter1->second.find(conn.req_name);
+        }
+        iter2->second.push_back(make_pair(conn.serv_instance, conn.serv_name));
+    }
+    auto _genArgNames = [](const vector<VulArgument> &args, const vector<VulArgument> &rets) {
+        string argnames;
+        bool first = true;
+        for (const VulArgument &a : args) {
+            if (!first) argnames += ", ";
+            first = false;
+            argnames += a.name;
+        }
+        for (const VulArgument &a : rets) {
+            if (!first) argnames += ", ";
+            first = false;
+            argnames += a.name;
+        }
+        return argnames;
+    };
+    for (const auto &vipair : design.instances) {
+        const string &instname = vipair.first;
+        const VulInstance &vi = vipair.second;
+        auto cbit = design.combines.find(vi.combine);
+        if (cbit == design.combines.end()) {
+            err->push_back(string("Error: combine not found for instance '") + instname + "': " + vi.combine);
+            return err;
+        }
+        const VulCombine &vc = cbit->second;
+        for (const VulRequest &vr : vc.request) {
+            string argsig = codeGenerateFunctionArgumentSignature(vr.arg, vr.ret);
+            string argnames = _genArgNames(vr.arg, vr.ret);
+            cpplines.push_back("void _request_" + instname + "_" + vr.name + "(" + argsig + ") {");
+            auto connit = req_connect_map.find(instname);
+            if (connit != req_connect_map.end()) {
+                auto reqit = connit->second.find(vr.name);
+                if (reqit != connit->second.end()) {
+                    for (const auto &pair : reqit->second) {
+                        cpplines.push_back("    _instance_" + pair.first + "->_service_" + pair.second + "(" + argnames + ");");
+                    }
+                }
+            }
+            cpplines.push_back("}");
+            cpplines.push_back("");
+        }
+    }
+
+    // Stalled Connection Field
+    // For each stallable instance a global function for _external_stall() is setup to call all connected stall()
+    // void _stall_$instname$() {
+    //     _instance_$dstinstname$->stall();
+    // }
+    unordered_map<string, vector<string>> stalled_connect_map;
+    for (const auto &conn : design.stalled_connections) {
+        auto iter = stalled_connect_map.find(conn.src_instance);
+        if (iter == stalled_connect_map.end()) {
+            stalled_connect_map[conn.src_instance] = vector<string>();
+            iter = stalled_connect_map.find(conn.src_instance);
+        }
+        iter->second.push_back(conn.dest_instance);
+    }
+    for (const auto &vipair : design.instances) {
+        const string &instname = vipair.first;
+        const VulInstance &vi = vipair.second;
+        auto cbit = design.combines.find(vi.combine);
+        if (cbit == design.combines.end()) {
+            err->push_back(string("Error: combine not found for instance '") + instname + "': " + vi.combine);
+            return err;
+        }
+        const VulCombine &vc = cbit->second;
+        if (vc.stallable) {
+            cpplines.push_back("void _stall_" + instname + "() {");
+            auto connit = stalled_connect_map.find(instname);
+            if (connit != stalled_connect_map.end()) {
+                for (const string &dstinst : connit->second) {
+                    cpplines.push_back("    _instance_" + dstinst + "->stall();");
+                }
+            }
+            cpplines.push_back("}");
+            cpplines.push_back("");
+        }
+    }
+
+    // init function
+    cpplines.push_back("void init_simulation() {");
+    // Pipe Init Field
+    // Call constructors for pipes
+    // _pipe_$name$ = make_unique<Pipe<$type$, $buf$, $in$, $out$>>();
+    for (const auto &pipepair : design.pipes) {
+        const string &pipename = pipepair.first;
+        const VulPipe &vp = pipepair.second;
+        cpplines.push_back("    _pipe_" + pipename + " = make_unique<Pipe<" +
+            vp.type + ", "
+            + std::to_string(vp.buffersize) + ", "
+            + std::to_string(vp.inputsize) + ", "
+            + std::to_string(vp.outputsize)
+            + ">>();");
+    }
+    // Instance Init Field
+    // Call constructor for instance
+    // {
+    //     $combine$::ConstructorArguments args;
+    //     // for pipein: args._pipein_$name$ = &(_pipe_$copipename$->outputs[$copipeport]);
+    //     // for pipeout: args._pipeout_$name$ = &(_pipe_$copipename$->inputs[$copipeport]);
+    //     // for request: args._request_$name$ = _request_$instname$_$name$;
+    //     // for stallable: args._external_stall = _stall_$instname$;
+    // }
+    for (const auto &vipair : design.instances) {
+        const string &instname = vipair.first;
+        const VulInstance &vi = vipair.second;
+        auto cbit = design.combines.find(vi.combine);
+        if (cbit == design.combines.end()) {
+            err->push_back(string("Error: combine not found for instance '") + instname + "': " + vi.combine);
+            return err;
+        }
+        const VulCombine &vc = cbit->second;
+        cpplines.push_back("    {");
+        cpplines.push_back("        " + vc.name + "::ConstructorArguments args;");
+        for (const VulPipePort &pp : vc.pipein) {
+            auto copit = std::find_if(design.pipe_mod_connections.begin(), design.pipe_mod_connections.end(),
+                [&](const VulPipeModuleConnection &c) { return c.instance == instname && c.pipeinport == pp.name; });
+            if (copit == design.pipe_mod_connections.end()) {
+                err->push_back(string("Error: pipein connection not found for instance '") + instname + "' pipein '" + pp.name + "'");
+                return err;
+            }
+            cpplines.push_back("        args._pipein_" + pp.name + " = &(_pipe_" + copit->pipe + "->outputs[" + std::to_string(copit->portindex) + "]);");
+        }
+        for (const VulPipePort &pp : vc.pipeout) {
+            auto copit = std::find_if(design.mod_pipe_connections.begin(), design.mod_pipe_connections.end(),
+                [&](const VulModulePipeConnection &c) { return c.instance == instname && c.pipeoutport == pp.name; });
+            if (copit == design.mod_pipe_connections.end()) {
+                err->push_back(string("Error: pipeout connection not found for instance '") + instname + "' pipeout '" + pp.name + "'");
+                return err;
+            }
+            cpplines.push_back("        args._pipeout_" + pp.name + " = &(_pipe_" + copit->pipe + "->inputs[" + std::to_string(copit->portindex) + "]);");
+        }
+        for (const VulRequest &vr : vc.request) {
+            cpplines.push_back("        args._request_" + vr.name + " = _request_" + instname + "_" + vr.name + ";");
+        }
+        if (vc.stallable) {
+            cpplines.push_back("        args._external_stall = _stall_" + instname + ";");
+        }
+        cpplines.push_back("        _instance_" + instname + " = make_unique<" + vc.name + ">(args);");
+        cpplines.push_back("    }");
+    }
+
+    // end of init function
+    cpplines.push_back("}");
+    cpplines.push_back("");
+
+    vector<std::pair<string, string>> update_sequence; // (former_instance, later_instance)
+    for (const auto &seq : design.update_constraints) {
+        update_sequence.push_back(make_pair(seq.former_instance, seq.latter_instance));
+    }
+    for (const auto &stl : design.stalled_connections) {
+        update_sequence.push_back(make_pair(stl.src_instance, stl.dest_instance));
+    }
+    vector<string> sorted_instances;
+    // Topological sort (Kahn's algorithm)
+    {
+        // collect all instance names as nodes
+        std::unordered_set<string> nodes;
+        for (const auto &vipair : design.instances) {
+            nodes.insert(vipair.first);
+        }
+
+        // adjacency list and indegree map
+        std::unordered_map<string, vector<string>> adj;
+        std::unordered_map<string, int> indeg;
+        for (const string &n : nodes) indeg[n] = 0;
+
+        for (const auto &p : update_sequence) {
+            const string &u = p.first;
+            const string &v = p.second;
+            // ignore edges referring to unknown instances
+            if (nodes.find(u) == nodes.end() || nodes.find(v) == nodes.end()) continue;
+            adj[u].push_back(v);
+            indeg[v]++;
+        }
+
+        // start with all zero-indegree nodes (deterministically sorted)
+        std::deque<string> q;
+        vector<string> zeros;
+        for (const string &n : nodes) if (indeg[n] == 0) zeros.push_back(n);
+        sort(zeros.begin(), zeros.end());
+        for (const string &s : zeros) q.push_back(s);
+
+        while (!q.empty()) {
+            string u = q.front(); q.pop_front();
+            sorted_instances.push_back(u);
+            auto it = adj.find(u);
+            if (it == adj.end()) continue;
+            for (const string &v : it->second) {
+                indeg[v]--;
+                if (indeg[v] == 0) q.push_back(v);
+            }
+        }
+
+        // if not all nodes are sorted, there is a cycle
+        if (sorted_instances.size() != nodes.size()) {
+            std::unordered_set<string> remaining(nodes.begin(), nodes.end());
+            for (const string &s : sorted_instances) remaining.erase(s);
+            string cyc = string("Error: update sequence has cycle involving:");
+            for (const string &n : remaining) cyc += string(" ") + n;
+            err->push_back(cyc);
+            return err;
+        }
+    }
+    
+    // void _sim_tick() function
+    cpplines.push_back("void _sim_tick() {");
+    // Tick Field
+    // Update each instance according to update sequence
+    // _instance_$name$->all_current_tick();
+    for (const string &instname : sorted_instances) {
+        cpplines.push_back("    _instance_" + instname + "->all_current_tick();");
+    }
+    cpplines.push_back("}");
+    cpplines.push_back("");
+
+    // void _sim_applytick() function
+    cpplines.push_back("void _sim_applytick() {");
+    // ApplyTick Field
+    // Update each instance according to update sequence
+    // _instance_$name$->all_current_applytick();
+    for (const string &instname : sorted_instances) {
+        cpplines.push_back("    _instance_" + instname + "->all_current_applytick();");
+    }
+    // ApplyTick Pipe Field
+    // Update each pipe
+    // _pipe_$name$->apply_tick();
+    for (const auto &pipepair : design.pipes) {
+        const string &pipename = pipepair.first;
+        cpplines.push_back("    _pipe_" + pipename + "->apply_tick();");
+    }
+    cpplines.push_back("}");
+    cpplines.push_back("");
+
+    // void run_simulation_tick() {
+    //     _sim_tick();
+    //     _sim_applytick();
+    // }
+    cpplines.push_back("void run_simulation_tick() {");
+    cpplines.push_back("    _sim_tick();");
+    cpplines.push_back("    _sim_applytick();");
+    cpplines.push_back("}");
+    cpplines.push_back("");
+
+    // void finalize_simulation()
+    cpplines.push_back("void finalize_simulation() {");
+    // Finalize Field
+    // Reset all instance pointer
+    // _instance_$name$.reset();
+    for (const auto &instancepair : design.instances) {
+        const string &instname = instancepair.first;
+        cpplines.push_back("    _instance_" + instname + ".reset();");
+    }
+    // Finalize Pipe Field
+    // Reset all pipe pointer
+    // _pipe_$name$.reset();
+    for (const auto &pipepair : design.pipes) {
+        const string &pipename = pipepair.first;
+        cpplines.push_back("    _pipe_" + pipename + ".reset();");
+    }
+    cpplines.push_back("}");
+    cpplines.push_back("");
+
+    return nullptr;
+}
+
+/**
+ * @brief Generate C++ code for simulating an entire design.
  * This includes generating the header files and C++ source files for all combines in the design.
  * @param design The VulDesign object containing the entire design.
  * @param libdir The directory where the vulsim core lib is located.
@@ -465,45 +804,98 @@ unique_ptr<vector<string>> codegenProject(VulDesign &design, const string &libdi
         }
         cofs.close();
     }
-
-    // copy vulsimlib.h and common.h from libdir to outdir
+    
+    // generate simulation.cpp
     {
-        fs::path vulsimlibsrc = libpath / "vulsimlib.h";
-        fs::path vulsimlibdst = outpath / "vulsimlib.h";
-        std::error_code ec;
-        fs::copy_file(vulsimlibsrc, vulsimlibdst, fs::copy_options::overwrite_existing, ec);
-        if (ec) {
-            err->push_back(string("Error: failed to copy vulsimlib.h from ") + vulsimlibsrc.string() + " to " + vulsimlibdst.string() + " : " + ec.message());
+        vector<string> simlines;
+        unique_ptr<vector<string>> localerr = codegenSimulation(design, simlines);
+        if (localerr && !localerr->empty()) {
+            err->push_back(string("Error: failed to generate simulation.cpp"));
+            for (const string &e : *localerr) {
+                err->push_back("  " + e);
+            }
             return err;
         }
+        fs::path simfile = outpath / "simulation.cpp";
+        std::ofstream sofs(simfile);
+        if (!sofs.is_open()) {
+            err->push_back(string("Error: failed to open output file for writing: ") + simfile.string());
+            return err;
+        }
+        for (const string &line : simlines) {
+            sofs << line << std::endl;
+        }
+        sofs.close();
     }
+
+    // generate config.ini
     {
-        fs::path commonsrc = libpath / "common.h";
-        fs::path commondst = outpath / "common.h";
-        std::error_code ec;
-        fs::copy_file(commonsrc, commondst, fs::copy_options::overwrite_existing, ec);
-        if (ec) {
-            err->push_back(string("Error: failed to copy common.h from ") + commonsrc.string() + " to " + commondst.string() + " : " + ec.message());
+        fs::path configfile = outpath / "config.ini";
+        std::ofstream cofs(configfile);
+        if (!cofs.is_open()) {
+            err->push_back(string("Error: failed to open output file for writing: ") + configfile.string());
             return err;
         }
+        for (const auto &configpair : design.config_lib) {
+            const VulConfigItem &vc = configpair.second;
+            cofs << vc.name << " = " << vc.value << std::endl;
+        }
+        cofs.close();
     }
 
-    // copy pipe.hpp and storage.hpp from libdir to outdir
+    // copy everything in libdir to outdir (regular files only, error on duplicate)
     {
         std::error_code ec;
-        fs::path pipesrc = libpath / "pipe.hpp";
-        fs::path pipedst = outpath / "pipe.hpp";
-        fs::copy_file(pipesrc, pipedst, fs::copy_options::overwrite_existing, ec);
-        if (ec) {
-            err->push_back(string("Error: failed to copy pipe.hpp from ") + pipesrc.string() + " to " + pipedst.string() + " : " + ec.message());
+        if (!fs::exists(libpath)) {
+            err->push_back(string("Error: libdir does not exist: ") + libpath.string());
             return err;
         }
-        fs::path storagesrc = libpath / "storage.hpp";
-        fs::path storagedst = outpath / "storage.hpp";
-        fs::copy_file(storagesrc, storagedst, fs::copy_options::overwrite_existing, ec);
-        if (ec) {
-            err->push_back(string("Error: failed to copy storage.hpp from ") + storagesrc.string() + " to " + storagedst.string() + " : " + ec.message());
-            return err;
+
+        for (auto it = fs::recursive_directory_iterator(libpath, fs::directory_options::skip_permission_denied, ec);
+             it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec) {
+                err->push_back(string("Error: failed while iterating libdir: ") + ec.message());
+                return err;
+            }
+
+            const fs::path src = it->path();
+            if (!fs::is_regular_file(src, ec)) {
+                if (ec) {
+                    err->push_back(string("Error: failed to stat path: ") + src.string() + " : " + ec.message());
+                    return err;
+                }
+                // skip non-regular files
+                continue;
+            }
+
+            fs::path rel = fs::relative(src, libpath, ec);
+            if (ec) {
+                err->push_back(string("Error: failed to compute relative path for: ") + src.string() + " : " + ec.message());
+                return err;
+            }
+            fs::path dst = outpath / rel;
+
+            // if destination exists, error (no duplicates allowed)
+            if (fs::exists(dst)) {
+                err->push_back(string("Error: destination file already exists (duplicate): ") + dst.string());
+                return err;
+            }
+
+            // ensure parent directory exists
+            fs::path parent = dst.parent_path();
+            if (!parent.empty() && !fs::exists(parent)) {
+                if (!fs::create_directories(parent, ec)) {
+                    err->push_back(string("Error: failed to create directory: ") + parent.string() + " : " + ec.message());
+                    return err;
+                }
+            }
+
+            // copy file
+            fs::copy_file(src, dst, fs::copy_options::none, ec);
+            if (ec) {
+                err->push_back(string("Error: failed to copy file from ") + src.string() + " to " + dst.string() + " : " + ec.message());
+                return err;
+            }
         }
     }
 
