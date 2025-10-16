@@ -830,15 +830,22 @@ unique_ptr<vector<string>> codegenProject(VulDesign &design, const string &libdi
 
     // generate config.ini
     {
+        vector<string> configstrs;
+        for (const auto &configpair : design.config_lib) {
+            const VulConfigItem &vc = configpair.second;
+            configstrs.push_back(vc.name + " = " + vc.value);
+        }
+        // sort configstrs lexicographically
+        sort(configstrs.begin(), configstrs.end());
+
         fs::path configfile = outpath / "config.ini";
         std::ofstream cofs(configfile);
         if (!cofs.is_open()) {
             err->push_back(string("Error: failed to open output file for writing: ") + configfile.string());
             return err;
         }
-        for (const auto &configpair : design.config_lib) {
-            const VulConfigItem &vc = configpair.second;
-            cofs << vc.name << " = " << vc.value << std::endl;
+        for (const string &line : configstrs) {
+            cofs << line << std::endl;
         }
         cofs.close();
     }
