@@ -1,6 +1,4 @@
-
-#ifndef NULLSIM_DATATYPE_H
-#define NULLSIM_DATATYPE_H
+#pragma once
 
 #include <vector>
 #include <unordered_map>
@@ -17,11 +15,14 @@
 #include <unistd.h>
 
 #include <inttypes.h>
-#include <assert.h>
-#include <fenv.h>
 #include <math.h>
 
-#define assertf(expr, fmt, ...) {if(!(static_cast <bool> (expr))) [[unlikely]] { printf(fmt "\n", ##__VA_ARGS__); fflush(stdout); assert (expr);}}
+#define assertf(expr, fmt, ...) { \ 
+    if(!(static_cast <bool> (expr))) [[unlikely]] { \ 
+        printf(fmt "\n", ##__VA_ARGS__); \ 
+        printf("assertion failed: %s, file %s, line %d\n", #expr, __FILE__, __LINE__); \ 
+        fflush(stdout); exit_simulation(1); \ 
+    }}
 
 using std::vector;
 using std::unordered_map;
@@ -74,9 +75,9 @@ inline uint64_t rand_long() {
 
 uint64 get_current_tick();
 uint64 get_current_time_us();
-uint64 get_wall_time_tick();
 
-vector<string> & get_cmdline_args(const char prefix);
-void init_cmdline_args(int argc, char ** argv);
+vector<string> get_cmdline_args(const char prefix);
 
-#endif
+int64 get_design_config_item(const string key);
+
+void exit_simulation(int32 code);
