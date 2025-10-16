@@ -52,6 +52,8 @@ void init_simulation() {
     //     // for pipeout: args._pipeout_$name$ = &(_pipe_$copipename$->inputs[$copipeport]);
     //     // for request: args._request_$name$ = _request_$instname$_$name$;
     //     // for stallable: args._external_stall = _stall_$instname$;
+    //     // for config: args.$name$ = $GEN_CONFIG_STATEMENT$;
+    //     _instance_$name$ = make_unique<$combine$>(args);
     // }
 }
 

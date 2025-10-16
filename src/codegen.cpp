@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <deque>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
@@ -258,22 +259,16 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     for (const VulConfig &c : vc.config) {
         // Member Field +：
         // /* $comment$ */
-        // const int64 $name$ = $ref.value$;
+        // const int64 $name$;
         string cmt = (c.comment.empty() ? (string("// ") + c.name) : (string("// ") + c.comment));
-        string valuestr = "0";
-        if (!c.ref.empty()) {
-            auto it = design.config_lib.find(c.ref);
-            if (it != design.config_lib.end()) {
-                valuestr = it->second.value;
-            } else {
-                err->push_back(string("Error: config reference not found for combine '") + combine + "' config '" + c.name + "': " + c.ref);
-                return err;
-            }
-        } else {
-            err->push_back(string("Warning: config reference empty for combine '") + combine + "' config '" + c.name + "'");
-        }
         member_field.push_back(cmt);
-        member_field.push_back("const int64 " + c.name + " = " + valuestr + ";");
+        member_field.push_back("int64 " + c.name + ";");
+        // Constructor Arguments Field +:
+        // int64 $name$;
+        constructor_args_field.push_back("int64 " + c.name + ";");
+        // Constructor Field +:
+        // this->$name$ = arg.$name$;
+        constructor_field.push_back("this->" + c.name + " = arg." + c.name + ";");
     }
 
     auto _extractCodeIntoField = [&](const VulCppFunc &cf, vector<string> &field) {
@@ -389,6 +384,55 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     cpplines.push_back("");
 
     return nullptr;
+}
+
+/**
+ * @brief Generate a C++ value statement from a VulDesign context and a value string.
+ * @param design The VulDesign object containing the context.
+ * @param value The value string to convert.
+ * @param out The output string to hold the generated C++ value statement.
+ * @return The error message string if any error occurs, empty string on success.
+ */
+string _codegenConfigValueStatement(const VulDesign &design, const string &value, string &out) {
+    // Simple lexer: split into identifiers, numbers, operators, and parentheses
+    out.clear();
+    size_t i = 0;
+    while (i < value.size()) {
+        char c = value[i];
+        if (std::isspace((unsigned char)c)) { out.push_back(c); i++; continue; }
+        if (std::isalpha((unsigned char)c) || c == '_') {
+            // identifier
+            size_t j = i + 1;
+            while (j < value.size() && (std::isalnum((unsigned char)value[j]) || value[j] == '_')) j++;
+            string ident = value.substr(i, j - i);
+            // if ident is in design config lib
+            if (design.config_lib.find(ident) != design.config_lib.end()) {
+                // design config, replace with get_design_config_item("ident")
+                out += string("get_design_config_item(\"") + ident + string("\")");
+                i = j;
+                continue;
+            }
+            // else, unknown ident, report error
+            return string("Error: unknown identifier in config value: ") + ident;
+        }
+        if (std::isdigit((unsigned char)c)) {
+            // number literal (integer)
+            size_t j = i + 1;
+            while (j < value.size() && (
+                std::isdigit((unsigned char)value[j]) ||
+                value[j] == 'x' || value[j] == 'X' ||
+                value[j] == 'u' || value[j] == 'U' ||
+                value[j] == 'l' || value[j] == 'L'
+            )) j++; // allow hex (0x), unsigned (u), long (l) suffixes
+            out += value.substr(i, j - i);
+            i = j;
+            continue;
+        }
+        // operators or punctuation: copy as-is (handles + - * / % ( ) etc.)
+        out.push_back(c);
+        i++;
+    }
+    return "";
 }
 
 /**
@@ -561,6 +605,8 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     //     // for pipeout: args._pipeout_$name$ = &(_pipe_$copipename$->inputs[$copipeport]);
     //     // for request: args._request_$name$ = _request_$instname$_$name$;
     //     // for stallable: args._external_stall = _stall_$instname$;
+    //     // for config: args.$name$ = $GEN_CONFIG_STATEMENT$;
+    //     _instance_$name$ = make_unique<$combine$>(args);
     // }
     for (const auto &vipair : design.instances) {
         const string &instname = vipair.first;
@@ -596,6 +642,24 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
         }
         if (vc.stallable) {
             cpplines.push_back("        args._external_stall = _stall_" + instname + ";");
+        }
+        for (const VulConfig &vcfg : vc.config) {
+            string configstmt;
+            string localerr = _codegenConfigValueStatement(design, vcfg.value, configstmt);
+            if(!localerr.empty()) {
+                err->push_back(string("Error: failed to generate config value statement for instance '") + instname + "' config '" + vcfg.name + "': " + localerr);
+                return err;
+            }
+            cpplines.push_back("        args." + vcfg.name + " = " + configstmt + ";");
+        }
+        for (auto &override : vi.config_override) {
+            string configstmt;
+            string localerr = _codegenConfigValueStatement(design, override.second, configstmt);
+            if(!localerr.empty()) {
+                err->push_back(string("Error: failed to generate config override value statement for instance '") + instname + "' config '" + override.first + "': " + localerr);
+                return err;
+            }
+            cpplines.push_back("        args." + override.first + " = " + configstmt + ";");
         }
         cpplines.push_back("        _instance_" + instname + " = make_unique<" + vc.name + ">(args);");
         cpplines.push_back("    }");

@@ -419,8 +419,9 @@ void VulDesign::_loadCombineFromFile(const string &filename, string &err) {
         }
         VulConfig cfg;
         cfg.name = cname.text().as_string();
-        pugi::xml_node cref = c.child("ref");
-        cfg.ref = cref ? cref.text().as_string() : string();
+        pugi::xml_node cvalue = c.child("value");
+        cfg.value = cvalue ? cvalue.text().as_string() : string();
+        extractConfigReferences(cfg); // populate cfg.references
         pugi::xml_node ccomment = c.child("comment");
         cfg.comment = ccomment ? ccomment.text().as_string() : string();
         if (cfg.name.empty()) {
@@ -920,13 +921,16 @@ string VulDesign::_checkNameError() {
     }
 
     // (4) All config reference names in combines must exist in config_lib.
-    for (const auto &kv : combines) {
+    for (auto &kv : combines) {
         const string &cname = kv.first;
-        const VulCombine &vc = kv.second;
-        for (const VulConfig &cfg : vc.config) {
-            if (!cfg.ref.empty()) {
-                if (config_lib.find(cfg.ref) == config_lib.end()) {
-                    return string("#11005: combine '") + cname + " has config ref to unknown config '" + cfg.ref + "'";
+        VulCombine &vc = kv.second;
+        for (VulConfig &cfg : vc.config) {
+            extractConfigReferences(cfg); // ensure cfg.ref is trimmed
+            for (const string &refname : cfg.references) {
+                if (!refname.empty()) {
+                    if (config_lib.find(refname) == config_lib.end()) {
+                        return string("#11005: combine '") + cname + " has config ref to unknown config '" + refname + "'";
+                    }
                 }
             }
         }
@@ -1473,7 +1477,7 @@ void VulDesign::_saveCombineToFile(const string &filename, const VulCombine &vc,
     for (const VulConfig &cfg : vc.config) {
         pugi::xml_node cn = root.append_child("config");
         cn.append_child("name").text().set(cfg.name.c_str());
-        cn.append_child("ref").text().set(cfg.ref.c_str());
+        cn.append_child("value").text().set(cfg.value.c_str());
         if (!cfg.comment.empty()) cn.append_child("comment").text().set(cfg.comment.c_str());
     }
 

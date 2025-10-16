@@ -1,10 +1,12 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 using std::vector;
 using std::pair;
 using std::string;
+using std::unordered_set;
 
 /**
  * @brief Check if the given name is a valid identifier.
@@ -79,8 +81,16 @@ typedef struct {
 typedef struct {
     string name;
     string comment;
-    string ref;
+    string value;
+    unordered_set<string> references; // names of config items referenced by this value
 } VulConfig;
+
+/**
+ * @brief Extract referenced config item names from a VulConfig's value string.
+ * This function parses the value string to identify identifiers.
+ * @param vc The VulConfig object to extract references for. The references field will be populated.
+ */
+void extractConfigReferences(VulConfig &vc);
 
 typedef struct {
     string name;

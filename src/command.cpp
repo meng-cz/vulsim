@@ -77,6 +77,34 @@ string cmdUpdateConfigItem(VulDesign &design, const string &name, const string &
     return "";
 }
 
+string _fullWordReplace(const string &s, const string &oldword, const string &newword) {
+    if (oldword.empty()) return s; // nothing to do
+    string out;
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = (unsigned char)s[i];
+        if (std::isalpha(c) || s[i] == '_') {
+            size_t j = i + 1;
+            while (j < s.size()) {
+                unsigned char cc = (unsigned char)s[j];
+                if (!(std::isalnum(cc) || cc == '_')) break;
+                ++j;
+            }
+            string ident = s.substr(i, j - i);
+            if (ident == oldword) {
+                out += newword;
+            } else {
+                out += ident;
+            }
+            i = j;
+        } else {
+            out += s[i];
+            ++i;
+        }
+    }
+    return out;
+}
+
 /**
  * @brief Rename a config item in the design's config library.
  * All combines using this config item will also be updated.
@@ -98,7 +126,7 @@ string cmdRenameConfigItem(VulDesign &design, const string &oldname, const strin
         for (const auto &ck : design.combines) {
             const VulCombine &vc = ck.second;
             for (const VulConfig &cfg : vc.config) {
-                if (cfg.ref == oldname) {
+                if (cfg.references.find(oldname) != cfg.references.end()) {
                     return string("#20012: cannot delete config item '") + oldname + "' because combine '" + ck.first + "' references it";
                 }
             }
@@ -130,7 +158,12 @@ string cmdRenameConfigItem(VulDesign &design, const string &oldname, const strin
         VulCombine &vc = ck.second;
         bool changed = false;
         for (VulConfig &cfg : vc.config) {
-            if (cfg.ref == oldname) { cfg.ref = newname; changed = true; }
+            if (cfg.references.find(oldname) != cfg.references.end()) {
+                cfg.value = _fullWordReplace(cfg.value, oldname, newname);
+                // re-extract references
+                extractConfigReferences(cfg);
+                changed = true;
+            }
         }
         if (changed) design.dirty_combines = true;
     }
@@ -694,6 +727,7 @@ string cmdDuplicateCombine(VulDesign &design, const string &oldname, const strin
     return string();
 }
 
+
 /**
  * @brief Add, update, or remove a config item in a combine.
  * If the config item already exists, its ref and comment will be updated.
@@ -701,12 +735,12 @@ string cmdDuplicateCombine(VulDesign &design, const string &oldname, const strin
  * @param design The VulDesign object to modify.
  * @param combinename The name of the combine to modify.
  * @param configname The name of the config item to add, update, or remove.
- * @param configref The reference name of the config item in the design's config library.
+ * @param configvalue The value string for the config item. It can reference config items by name.
  *                  If empty, the config item will be removed.
  * @param comment An optional comment for the config item.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const string &configname, const string &configref, const string &comment) {
+string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const string &configname, const string &configvalue, const string &comment) {
     if (combinename.empty()) return "#22030: combine name cannot be empty";
     auto it = design.combines.find(combinename);
     if (it == design.combines.end()) return string("#22031: combine '") + combinename + "' not found";
@@ -716,8 +750,8 @@ string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const
 
     VulCombine &vc = it->second;
 
-    // Remove config item if configref is empty
-    if (configref.empty()) {
+    // Remove config item if configvalue is empty
+    if (configvalue.empty()) {
         auto cit = std::find_if(vc.config.begin(), vc.config.end(), [&](const VulConfig &c){ return c.name == configname; });
         if (cit == vc.config.end()) return string("#22034: config item '") + configname + "' not found in combine '" + combinename + "'";
         vc.config.erase(cit);
@@ -725,16 +759,24 @@ string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const
         return string();
     }
 
-    // Validate that configref exists in design's config library
-    if (design.config_lib.find(configref) == design.config_lib.end()) {
-        return string("#22035: config item reference '") + configref + "' not found in design's config library";
+    VulConfig checking;
+    checking.name = configname;
+    checking.value = configvalue;
+    checking.comment = comment;
+    extractConfigReferences(checking);
+    for (const string &refname : checking.references) {
+        // Validate that configref exists in design's config library
+        if (design.config_lib.find(refname) == design.config_lib.end()) {
+            return string("#22035: config item reference '") + refname + "' not found in design's config library";
+        }
     }
 
     // Add or update config item
     for (VulConfig &c : vc.config) {
         if (c.name == configname) {
-            c.ref = configref;
+            c.value = configvalue;
             c.comment = comment;
+            c.references = checking.references; // update references
             design.dirty_combines = true;
             return string();
         }
@@ -744,11 +786,7 @@ string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const
     if (!conflict.empty()) return string("#22033: cannot add config item '") + configname + "': " + conflict;
 
     // not found -> add new config item
-    VulConfig nc;
-    nc.name = configname;
-    nc.ref = configref;
-    nc.comment = comment;
-    vc.config.push_back(nc);
+    vc.config.push_back(checking);
     design.dirty_combines = true;
     return string();
 }

@@ -40,9 +40,9 @@ unique_ptr<VulPrefabMetaData> loadPrefabFromFile(const string &filename, string 
         VulConfig c;
         c.name = child_text(cfg, "name");
         c.comment = child_text(cfg, "comment");
-        // optional ref
-        pugi::xml_node refn = cfg.child("ref");
-        if (refn) c.ref = string(refn.child_value());
+        // optional value
+        pugi::xml_node value = cfg.child("value");
+        if (value) c.value = string(value.child_value());
         meta->config.push_back(std::move(c));
     }
 

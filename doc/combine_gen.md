@@ -282,18 +282,28 @@ User Applitick Field +:
 
 ## config
 
-包含$name$, $ref$, $comment$标签
+包含$name$, $value$, $comment$标签
+
+Constructor Arguments Field +:
+```cpp
+int64 $name$;
+```
+
+Constructor Field +:
+```cpp
+this->$name$ = arg.$name$;
+```
 
 Member Field +：
 ```cpp
 /* $comment$ */
-const int64 $name$ = $ref.value$;
+int64 $name$;
 ```
 
 Helper Field +:
 ```cpp
 /* $comment$ */
-const int64 $name$ = $ref$;
+const int64 $name$ = $value$;
 ```
 
 ## init

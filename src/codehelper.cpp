@@ -55,7 +55,7 @@ unique_ptr<vector<string>> codeGenerateHelperLines(VulCombine &vc) {
     for (auto &c : vc.config) {
         string cmt = (c.comment.empty() ? (string("// ") + c.name) : (string("// ") + c.comment));
         code->push_back(cmt);
-        code->push_back("const int64 " + c.name + " = " + c.ref + ";");
+        code->push_back("const int64 " + c.name + " = " + c.value + ";");
         code->push_back("");
     }
 

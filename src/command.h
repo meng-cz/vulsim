@@ -108,12 +108,12 @@ string cmdDuplicateCombine(VulDesign &design, const string &oldname, const strin
  * @param design The VulDesign object to modify.
  * @param combinename The name of the combine to modify.
  * @param configname The name of the config item to add, update, or remove.
- * @param configref The reference name of the config item in the design's config library.
+ * @param configvalue The value string for the config item. It can reference config items by name.
  *                  If empty, the config item will be removed.
  * @param comment An optional comment for the config item.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const string &configname, const string &configref, const string &comment);
+string cmdSetupCombineConfig(VulDesign &design, const string &combinename, const string &configname, const string &configvalue, const string &comment);
 
 /**
  * @brief Add, update, or remove a storage item in a combine.

@@ -39,3 +39,43 @@ bool isBasicVulType(const string &type) {
     };
     return std::find(validTypes.begin(), validTypes.end(), type) != validTypes.end();
 }
+
+/**
+ * @brief Extract referenced config item names from a VulConfig's value string.
+ * This function parses the value string to identify identifiers.
+ * @param vc The VulConfig object to extract references for. The references field will be populated.
+ */
+void extractConfigReferences(VulConfig &vc) {
+    // Simple lexer: split into identifiers, numbers, operators, and parentheses
+    const string &value = vc.value;
+    vc.references.clear();
+    size_t i = 0;
+    while (i < value.size()) {
+        char c = value[i];
+        if (std::isspace((unsigned char)c)) {  i++; continue; }
+        if (std::isalpha((unsigned char)c) || c == '_') {
+            // identifier
+            size_t j = i + 1;
+            while (j < value.size() && (std::isalnum((unsigned char)value[j]) || value[j] == '_')) j++;
+            string ident = value.substr(i, j - i);
+            // get ident
+            vc.references.insert(ident);
+            i = j;
+            continue;
+        }
+        if (std::isdigit((unsigned char)c)) {
+            // number literal (integer)
+            size_t j = i + 1;
+            while (j < value.size() && (
+                std::isdigit((unsigned char)value[j]) ||
+                value[j] == 'x' || value[j] == 'X' ||
+                value[j] == 'u' || value[j] == 'U' ||
+                value[j] == 'l' || value[j] == 'L'
+            )) j++; // allow hex (0x), unsigned (u), long (l) suffixes
+            i = j;
+            continue;
+        }
+        // operators or punctuation: copy as-is (handles + - * / % ( ) etc.)
+        i++;
+    }
+}
