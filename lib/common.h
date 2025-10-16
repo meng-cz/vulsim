@@ -17,11 +17,11 @@
 #include <inttypes.h>
 #include <math.h>
 
-#define assertf(expr, fmt, ...) { \ 
-    if(!(static_cast <bool> (expr))) [[unlikely]] { \ 
-        printf(fmt "\n", ##__VA_ARGS__); \ 
-        printf("assertion failed: %s, file %s, line %d\n", #expr, __FILE__, __LINE__); \ 
-        fflush(stdout); exit_simulation(1); \ 
+#define assertf(expr, fmt, ...) { \
+    if(!(static_cast <bool> (expr))) [[unlikely]] { \
+        printf(fmt "\n", ##__VA_ARGS__); \
+        printf("assertion failed: %s, file %s, line %d\n", #expr, __FILE__, __LINE__); \
+        fflush(stdout); exit_simulation(1); \
     }}
 
 using std::vector;
