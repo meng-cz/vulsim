@@ -137,47 +137,6 @@
     |-- borderwidth
 ```
 
-# prefab XML文件结构
-
-```
-|-- prefab
-  |-- name
-  |-- comment
-  |-- [config]
-    |-- name
-    |-- comment
-  |-- [pipein]
-    |-- name
-    |-- type
-    |-- comment
-  |-- [pipeout]
-    |-- name
-    |-- type
-    |-- comment
-  |-- [request]
-    |-- name
-    |-- comment
-    |-- [arg]
-      |-- name
-      |-- type
-      |-- comment
-    |-- [return]
-      |-- name
-      |-- type
-      |-- comment
-  |-- [service]
-    |-- name
-    |-- comment
-    |-- [arg]
-      |-- name
-      |-- type
-      |-- comment
-    |-- [return]
-      |-- name
-      |-- type
-      |-- comment
-```
-
 # project XML文件结构
 
 ```

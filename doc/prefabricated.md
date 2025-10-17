@@ -1,17 +1,63 @@
-# VulSim SE Controller
+# Prefab 文件结构
 
-内置combine，包含以下tag
+```
+|-- PrefabName
+  |-- PrefabName.vulp
+  |-- PrefabName.h
+  |-- bundle
+    |-- bundles.xml
+    |-- ...
+  |-- source
+    |-- src.cpp
+    |-- ...
+  |-- slib
+    |-- win
+      |-- xxx.lib
+      |-- ...
+    |-- linux
+      |-- xxx.a
+      |-- ...
+```
 
+# Prefab.vulp XML文件结构
 
-* config CoreNum 目标核心数量，用于代码生成
-
-* config MemorySizeMB 目标内存空间，映射到__internal_config_memory_size_mb
-
-* config BaseAddr 目标内存空间，映射到__internal_config_base_addr
-
-* config DevBaseAddr 设备内存空间基地址，映射到__internal_config_dev_base_addr
-
-* 
-
-
+```
+|-- prefab
+  |-- name
+  |-- comment
+  |-- [config]
+    |-- name
+    |-- value
+    |-- comment
+  |-- [pipein]
+    |-- name
+    |-- type
+    |-- comment
+  |-- [pipeout]
+    |-- name
+    |-- type
+    |-- comment
+  |-- [request]
+    |-- name
+    |-- comment
+    |-- [arg]
+      |-- name
+      |-- type
+      |-- comment
+    |-- [return]
+      |-- name
+      |-- type
+      |-- comment
+  |-- [service]
+    |-- name
+    |-- comment
+    |-- [arg]
+      |-- name
+      |-- type
+      |-- comment
+    |-- [return]
+      |-- name
+      |-- type
+      |-- comment
+```
 

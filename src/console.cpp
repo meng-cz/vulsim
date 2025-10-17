@@ -883,10 +883,8 @@ unique_ptr<vector<string>> VulConsole::_consoleLoad(const vector<string> &args) 
     // project name = filename without extension
     string projname = vulfile.stem().string();
 
-    // currently prefab list is empty
-    VulPrefabMetaDataMap prefabs;
     string err;
-    auto d = VulDesign::loadFromFile(vulfile.string(), prefabs, err);
+    auto d = VulDesign::loadFromFile(vulfile.string(), err);
     if (!d) {
         if (err.empty()) err = string("#10000: failed to load project '") + vulfile.string() + "'";
         output->push_back(err);
@@ -1230,8 +1228,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
         string projname = toks[1];
         string projdir = toks[2];
 
-        // currently prefab list is empty
-        VulPrefabMetaDataMap prefabs;
         string err;
         auto d = VulDesign::initNewDesign(projname, projdir, err);
         if (!d) {

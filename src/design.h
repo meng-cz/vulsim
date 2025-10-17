@@ -4,7 +4,6 @@
 #include <memory>
 
 #include "type.h"
-#include "prefab.h"
 
 using std::unordered_map;
 using std::unique_ptr;
@@ -32,7 +31,7 @@ public:
      * @param err Error message in case of failure.
      * @return A unique_ptr to the loaded VulDesign, or nullptr on failure.
      */
-    static unique_ptr<VulDesign> loadFromFile(const string &filename, VulPrefabMetaDataMap &prefabs, string &err);
+    static unique_ptr<VulDesign> loadFromFile(const string &filename, string &err);
 
     /**
      * @brief Initialize a new VulDesign with given project name and directory.
@@ -65,8 +64,6 @@ public:
 
     vector<VulVisBlock> vis_blocks;
     vector<VulVisText> vis_texts;
-
-    VulPrefabMetaDataMap prefab_map;
 
     /**
      * @brief Load a config library from an XML file.

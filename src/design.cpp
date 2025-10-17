@@ -179,9 +179,8 @@ bool VulDesign::isValidTypeName(const string &type, vector<string> &seen_bundles
 /// @param filename The name of the file to load.
 /// @param err Error message in case of failure.
 /// @return A unique_ptr to the loaded VulDesign, or nullptr on failure.
-unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, VulPrefabMetaDataMap &prefabs, string &err) {
+unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &err) {
     auto design = std::unique_ptr<VulDesign>(new VulDesign());
-    design->prefab_map = prefabs;
     namespace fs = std::filesystem;
 
     fs::path filePath(filename);
