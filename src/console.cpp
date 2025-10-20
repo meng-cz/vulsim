@@ -442,11 +442,24 @@ unique_ptr<vector<string>> _consoleCombine(VulDesign &design, vector<string> &ar
         if (args.size() < 2) { output->push_back("Error: missing action"); return output; }
         string action = toLower(args[1]); bool isService = (sub == "service");
         if (action == "add" || action == "update") {
-            if (args.size() < 4) { output->push_back("Error: Usage: combine " + sub + " " + action + " <combine> <name> [--comment ...]"); return output; }
+            if (args.size() < 4) { output->push_back("Error: Usage: combine " + sub + " " + action + " <combine> <name> [--comment ...]  [--arg <type> <name> [<comment>]] [--return <type> <name> [<comment>]]"); return output; }
             string comb = args[2]; string name = args[3]; string comment;
             for (size_t i = 4; i + 1 < args.size(); ++i) if (args[i] == "--comment" || args[i] == "-c") { comment = args[i+1]; break; }
-            vector<string> anames, atypes, rnames, rtypes;
-            string res = isService ? cmdUpdateCombineService(design, comb, name, anames, atypes, rnames, rtypes, comment) : cmdUpdateCombineRequest(design, comb, name, anames, atypes, rnames, rtypes, comment);
+            vector<VulArgument> iargs, irets;
+            for (size_t i = 4; i + 2 < args.size(); ++i) {
+                if (args[i] == "--arg") {
+                    string atype = args[i+1]; string aname = args[i+2]; string acomment;
+                    i += 2;
+                    if (i + 1 < args.size() && args[i+1] != "--arg" && args[i+1] != "--return" && args[i+1] != "--comment" && args[i+1] != "-c") { acomment = args[i+1]; i++; }
+                    iargs.push_back(VulArgument{atype, aname, acomment});
+                } else if (args[i] == "--return") {
+                    string rtype = args[i+1]; string rname = args[i+2]; string rcomment;
+                    i += 2;
+                    if (i + 1 < args.size() && args[i+1] != "--arg" && args[i+1] != "--return" && args[i+1] != "--comment" && args[i+1] != "-c") { rcomment = args[i+1]; i++; }
+                    irets.push_back(VulArgument{rtype, rname, rcomment});
+                }
+            }
+            string res = isService ? cmdUpdateCombineService(design, comb, name, iargs, irets, comment) : cmdUpdateCombineRequest(design, comb, name, iargs, irets, comment);
             if (res.empty()) output->push_back(string("OK: ") + sub + " " + action + " succeeded"); else output->push_back(res);
             return output;
         }

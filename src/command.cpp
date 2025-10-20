@@ -1273,21 +1273,18 @@ string cmdRenameCombinePipeOut(VulDesign &design, const string &combinename, con
 }
 
 
-
 /**
  * @brief Add or update a request port in a combine.
  * If the request port already exists, its arguments, return values, and comment will be updated.
  * @param design The VulDesign object to modify.
  * @param combinename The name of the combine to modify.
  * @param reqname The name of the request port to add, update, or remove.
- * @param argnames The names of the arguments for the request port.
- * @param argtypes The types of the arguments for the request port.
- * @param retnames The names of the return values for the request port.
- * @param reptypes The types of the return values for the request port.
+ * @param args The arguments for the request port.
+ * @param rets The return values for the request port.
  * @param comment An optional comment for the request port.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdUpdateCombineRequest(VulDesign &design, const string &combinename, const string &reqname, const vector<string> &argnames, const vector<string> &argtypes, const vector<string> &retnames, const vector<string> &reptypes, const string &comment) {
+string cmdUpdateCombineRequest(VulDesign &design, const string &combinename, const string &reqname, const vector<VulArgument> &args, const vector<VulArgument> &rets, const string &comment) {
     if (combinename.empty()) return "#22100: combine name cannot be empty";
     auto it = design.combines.find(combinename);
     if (it == design.combines.end()) return string("#22101: combine '") + combinename + "' not found";
@@ -1295,33 +1292,22 @@ string cmdUpdateCombineRequest(VulDesign &design, const string &combinename, con
     if (reqname.empty()) return "#22102: request name cannot be empty";
     if (!isValidIdentifier(reqname)) return string("#22103: invalid request name '") + reqname + "'";
 
-    // argnames/argtypes length must match; retnames/reptypes length must match
-    if (argnames.size() != argtypes.size()) return string("#22104: arg names and types length mismatch for request '") + reqname + "'";
-    if (retnames.size() != reptypes.size()) return string("#22105: return names and types length mismatch for request '") + reqname + "'";
-
     VulCombine &vc = it->second;
 
     // validate each type
-    for (const string &t : argtypes) {
-        if (!t.empty() && !design.isValidTypeName(t)) return string("#22106: invalid argument type '") + t + "' for request '" + reqname + "'";
+    for (const VulArgument &a : args) {
+        if (!a.type.empty() && !design.isValidTypeName(a.type)) return string("#22106: invalid argument type '") + a.type + "' for request '" + reqname + "'";
     }
-    for (const string &t : reptypes) {
-        if (!t.empty() && !design.isValidTypeName(t)) return string("#22107: invalid return type '") + t + "' for request '" + reqname + "'";
+    for (const VulArgument &r : rets) {
+        if (!r.type.empty() && !design.isValidTypeName(r.type)) return string("#22107: invalid return type '") + r.type + "' for request '" + reqname + "'";
     }
 
     // find existing request
     for (VulRequest &r : vc.request) {
         if (r.name == reqname) {
             // update
-            r.arg.clear(); r.ret.clear();
-            for (size_t i = 0; i < argnames.size(); ++i) {
-                VulArgument a; a.name = argnames[i]; a.type = argtypes[i]; a.comment.clear();
-                r.arg.push_back(a);
-            }
-            for (size_t i = 0; i < retnames.size(); ++i) {
-                VulArgument a; a.name = retnames[i]; a.type = reptypes[i]; a.comment.clear();
-                r.ret.push_back(a);
-            }
+            r.arg = args;
+            r.ret = rets;
             r.comment = comment;
             design.dirty_combines = true;
             return string();
@@ -1336,14 +1322,8 @@ string cmdUpdateCombineRequest(VulDesign &design, const string &combinename, con
     VulRequest nr;
     nr.name = reqname;
     nr.comment = comment;
-    for (size_t i = 0; i < argnames.size(); ++i) {
-        VulArgument a; a.name = argnames[i]; a.type = argtypes[i]; a.comment.clear();
-        nr.arg.push_back(a);
-    }
-    for (size_t i = 0; i < retnames.size(); ++i) {
-        VulArgument a; a.name = retnames[i]; a.type = reptypes[i]; a.comment.clear();
-        nr.ret.push_back(a);
-    }
+    nr.arg = args;
+    nr.ret = rets;
     vc.request.push_back(nr);
     design.dirty_combines = true;
     return string();
@@ -1416,17 +1396,16 @@ string cmdRenameCombineRequest(VulDesign &design, const string &combinename, con
 /**
  * @brief Add or update a service port in a combine.
  * If the service port already exists, its arguments, return values, and comment will be updated.
+ * For a new service port, its associated cpp file and function name will be created automatically.
  * @param design The VulDesign object to modify.
  * @param combinename The name of the combine to modify.
  * @param servname The name of the service port to add, update, or remove.
- * @param argnames The names of the arguments for the service port.
- * @param argtypes The types of the arguments for the service port.
- * @param retnames The names of the return values for the service port.
- * @param reptypes The types of the return values for the service port.
+ * @param args The arguments for the service port.
+ * @param rets The return values for the service port.
  * @param comment An optional comment for the service port.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdUpdateCombineService(VulDesign &design, const string &combinename, const string &servname, const vector<string> &argnames, const vector<string> &argtypes, const vector<string> &retnames, const vector<string> &reptypes, const string &comment) {
+string cmdUpdateCombineService(VulDesign &design, const string &combinename, const string &servname, const vector<VulArgument> &args, const vector<VulArgument> &rets, const string &comment) {
     if (combinename.empty()) return "#22120: combine name cannot be empty";
     auto it = design.combines.find(combinename);
     if (it == design.combines.end()) return string("#22121: combine '") + combinename + "' not found";
@@ -1434,18 +1413,14 @@ string cmdUpdateCombineService(VulDesign &design, const string &combinename, con
     if (servname.empty()) return "#22122: service name cannot be empty";
     if (!isValidIdentifier(servname)) return string("#22123: invalid service name '") + servname + "'";
 
-    // argnames/argtypes length must match; retnames/reptypes length must match
-    if (argnames.size() != argtypes.size()) return string("#22124: arg names and types length mismatch for service '") + servname + "'";
-    if (retnames.size() != reptypes.size()) return string("#22125: return names and types length mismatch for service '") + servname + "'";
-
     VulCombine &vc = it->second;
 
     // validate each type
-    for (const string &t : argtypes) {
-        if (!t.empty() && !design.isValidTypeName(t)) return string("#22126: invalid argument type '") + t + "' for service '" + servname + "'";
+    for (const VulArgument &a : args) {
+        if (!a.type.empty() && !design.isValidTypeName(a.type)) return string("#22126: invalid argument type '") + a.type + "' for service '" + servname + "'";
     }
-    for (const string &t : reptypes) {
-        if (!t.empty() && !design.isValidTypeName(t)) return string("#22127: invalid return type '") + t + "' for service '" + servname + "'";
+    for (const VulArgument &a : rets) {
+        if (!a.type.empty() && !design.isValidTypeName(a.type)) return string("#22127: invalid return type '") + a.type + "' for service '" + servname + "'";
     }
 
     // find existing service
@@ -1453,14 +1428,8 @@ string cmdUpdateCombineService(VulDesign &design, const string &combinename, con
         if (s.name == servname) {
             // update
             s.arg.clear(); s.ret.clear();
-            for (size_t i = 0; i < argnames.size(); ++i) {
-                VulArgument a; a.name = argnames[i]; a.type = argtypes[i]; a.comment.clear();
-                s.arg.push_back(a);
-            }
-            for (size_t i = 0; i < retnames.size(); ++i) {
-                VulArgument a; a.name = retnames[i]; a.type = reptypes[i]; a.comment.clear();
-                s.ret.push_back(a);
-            }
+            s.arg = args;
+            s.ret = rets;
             s.comment = comment;
             design.dirty_combines = true;
             return string();
@@ -1474,14 +1443,8 @@ string cmdUpdateCombineService(VulDesign &design, const string &combinename, con
     VulService ns;
     ns.name = servname;
     ns.comment = comment;
-    for (size_t i = 0; i < argnames.size(); ++i) {
-        VulArgument a; a.name = argnames[i]; a.type = argtypes[i]; a.comment.clear();
-        ns.arg.push_back(a);
-    }
-    for (size_t i = 0; i < retnames.size(); ++i) {
-        VulArgument a; a.name = retnames[i]; a.type = reptypes[i]; a.comment.clear();
-        ns.ret.push_back(a);
-    }
+    ns.arg = args;
+    ns.ret = rets;
 
     // initialize cpp function file for this service: combinename + _serv_ + servname
     string funcname = combinename + string("_serv_") + servname;

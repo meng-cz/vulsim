@@ -249,14 +249,12 @@ string cmdRenameCombinePipeOut(VulDesign &design, const string &combinename, con
  * @param design The VulDesign object to modify.
  * @param combinename The name of the combine to modify.
  * @param reqname The name of the request port to add, update, or remove.
- * @param argnames The names of the arguments for the request port.
- * @param argtypes The types of the arguments for the request port.
- * @param retnames The names of the return values for the request port.
- * @param reptypes The types of the return values for the request port.
+ * @param args The arguments for the request port.
+ * @param rets The return values for the request port.
  * @param comment An optional comment for the request port.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdUpdateCombineRequest(VulDesign &design, const string &combinename, const string &reqname, const vector<string> &argnames, const vector<string> &argtypes, const vector<string> &retnames, const vector<string> &reptypes, const string &comment);
+string cmdUpdateCombineRequest(VulDesign &design, const string &combinename, const string &reqname, const vector<VulArgument> &args, const vector<VulArgument> &rets, const string &comment);
 
 /**
  * @brief Rename a request port in a combine.
@@ -276,14 +274,12 @@ string cmdRenameCombineRequest(VulDesign &design, const string &combinename, con
  * @param design The VulDesign object to modify.
  * @param combinename The name of the combine to modify.
  * @param servname The name of the service port to add, update, or remove.
- * @param argnames The names of the arguments for the service port.
- * @param argtypes The types of the arguments for the service port.
- * @param retnames The names of the return values for the service port.
- * @param reptypes The types of the return values for the service port.
+ * @param args The arguments for the service port.
+ * @param rets The return values for the service port.
  * @param comment An optional comment for the service port.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdUpdateCombineService(VulDesign &design, const string &combinename, const string &servname, const vector<string> &argnames, const vector<string> &argtypes, const vector<string> &retnames, const vector<string> &reptypes, const string &comment);
+string cmdUpdateCombineService(VulDesign &design, const string &combinename, const string &servname, const vector<VulArgument> &args, const vector<VulArgument> &rets, const string &comment);
 
 /**
  * @brief Rename a service port in a combine.
