@@ -71,12 +71,19 @@ public:
     unordered_map<string, VulPrefab> prefabs; // Indexed by prefab name
 
     /**
+     * @brief Check for global name conflicts across bundles, combines, instances, pipes, prefabs, and config items.
+     * @param name The name to check for conflicts.
+     * @return An empty string if no conflict, or an error message if there is a conflict.
+     */
+    string checkGlobalNameConflict(const string &name);
+
+    /**
      * @brief Add a prefab to the design, along with its dependent bundles.
      * @param prefab The VulPrefab to add.
      * @param dep_bundles The list of VulBundles that the prefab depends on.
      * @return An empty string on success, or an error message on failure (e.g. name conflict).
      */
-    string _addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles);
+    string addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles);
 
     vector<VulVisBlock> vis_blocks;
     vector<VulVisText> vis_texts;

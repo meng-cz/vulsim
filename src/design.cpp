@@ -83,6 +83,33 @@ unique_ptr<VulDesign> VulDesign::initNewDesign(const string &project_name, const
 }
 
 /**
+ * @brief Check for global name conflicts across bundles, combines, instances, pipes, prefabs, and config items.
+ * @param name The name to check for conflicts.
+ * @return An empty string if no conflict, or an error message if there is a conflict.
+ */
+string VulDesign::checkGlobalNameConflict(const string &name) {
+    if (bundles.find(name) != bundles.end()) {
+        return string("Name conflict: bundle with name '") + name + "' already exists.";
+    }
+    if (combines.find(name) != combines.end()) {
+        return string("Name conflict: combine with name '") + name + "' already exists.";
+    }
+    if (instances.find(name) != instances.end()) {
+        return string("Name conflict: instance with name '") + name + "' already exists.";
+    }
+    if (pipes.find(name) != pipes.end()) {
+        return string("Name conflict: pipe with name '") + name + "' already exists.";
+    }
+    if (prefabs.find(name) != prefabs.end()) {
+        return string("Name conflict: prefab with name '") + name + "' already exists.";
+    }
+    if (config_lib.find(name) != config_lib.end()) {
+        return string("Name conflict: config item with name '") + name + "' already exists.";
+    }
+    return "";
+}
+
+/**
  * Check if the given type is a valid VulSim Data Type.
  * List of valid types:
  * Basic types; Bundles;
@@ -311,7 +338,7 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
                 }
             }
         }
-        err = design->_addPrefab(prefab, dep_bundles);
+        err = design->addPrefab(prefab, dep_bundles);
         if (!err.empty()) {
             err = string("#10010: Failed to load prefab '") + prefab_name + "' to design: " + err;
             return nullptr;
@@ -327,10 +354,11 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
  * @param dep_bundles The list of VulBundles that the prefab depends on.
  * @return An empty string on success, or an error message on failure (e.g. name conflict).
  */
-string VulDesign::_addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles) {
+string VulDesign::addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles) {
     // check for name conflict
-    if (prefabs.find(prefab.name) != prefabs.end()) {
-        return string("Prefab name conflict: '") + prefab.name + "'";
+    string err = checkGlobalNameConflict(prefab.name);
+    if (!err.empty()) {
+        return string("Prefab name conflict: '") + prefab.name + "':" + err;
     }
 
     // add dependent bundles to design if not already present
@@ -448,6 +476,10 @@ string VulDesign::saveProject() {
     // Save all bundles if dirty (one file per bundle)
     if (dirty_bundles) {
         for (const auto &kv : bundles) {
+            // only save user-defined bundles (those referenced by "_user_" prefab)
+            if (std::find(kv.second.ref_prefabs.begin(), kv.second.ref_prefabs.end(), "_user_") == kv.second.ref_prefabs.end()) {
+                continue;
+            }
             const string fname = (bakDir / "bundle" / (kv.first + ".xml")).string();
             err = serializeSaveBundleToFile(fname, kv.second);
             if (!err.empty()) {

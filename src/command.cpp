@@ -21,13 +21,8 @@
  * @param name The name to check for conflicts.
  * @return An empty string if there are no conflicts, or an error message if there is a conflict.
  */
-string isNameConflict(const VulDesign &design, const string &name) {
-    if (design.bundles.find(name) != design.bundles.end()) return "Bundle name conflict";
-    if (design.combines.find(name) != design.combines.end()) return "Combine name conflict";
-    if (design.instances.find(name) != design.instances.end()) return "Instance name conflict";
-    if (design.pipes.find(name) != design.pipes.end()) return "Pipe name conflict";
-    if (design.config_lib.find(name) != design.config_lib.end()) return "Config item name conflict";
-    return "";
+string isNameConflict(VulDesign &design, const string &name) {
+    return design.checkGlobalNameConflict(name);
 }
 
 /**
