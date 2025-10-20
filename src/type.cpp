@@ -15,6 +15,18 @@
  * @return true if the name is a valid identifier, false otherwise.
  */
 bool isValidIdentifier(const string &name) {
+    static const std::unordered_set<string> cpp_keywords = {
+        "alignas","alignof","and","and_eq","asm","atomic_cancel","atomic_commit","atomic_noexcept",
+        "auto","bitand","bitor","bool","break","case","catch","char","char16_t","char32_t","class",
+        "compl","concept","const","constexpr","const_cast","continue","co_return","co_await","co_yield",
+        "decltype","default","delete","do","double","dynamic_cast","else","enum","explicit","export",
+        "extern","false","float","for","friend","goto","if","inline","int","long","mutable","namespace",
+        "new","noexcept","not","not_eq","nullptr","operator","or","or_eq","private","protected","public",
+        "register","reinterpret_cast","return","short","signed","sizeof","static","static_assert","static_cast",
+        "struct","switch","template","this","thread_local","throw","true","try","typedef","typeid","typename",
+        "union","unsigned","using","virtual","void","volatile","wchar_t","while","xor","xor_eq",
+        "uint8", "uint16", "uint32", "uint64", "uint128", "int8", "int16", "int32", "int64", "int128"
+    };
     if (name.empty()) return false;
     // first char: letter or underscore
     unsigned char c0 = (unsigned char)name[0];
@@ -23,6 +35,7 @@ bool isValidIdentifier(const string &name) {
         unsigned char c = (unsigned char)name[i];
         if (!(std::isalnum(c) || name[i] == '_')) return false;
     }
+    if (cpp_keywords.find(name) != cpp_keywords.end()) return false;
     return true;
 }
 
@@ -84,4 +97,26 @@ void extractConfigReferences(VulConfig &vc) {
         // operators or punctuation: copy as-is (handles + - * / % ( ) etc.)
         i++;
     }
+}
+
+/**
+ * @brief Create a fake VulCombine from a VulPrefab for design-time representation.
+ * @param prefab The VulPrefab to convert.
+ * @param out_combine The output VulCombine object to populate.
+ */
+void fakeCombineFromPrefab(const VulPrefab &prefab, VulCombine &out_combine) {
+    out_combine.name = prefab.name;
+    out_combine.comment = prefab.comment;
+    out_combine.pipein = prefab.pipein;
+    out_combine.pipeout = prefab.pipeout;
+    out_combine.request = prefab.request;
+    out_combine.service = prefab.service;
+    out_combine.storage.clear();
+    out_combine.storagenext.clear();
+    out_combine.storagetick.clear();
+    out_combine.tick = VulCppFunc();
+    out_combine.applytick = VulCppFunc();
+    out_combine.init = VulCppFunc();
+    out_combine.config = prefab.config;
+    out_combine.stallable = prefab.stallable;
 }

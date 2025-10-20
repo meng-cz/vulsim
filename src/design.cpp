@@ -192,6 +192,7 @@ bool VulDesign::isValidTypeName(const string &type, vector<string> &seen_bundles
 
         // base types: basic vul types, bundles
         if (isBasicVulType(token)) return true;
+        if (!isValidIdentifier(token)) return false;
         // check for bundle
         if (bundles.find(token) != bundles.end()) {
             seen_bundles.push_back(token);
@@ -551,10 +552,34 @@ string VulDesign::saveProject() {
     return string();
 }
 
+/**
+ * @brief Get the VulCombine definition for a given combine name.
+ * If the combine does not exist, create a fake combine from a prefab with the same name.
+ * @param combine_name The name of the combine to get.
+ * @param is_fake Output parameter indicating whether the returned combine is fake (from prefab) or real.
+ * @return A unique_ptr to the VulCombine definition.
+ */
+unique_ptr<VulCombine> VulDesign::getOrFakeCombineReadonly(const string &combine_name, bool &is_fake) {
+    auto it = combines.find(combine_name);
+    if (it != combines.end()) {
+        is_fake = false;
+        return std::make_unique<VulCombine>(it->second);
+    }
 
+    // check if there is a prefab with this name
+    auto pit = prefabs.find(combine_name);
+    if (pit != prefabs.end()) {
+        const VulPrefab &vp = pit->second;
+        VulCombine fake_combine;
+        fakeCombineFromPrefab(vp, fake_combine);
+        is_fake = true;
+        return std::make_unique<VulCombine>(fake_combine);
+    }
 
-
-
+    // not found
+    is_fake = false;
+    return nullptr;
+}
 
 /**
  * @brief Check for name conflicts:
@@ -564,34 +589,8 @@ string VulDesign::saveProject() {
  * (4) All config reference names in combines must exist in config_lib.
  */
 string VulDesign::_checkNameError() {
-    // collect C++ reserved keywords (subset common to C++11+)
-    static const std::unordered_set<string> cpp_keywords = {
-        "alignas","alignof","and","and_eq","asm","atomic_cancel","atomic_commit","atomic_noexcept",
-        "auto","bitand","bitor","bool","break","case","catch","char","char16_t","char32_t","class",
-        "compl","concept","const","constexpr","const_cast","continue","co_return","co_await","co_yield",
-        "decltype","default","delete","do","double","dynamic_cast","else","enum","explicit","export",
-        "extern","false","float","for","friend","goto","if","inline","int","long","mutable","namespace",
-        "new","noexcept","not","not_eq","nullptr","operator","or","or_eq","private","protected","public",
-        "register","reinterpret_cast","return","short","signed","sizeof","static","static_assert","static_cast",
-        "struct","switch","template","this","thread_local","throw","true","try","typedef","typeid","typename",
-        "union","unsigned","using","virtual","void","volatile","wchar_t","while","xor","xor_eq",
-        "uint8", "uint16", "uint32", "uint64", "uint128", "int8", "int16", "int32", "int64", "int128"
-    };
-
-    auto is_valid_ident = [&](const string &s) {
-        if (s.empty()) return false;
-        // first char: letter or underscore
-        unsigned char c0 = (unsigned char)s[0];
-        if (!(std::isalpha(c0) || s[0] == '_')) return false;
-        for (size_t i = 1; i < s.size(); ++i) {
-            unsigned char c = (unsigned char)s[i];
-            if (!(std::isalnum(c) || s[i] == '_')) return false;
-        }
-        if (cpp_keywords.find(s) != cpp_keywords.end()) return false;
-        return true;
-    };
-
-    // (1) No duplicate names within: bundles, combines, instances, pipes, and config_lib.
+    
+    // (1) No duplicate names within: bundles, combines, instances, pipes, prefabs, and config_lib.
     unordered_map<string, string> owner; // name -> category
 
     auto check_and_insert = [&](const string &name, const string &cat) -> string {
@@ -624,6 +623,10 @@ string VulDesign::_checkNameError() {
         string err = check_and_insert(p.first, "config_lib");
         if (!err.empty()) return err;
     }
+    for (const auto &p : prefabs) {
+        string err = check_and_insert(p.first, "prefab");
+        if (!err.empty()) return err;
+    }
 
     // (2) All instances must refer to an existing combine.
     for (const auto &kv : instances) {
@@ -636,7 +639,7 @@ string VulDesign::_checkNameError() {
 
     // (3) All names must be valid C++ identifiers and not C++ reserved keywords.
     for (const auto &o : owner) {
-        if (!is_valid_ident(o.first)) {
+        if (!isValidIdentifier(o.first)) {
             return string("#11004: invalid identifier name: '") + o.first + "'";
         }
     }
@@ -825,13 +828,13 @@ string VulDesign::_checkReqConnectionError() {
 
         // find the combine of the request instance
         const string &reqCombineName = instIt->second.combine;
-        auto combIt = combines.find(reqCombineName);
-        if (combIt == combines.end()) {
+        unique_ptr<VulCombine> reqCombinePtr = getOrFakeCombineReadonly(reqCombineName);
+        if (!reqCombinePtr) {
             return string("#13002: req connection instance '") + rc.req_instance + "' refers to unknown combine '" + reqCombineName + "'";
         }
 
         // find request definition in combine
-        const VulCombine &reqCombine = combIt->second;
+        const VulCombine &reqCombine = *reqCombinePtr;
         const VulRequest *reqDef = nullptr;
         for (const VulRequest &r : reqCombine.request) {
             if (r.name == rc.req_name) { reqDef = &r; break; }
@@ -856,13 +859,13 @@ string VulDesign::_checkReqConnectionError() {
 
         // find service combine
         const string &servCombineName = sInstIt->second.combine;
-        auto sCombIt = combines.find(servCombineName);
-        if (sCombIt == combines.end()) {
+        unique_ptr<VulCombine> servCombinePtr = getOrFakeCombineReadonly(servCombineName);
+        if (!servCombinePtr) {
             return string("#13005: service instance '") + servInst + "' refers to unknown combine '" + servCombineName + "'";
         }
 
         // find service definition
-        const VulCombine &servCombine = sCombIt->second;
+        const VulCombine &servCombine = *servCombinePtr;
         const VulService *servDef = nullptr;
         for (const VulService &s : servCombine.service) {
             if (s.name == servName) { servDef = &s; break; }
@@ -908,9 +911,9 @@ string VulDesign::_checkReqConnectionError() {
     for (const auto &instKv : instances) {
         const string &instName = instKv.first;
         const string &combName = instKv.second.combine;
-        auto combIt = combines.find(combName);
-        if (combIt == combines.end()) continue; // already checked elsewhere
-        const VulCombine &vc = combIt->second;
+        unique_ptr<VulCombine> combPtr = getOrFakeCombineReadonly(combName);
+        if (!combPtr) continue; // already checked elsewhere
+        const VulCombine &vc = *combPtr;
         for (const VulRequest &r : vc.request) {
             if (r.ret.empty()) continue; // only care about requests with return
 
@@ -951,13 +954,13 @@ string VulDesign::_checkPipeConnectionError() {
 
         // combine exists
         const string &combName = instIt->second.combine;
-        auto combIt = combines.find(combName);
-        if (combIt == combines.end()) {
+        unique_ptr<VulCombine> combPtr = getOrFakeCombineReadonly(combName);
+        if (!combPtr) {
             return string("#14002: modpipe instance '") + mpc.instance + "' refers to unknown combine '" + combName + "'";
         }
 
         // module pipeout port exists in combine
-        const VulCombine &vc = combIt->second;
+        const VulCombine &vc = *combPtr;
         const VulPipePort *portDef = nullptr;
         for (const VulPipePort &p : vc.pipeout) {
             if (p.name == mpc.pipeoutport) { portDef = &p; break; }
@@ -994,13 +997,13 @@ string VulDesign::_checkPipeConnectionError() {
 
         // combine exists
         const string &combName = instIt->second.combine;
-        auto combIt = combines.find(combName);
-        if (combIt == combines.end()) {
+        unique_ptr<VulCombine> combPtr = getOrFakeCombineReadonly(combName);
+        if (!combPtr) {
             return string("#14008: pipemod instance '") + pmc.instance + "' refers to unknown combine '" + combName + "'";
         }
 
         // module pipein port exists in combine
-        const VulCombine &vc = combIt->second;
+        const VulCombine &vc = *combPtr;
         const VulPipePort *portDef = nullptr;
         for (const VulPipePort &p : vc.pipein) {
             if (p.name == pmc.pipeinport) { portDef = &p; break; }
@@ -1060,21 +1063,21 @@ string VulDesign::_checkSeqConnectionError() {
 
         // dest combine must be stallable
         const string &destComb = instances.at(sc.dest_instance).combine;
-        auto combIt = combines.find(destComb);
-        if (combIt == combines.end()) {
+        unique_ptr<VulCombine> destCombPtr = getOrFakeCombineReadonly(destComb);
+        if (!destCombPtr) {
             return string("#15005: stalled connection dest instance '") + sc.dest_instance + "' refers to unknown combine '" + destComb + "'";
         }
-        if (!combIt->second.stallable) {
+        if (!destCombPtr->stallable) {
             return string("#15006: stalled connection dest instance '") + sc.dest_instance + "' combine '" + destComb + "' is not stallable";
         }
 
         // src combine must be stallable
         const string &srcComb = instances.at(sc.src_instance).combine;
-        combIt = combines.find(srcComb);
-        if (combIt == combines.end()) {
+        unique_ptr<VulCombine> srcCombPtr = getOrFakeCombineReadonly(srcComb);
+        if (!srcCombPtr) {
             return string("#15007: stalled connection src instance '") + sc.src_instance + "' refers to unknown combine '" + srcComb + "'";
         }
-        if (!combIt->second.stallable) {
+        if (!srcCombPtr->stallable) {
             return string("#15008: stalled connection src instance '") + sc.src_instance + "' combine '" + srcComb + "' is not stallable";
         }
     }

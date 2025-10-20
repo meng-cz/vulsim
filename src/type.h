@@ -140,6 +140,13 @@ typedef struct {
     bool stallable;
 } VulPrefab;
 
+/**
+ * @brief Create a fake VulCombine from a VulPrefab for design-time representation.
+ * @param prefab The VulPrefab to convert.
+ * @param out_combine The output VulCombine object to populate.
+ */
+void fakeCombineFromPrefab(const VulPrefab &prefab, VulCombine &out_combine);
+
 typedef struct {
     long x = 0, y = 0;
     long w = 0, h = 0;

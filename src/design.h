@@ -181,6 +181,25 @@ public:
      */
     bool isValidTypeName(const string &type, vector<string> &seen_bundles);
 
+    /**
+     * @brief Get the VulCombine definition for a given combine name.
+     * If the combine does not exist, create a fake combine from a prefab with the same name.
+     * @param combine_name The name of the combine to get.
+     * @param is_fake Output parameter indicating whether the returned combine is fake (from prefab) or real.
+     * @return A unique_ptr to the VulCombine definition.
+     */
+    unique_ptr<VulCombine> getOrFakeCombineReadonly(const string &combine_name, bool &is_fake);
+    /**
+     * @brief Get the VulCombine definition for a given combine name.
+     * If the combine does not exist, create a fake combine from a prefab with the same name.
+     * @param combine_name The name of the combine to get.
+     * @return A unique_ptr to the VulCombine definition.
+     */
+    unique_ptr<VulCombine> getOrFakeCombineReadonly(const string &combine_name) {
+        bool is_fake;
+        return getOrFakeCombineReadonly(combine_name, is_fake);
+    }
+
 protected:
     VulDesign() {};
 };
