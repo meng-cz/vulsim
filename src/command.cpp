@@ -172,6 +172,14 @@ string cmdRenameConfigItem(VulDesign &design, const string &oldname, const strin
     return string();
 }
 
+/**
+ * @brief Check that all referenced prefabs in the bundle are user-only.
+ * @param ref_prefabs The list of referenced prefab names.
+ * @return true if ref_prefabs contains only a "_user_" item, false otherwise.
+ */
+bool _checkBundleRefPrefabUserOnly(const vector<string> &ref_prefabs) {
+    return (ref_prefabs.size() == 1 && ref_prefabs[0] == "_user_");
+}
 
 /**
  * @brief Add or update a bundle in the design.
@@ -187,6 +195,10 @@ string cmdUpdateBundle(VulDesign &design, const string &name, const string &comm
     auto it = design.bundles.find(name);
     if (it != design.bundles.end()) {
         // Update existing bundle
+        // check for only _user_ mask in bundle ref_prefabs
+        if (!_checkBundleRefPrefabUserOnly(it->second.ref_prefabs)) {
+            return "#21004: Cannot update bundle '" + name + "': references prefabs";
+        }
         it->second.comment = comment;
     } else {
         // Add new bundle
@@ -217,6 +229,10 @@ string cmdRenameBundle(VulDesign &design, const string &oldname, const string &n
 
     auto it = design.bundles.find(oldname);
     if (it == design.bundles.end()) return string("#21011: bundle '") + oldname + "' not found";
+
+    if (!_checkBundleRefPrefabUserOnly(it->second.ref_prefabs)) {
+        return "#21014: Cannot rename bundle '" + oldname + "': references prefabs";
+    }
 
     // helper: tokenize and replace full identifier tokens equal to oldname
     auto replaceTokenInType = [&](const string &stype, string &out) -> bool {
@@ -366,6 +382,9 @@ string cmdSetupBundleMember(VulDesign &design, const string &bundlename, const s
     if (!isValidIdentifier(membername)) return string("#21023: invalid member name '") + membername + "'";
 
     VulBundle &vb = it->second;
+    if (!_checkBundleRefPrefabUserOnly(vb.ref_prefabs)) {
+        return "#21026: Cannot modify bundle '" + bundlename + "': references prefabs";
+    }
 
     // Remove member if membertype is empty
     if (membertype.empty()) {

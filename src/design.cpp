@@ -373,8 +373,7 @@ string VulDesign::addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles) {
             if (match) {
                 for (size_t i = 0; i < existing.members.size(); ++i) {
                     if (existing.members[i].name != vb.members[i].name ||
-                        existing.members[i].type != vb.members[i].type ||
-                        existing.members[i].comment != vb.members[i].comment) {
+                        existing.members[i].type != vb.members[i].type) {
                         match = false;
                         break;
                     }
@@ -383,6 +382,8 @@ string VulDesign::addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles) {
             if (!match) {
                 return string("Bundle definition conflict for '") + vb.name + "' required by prefab '" + prefab.name + "'";
             }
+            // update comments
+            bundles[vb.name].comment = vb.comment;
         }
         // add reference to prefab in bundle
         auto &bundle_ref_prefabs = bundles[vb.name].ref_prefabs;
