@@ -142,5 +142,8 @@
 ```
 |-- project
   |-- version
+  |-- prefab
+    |-- name
+    |-- path
 ```
 

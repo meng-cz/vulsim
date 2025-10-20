@@ -62,76 +62,29 @@ public:
     vector<VulStalledConnection> stalled_connections;
     vector<VulUpdateSequence> update_constraints;
 
+    unordered_map<string, VulPrefab> prefabs; // Indexed by prefab name
+
+    /**
+     * @brief Add a prefab to the design, along with its dependent bundles.
+     * @param prefab The VulPrefab to add.
+     * @param dep_bundles The list of VulBundles that the prefab depends on.
+     * @return An empty string on success, or an error message on failure (e.g. name conflict).
+     */
+    string _addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles);
+
     vector<VulVisBlock> vis_blocks;
     vector<VulVisText> vis_texts;
-
-    /**
-     * @brief Load a config library from an XML file.
-     * @param filename The name of the XML file to load. (config.xml)
-     * @param err Error message in case of failure.
-     */
-    void _loadConfigLibFromFile(const string &filename, string &err);
-
-    /**
-     * @brief Load a bundle from an XML file.
-     * @param filename The name of the XML file to load. (bundle/xxx.xml)
-     * @param err Error message in case of failure.
-     */
-    void _loadBundleFromFile(const string &filename, string &err);
-
-    /**
-     * @brief Load a combine from an XML file.
-     * @param filename The name of the XML file to load. (combine/xxx.xml)
-     * @param err Error message in case of failure.
-     */
-    void _loadCombineFromFile(const string &filename, string &err);
-
-    /**
-     * @brief Load the design from an XML file.
-     * @param filename The name of the XML file to load. (design.xml)
-     * @param err Error message in case of failure.
-     */
-    void _loadDesignFromFile(const string &filename, string &err);
 
     bool dirty_config_lib = false;
     bool dirty_bundles = false;
     bool dirty_combines = false;
 
     /**
-     * @brief Save the config library to an XML file.
-     * @param filename The name of the XML file to save. (config.xml)
-     * @param err Error message in case of failure.
-     */
-    void _saveConfigLibToFile(const string &filename, string &err);
-
-    /**
-     * @brief Save a bundle to an XML file.
-     * @param filename The name of the XML file to save. (bundle/xxx.xml)
-     * @param vb The VulBundle to save.
-     * @param err Error message in case of failure.
-     */
-    void _saveBundleToFile(const string &filename, const VulBundle &vb, string &err);
-
-    /**
-     * @brief Save a combine to an XML file.
-     * @param filename The name of the XML file to save. (combine/xxx.xml)
-     * @param vc The VulCombine to save.
-     * @param err Error message in case of failure.
-     */
-    void _saveCombineToFile(const string &filename, const VulCombine &vc, string &err);
-
-    /**
-     * @brief Save the design to an XML file.
-     * @param filename The name of the XML file to save. (design.xml)
-     * @param err Error message in case of failure.
-     */
-    void _saveDesignToFile(const string &filename, string &err);
-
-    /**
      * @brief Save the entire project to the project directory.
      * @return An empty string on success, or an error message on failure.
      */
     string saveProject();
+
 
     /**
      * @brief Check for name conflicts:

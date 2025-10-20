@@ -1,5 +1,5 @@
 #include "design.h"
-#include "pugixml.hpp"
+#include "serialize.h"
 
 #include <algorithm>
 #include <cctype>
@@ -193,44 +193,26 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
     design->project_dir = dir.string();
     design->project_name = filePath.stem().string();
 
-    // load version from .vul file
-    {
-        pugi::xml_document doc;
-        pugi::xml_parse_result res = doc.load_file(filePath.string().c_str());
-        if (!res) {
-            err = string("#10002: Failed to load project file: ") + filename + "; parser error: " + res.description();
-            return nullptr;
-        }
-
-        pugi::xml_node root = doc.child("project");
-        if (!root) {
-            err = string("#10003: Missing root <project> in file: ") + filename;
-            return nullptr;
-        }
-
-        pugi::xml_node versionNode = root.child("version");
-        if (versionNode) {
-            string verStr = versionNode.text().as_string();
-            size_t pos1 = verStr.find('.');
-            size_t pos2 = verStr.rfind('.');
-            if (pos1 != string::npos && pos2 != string::npos && pos1 != pos2) {
-                try {
-                    int major = std::stoi(verStr.substr(0, pos1));
-                    int minor = std::stoi(verStr.substr(pos1 + 1, pos2 - pos1 - 1));
-                    int patch = std::stoi(verStr.substr(pos2 + 1));
-                    design->version = {major, minor, patch};
-                } catch (...) {
-                    // ignore parse errors, keep default version
-                }
-            }
-        }
+    // load project info from .vul file
+    VulProject vp;
+    err = serializeParseProjectInfoFromFile(filePath.string(), vp);
+    if (!err.empty()) {
+        err = string("#10002: Failed to load project file: ") + filename + "; parser error: " + err;
+        return nullptr;
     }
+    if (vp.version != std::make_tuple(0,0,0)) {
+        design->version = vp.version;
+    }
+
 
     // load config.xml if present
     fs::path configFile = dir / "config.xml";
     if (fs::exists(configFile) && fs::is_regular_file(configFile)) {
-        design->_loadConfigLibFromFile(configFile.string(), err);
-        if (!err.empty()) return nullptr;
+        err = serializeParseConfigLibFromFile(configFile.string(), design->config_lib);
+        if (!err.empty()) {
+            err = string("#10003: Failed to load config lib file: ") + configFile.string() + "; parser error: " + err;
+            return nullptr;
+        }
     }
 
     // load all bundle xml files from bundle/ folder
@@ -239,8 +221,15 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
         for (auto &entry : fs::directory_iterator(bundleDir)) {
             if (!entry.is_regular_file()) continue;
             if (entry.path().extension() == ".xml") {
-                design->_loadBundleFromFile(entry.path().string(), err);
-                if (!err.empty()) return nullptr;
+                VulBundle vb;
+                err = serializeParseBundleFromFile(entry.path().string(), vb);
+                if (!err.empty()) {
+                    err = string("#10004: Failed to load bundle file: ") + entry.path().string() + "; parser error: " + err;
+                    return nullptr;
+                }
+                vb.ref_prefabs.clear();
+                vb.ref_prefabs.push_back("_user_"); // special marker to indicate user-defined bundle
+                design->bundles[vb.name] = vb;
             }
         }
     }
@@ -251,8 +240,13 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
         for (auto &entry : fs::directory_iterator(combineDir)) {
             if (!entry.is_regular_file()) continue;
             if (entry.path().extension() == ".xml") {
-                design->_loadCombineFromFile(entry.path().string(), err);
-                if (!err.empty()) return nullptr;
+                VulCombine vc;
+                err = serializeParseCombineFromFile(entry.path().string(), vc);
+                if (!err.empty()) {
+                    err = string("#10005: Failed to load combine file: ") + entry.path().string() + "; parser error: " + err;
+                    return nullptr;
+                }
+                design->combines[vc.name] = vc;
             }
         }
     }
@@ -260,573 +254,263 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
     // load design.xml (required)
     fs::path designFile = dir / "design.xml";
     if (fs::exists(designFile) && fs::is_regular_file(designFile)) {
-        design->_loadDesignFromFile(designFile.string(), err);
-        if (!err.empty()) return nullptr;
+        err = serializeParseDesignFromFile(designFile.string(),
+            design->instances,
+            design->pipes,
+            design->req_connections,
+            design->mod_pipe_connections,
+            design->pipe_mod_connections,
+            design->stalled_connections,
+            design->update_constraints,
+            design->vis_blocks,
+            design->vis_texts
+        );
+        if (!err.empty()) {
+            err = string("#10006: Failed to load design file: ") + designFile.string() + "; parser error: " + err;
+            return nullptr;
+        }
     } else {
-        err = "#10002: design.xml not found in project folder: " + dir.string();
+        err = "#10007: design.xml not found in project folder: " + dir.string();
         return nullptr;
+    }
+
+    // load prefabs
+    for (auto &pentry : vp.prefabs) {
+        const string &prefab_name = pentry.first;
+        const string &prefab_dir = pentry.second;
+        fs::path prefab_dir_path = prefab_dir;
+        fs::path prefab_file = prefab_dir_path / (prefab_name + ".vulp");
+        VulPrefab prefab;
+        err = serializeParsePrefabFromFile(prefab_file.string(), prefab);
+        if (!err.empty()) {
+            err = string("#10008: Failed to load prefab file: ") + prefab_file.string() + "; parser error: " + err;
+            return nullptr;
+        }
+        prefab.path = prefab_dir_path.string();
+        prefab.name = prefab_name;
+        vector<VulBundle> dep_bundles;
+        fs::path prefab_bundle_dir = prefab_dir_path / "bundle";
+        // load dependent bundles in prefab's bundle/ folder
+        if (fs::exists(prefab_bundle_dir) && fs::is_directory(prefab_bundle_dir)) {
+            for (auto &entry : fs::directory_iterator(prefab_bundle_dir)) {
+                if (!entry.is_regular_file()) continue;
+                if (entry.path().extension() == ".xml") {
+                    VulBundle vb;
+                    err = serializeParseBundleFromFile(entry.path().string(), vb);
+                    if (!err.empty()) {
+                        err = string("#10009: Failed to load prefab bundle file: ") + entry.path().string() + "; parser error: " + err;
+                        return nullptr;
+                    }
+                    dep_bundles.push_back(vb);
+                }
+            }
+        }
+        err = design->_addPrefab(prefab, dep_bundles);
+        if (!err.empty()) {
+            err = string("#10010: Failed to load prefab '") + prefab_name + "' to design: " + err;
+            return nullptr;
+        }
     }
 
     return std::move(design);
 }
 
-void VulDesign::_loadConfigLibFromFile(const string &filename, string &err) {
-    err.clear();
-
-    pugi::xml_document doc;
-    pugi::xml_parse_result res = doc.load_file(filename.c_str());
-    if (!res) {
-        err = string("#10003: Failed to load config file: ") + filename + "; parser error: " + res.description();
-        return;
+/**
+ * @brief Add a prefab to the design, along with its dependent bundles.
+ * @param prefab The VulPrefab to add.
+ * @param dep_bundles The list of VulBundles that the prefab depends on.
+ * @return An empty string on success, or an error message on failure (e.g. name conflict).
+ */
+string VulDesign::_addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles) {
+    // check for name conflict
+    if (prefabs.find(prefab.name) != prefabs.end()) {
+        return string("Prefab name conflict: '") + prefab.name + "'";
     }
 
-    pugi::xml_node root = doc.child("configlib");
-    if (!root) {
-        err = string("#10004: Missing root <configlib> in file: ") + filename;
-        return;
-    }
-
-    // clear existing config lib before loading
-    config_lib.clear();
-
-    for (pugi::xml_node item : root.children("configitem")) {
-        pugi::xml_node nameNode = item.child("name");
-        pugi::xml_node valueNode = item.child("value");
-        pugi::xml_node commentNode = item.child("comment");
-
-        if (!nameNode || !valueNode) {
-            err = string("#10005: configitem missing <name> or <value> in file: ") + filename;
-            return;
+    // add dependent bundles to design if not already present
+    for (const VulBundle &vb : dep_bundles) {
+        if (bundles.find(vb.name) == bundles.end()) {
+            bundles[vb.name] = vb;
+        } else {
+            // check for consistency
+            const VulBundle &existing = bundles[vb.name];
+            bool match = (existing.members.size() == vb.members.size());
+            if (match) {
+                for (size_t i = 0; i < existing.members.size(); ++i) {
+                    if (existing.members[i].name != vb.members[i].name ||
+                        existing.members[i].type != vb.members[i].type ||
+                        existing.members[i].comment != vb.members[i].comment) {
+                        match = false;
+                        break;
+                    }
+                }
+            }
+            if (!match) {
+                return string("Bundle definition conflict for '") + vb.name + "' required by prefab '" + prefab.name + "'";
+            }
         }
-
-        string name = nameNode.text().as_string();
-        string value = valueNode.text().as_string();
-        string comment = commentNode ? commentNode.text().as_string() : string();
-
-        if (name.empty()) {
-            err = string("#10006: configitem has empty <name> in file: ") + filename;
-            return;
+        // add reference to prefab in bundle
+        auto &bundle_ref_prefabs = bundles[vb.name].ref_prefabs;
+        if (std::find(bundle_ref_prefabs.begin(), bundle_ref_prefabs.end(), prefab.name) == bundle_ref_prefabs.end()) {
+            bundle_ref_prefabs.push_back(prefab.name);
         }
-
-        VulConfigItem ci;
-        ci.name = name;
-        ci.value = value;
-        ci.comment = comment;
-
-        config_lib[ci.name] = ci;
     }
 
+    // add prefab to design
+    prefabs[prefab.name] = prefab;
+
+    return string("");
 }
 
-void VulDesign::_loadBundleFromFile(const string &filename, string &err) {
-    err.clear();
+string VulDesign::saveProject() {
+    namespace fs = std::filesystem;
+    string err;
 
-    pugi::xml_document doc;
-    pugi::xml_parse_result res = doc.load_file(filename.c_str());
-    if (!res) {
-        err = string("#10007: Failed to load bundle file: ") + filename + "; parser error: " + res.description();
-        return;
-    }
-
-    pugi::xml_node root = doc.child("bundle");
-    if (!root) {
-        err = string("#10008: Missing root <bundle> in file: ") + filename;
-        return;
-    }
-
-    pugi::xml_node nameNode = root.child("name");
-    if (!nameNode) {
-        err = string("#10009: bundle missing <name> in file: ") + filename;
-        return;
-    }
-
-    VulBundle vb;
-    vb.name = nameNode.text().as_string();
-    pugi::xml_node commentNode = root.child("comment");
-    vb.comment = commentNode ? commentNode.text().as_string() : string();
-
-    if (vb.name.empty()) {
-        err = string("#10010: bundle has empty <name> in file: ") + filename;
-        return;
-    }
-
-    // parse members
-    for (pugi::xml_node m : root.children("member")) {
-        pugi::xml_node mtype = m.child("type");
-        pugi::xml_node mname = m.child("name");
-        if (!mtype || !mname) {
-            err = string("#10011: member missing <type> or <name> in bundle file: ") + filename;
-            return;
+    fs::path proj(project_dir);
+    if (fs::exists(proj) && !fs::is_directory(proj)) return string("#16001: project dir path exists but is not a directory: ") + project_dir;
+    if (!fs::exists(proj)) {
+        try {
+            fs::create_directories(proj);
+        } catch (const std::exception &e) {
+            return string("#16002: failed to create project directory: ") + e.what();
         }
+    }
 
-        VulArgument va;
-        va.type = mtype.text().as_string();
-        va.name = mname.text().as_string();
-        pugi::xml_node mcomment = m.child("comment");
-        va.comment = mcomment ? mcomment.text().as_string() : string();
+    // create bak directory with timestamp to avoid collisions
+    std::time_t t = std::time(nullptr);
+    string bakName = string("bak_") + std::to_string((long long)t);
+    fs::path bakDir = proj / bakName;
 
-        if (va.name.empty()) {
-            err = string("#10012: member has empty <name> in bundle file: ") + filename;
-            return;
+    try {
+        fs::create_directories(bakDir);
+    } catch (const std::exception &e) {
+        return string("#16003: failed to create bak directory: ") + e.what();
+    }
+
+    // prepare subdirs
+    if (dirty_bundles) {
+        try { fs::create_directories(bakDir / "bundle"); } catch (const std::exception &e) { fs::remove_all(bakDir); return string("#16004: failed to create bak bundle dir: ") + e.what(); }
+    }
+    if (dirty_combines) {
+        try { fs::create_directories(bakDir / "combine"); } catch (const std::exception &e) { fs::remove_all(bakDir); return string("#16005: failed to create bak combine dir: ") + e.what(); }
+    }
+
+    // Save version info into {projectname}.vul XML file
+    VulProject vp;
+    vp.project_name = project_name;
+    vp.version = version;
+    vp.project_dir = project_dir;
+    // collect prefab dirs
+    for (const auto &kv : prefabs) {
+        vp.prefabs.push_back(std::make_pair(kv.first, kv.second.path));
+    }
+    err = serializeSaveProjectInfoToFile((bakDir / (project_name + ".vul")).string(), vp);
+    if (!err.empty()) {
+        err = string("#16006: failed to save project file: ") + err;
+        fs::remove_all(bakDir);
+        return err;
+    }
+
+    // Always save design.xml (top-level)
+    err = serializeSaveDesignToFile((bakDir / "design.xml").string(), 
+        instances,
+        pipes,
+        req_connections,
+        mod_pipe_connections,
+        pipe_mod_connections,
+        stalled_connections,
+        update_constraints,
+        vis_blocks,
+        vis_texts
+    );
+    if (!err.empty()) {
+        err = string("#16007: failed to save design file: ") + err;
+        fs::remove_all(bakDir);
+        return err;
+    }
+
+    // Save config lib if dirty
+    if (dirty_config_lib) {
+        err = serializeSaveConfigLibToFile((bakDir / "config.xml").string(), config_lib);
+        if (!err.empty()) {
+            err = string("#16008: failed to save config lib file: ") + err;
+            fs::remove_all(bakDir);
+            return err;
         }
-
-        vb.members.push_back(va);
     }
 
-    // insert or overwrite existing bundle
-    bundles[vb.name] = vb;
-}
-
-void VulDesign::_loadCombineFromFile(const string &filename, string &err) {
-    err.clear();
-
-    pugi::xml_document doc;
-    pugi::xml_parse_result res = doc.load_file(filename.c_str());
-    if (!res) {
-        err = string("#10013: Failed to load combine file: ") + filename + "; parser error: " + res.description();
-        return;
-    }
-
-    pugi::xml_node root = doc.child("combine");
-    if (!root) {
-        err = string("#10014: Missing root <combine> in file: ") + filename;
-        return;
-    }
-
-    pugi::xml_node nameNode = root.child("name");
-    if (!nameNode) {
-        err = string("#10015: combine missing <name> in file: ") + filename;
-        return;
-    }
-
-    VulCombine vc;
-    vc.name = nameNode.text().as_string();
-    pugi::xml_node commentNode = root.child("comment");
-    vc.comment = commentNode ? commentNode.text().as_string() : string();
-
-    if (vc.name.empty()) {
-        err = string("#10016: combine has empty <name> in file: ") + filename;
-        return;
-    }
-
-    // config entries
-    for (pugi::xml_node c : root.children("config")) {
-        pugi::xml_node cname = c.child("name");
-        if (!cname) {
-            err = string("#10017: config missing <name> in combine file: ") + filename;
-            return;
-        }
-        VulConfig cfg;
-        cfg.name = cname.text().as_string();
-        pugi::xml_node cvalue = c.child("value");
-        cfg.value = cvalue ? cvalue.text().as_string() : string();
-        extractConfigReferences(cfg); // populate cfg.references
-        pugi::xml_node ccomment = c.child("comment");
-        cfg.comment = ccomment ? ccomment.text().as_string() : string();
-        if (cfg.name.empty()) {
-            err = string("#10018: config has empty <name> in combine file: ") + filename;
-            return;
-        }
-        vc.config.push_back(cfg);
-    }
-
-    // pipein and pipeout
-    for (pugi::xml_node p : root.children("pipein")) {
-        pugi::xml_node pname = p.child("name");
-        pugi::xml_node ptype = p.child("type");
-        pugi::xml_node pcomment = p.child("comment");
-        VulPipePort vpp;
-        vpp.name = pname ? pname.text().as_string() : string();
-        vpp.type = ptype ? ptype.text().as_string() : string();
-        vpp.comment = pcomment ? pcomment.text().as_string() : string();
-        vc.pipein.push_back(vpp);
-    }
-    for (pugi::xml_node p : root.children("pipeout")) {
-        pugi::xml_node pname = p.child("name");
-        pugi::xml_node ptype = p.child("type");
-        pugi::xml_node pcomment = p.child("comment");
-        VulPipePort vpp;
-        vpp.name = pname ? pname.text().as_string() : string();
-        vpp.type = ptype ? ptype.text().as_string() : string();
-        vpp.comment = pcomment ? pcomment.text().as_string() : string();
-        vc.pipeout.push_back(vpp);
-    }
-
-    // requests
-    for (pugi::xml_node r : root.children("request")) {
-        VulRequest vr;
-        pugi::xml_node rname = r.child("name");
-        if (rname) vr.name = rname.text().as_string();
-        pugi::xml_node rcomment = r.child("comment");
-        vr.comment = rcomment ? rcomment.text().as_string() : string();
-
-        // args
-        for (pugi::xml_node a : r.children("arg")) {
-            pugi::xml_node aname = a.child("name");
-            pugi::xml_node atype = a.child("type");
-            if (!aname || !atype) {
-                err = string("#10019: request arg missing <name> or <type> in combine file: ") + filename;
-                return;
+    // Save all bundles if dirty (one file per bundle)
+    if (dirty_bundles) {
+        for (const auto &kv : bundles) {
+            const string fname = (bakDir / "bundle" / (kv.first + ".xml")).string();
+            err = serializeSaveBundleToFile(fname, kv.second);
+            if (!err.empty()) {
+                err = string("#16009: failed to save bundle '") + kv.first + "': " + err;
+                fs::remove_all(bakDir);
+                return err;
             }
-            VulArgument va;
-            va.name = aname.text().as_string();
-            va.type = atype.text().as_string();
-            pugi::xml_node acomment = a.child("comment");
-            va.comment = acomment ? acomment.text().as_string() : string();
-            vr.arg.push_back(va);
         }
+    }
 
-        // returns
-        for (pugi::xml_node ret : r.children("return")) {
-            pugi::xml_node rname2 = ret.child("name");
-            pugi::xml_node rtype2 = ret.child("type");
-            if (!rname2 || !rtype2) {
-                err = string("#10020: request return missing <name> or <type> in combine file: ") + filename;
-                return;
+    // Save all combines if dirty
+    if (dirty_combines) {
+        for (const auto &kv : combines) {
+            const string fname = (bakDir / "combine" / (kv.first + ".xml")).string();
+            err = serializeSaveCombineToFile(fname, kv.second);
+            if (!err.empty()) {
+                err = string("#16010: failed to save combine '") + kv.first + "': " + err;
+                fs::remove_all(bakDir);
+                return err;
             }
-            VulArgument va;
-            va.name = rname2.text().as_string();
-            va.type = rtype2.text().as_string();
-            pugi::xml_node rcomment2 = ret.child("comment");
-            va.comment = rcomment2 ? rcomment2.text().as_string() : string();
-            vr.ret.push_back(va);
         }
-
-        vc.request.push_back(vr);
     }
 
-    // services
-    for (pugi::xml_node s : root.children("service")) {
-        VulService vs;
-        pugi::xml_node sname = s.child("name");
-        if (sname) vs.name = sname.text().as_string();
-        pugi::xml_node scomment = s.child("comment");
-        vs.comment = scomment ? scomment.text().as_string() : string();
+    // At this point, all files are written to bakDir. Now atomically replace originals.
+    try {
+        // .vul file
+        fs::path origVul = proj / (project_name + ".vul");
+        if (fs::exists(origVul)) fs::remove(origVul);
+        fs::copy_file(bakDir / (project_name + ".vul"), origVul, fs::copy_options::overwrite_existing);
 
-        for (pugi::xml_node a : s.children("arg")) {
-            pugi::xml_node aname = a.child("name");
-            pugi::xml_node atype = a.child("type");
-            if (!aname || !atype) {
-                err = string("#10021: service arg missing <name> or <type> in combine file: ") + filename;
-                return;
-            }
-            VulArgument va;
-            va.name = aname.text().as_string();
-            va.type = atype.text().as_string();
-            pugi::xml_node acomment = a.child("comment");
-            va.comment = acomment ? acomment.text().as_string() : string();
-            vs.arg.push_back(va);
+        // design.xml
+        fs::path origDesign = proj / "design.xml";
+        if (fs::exists(origDesign)) fs::remove(origDesign);
+        fs::copy_file(bakDir / "design.xml", origDesign, fs::copy_options::overwrite_existing);
+
+        // config.xml
+        if (dirty_config_lib) {
+            if (fs::exists(proj / "config.xml")) fs::remove(proj / "config.xml");
+            fs::copy_file(bakDir / "config.xml", proj / "config.xml", fs::copy_options::overwrite_existing);
+            dirty_config_lib = false;
         }
 
-        for (pugi::xml_node ret : s.children("return")) {
-            pugi::xml_node rname2 = ret.child("name");
-            pugi::xml_node rtype2 = ret.child("type");
-            if (!rname2 || !rtype2) {
-                err = string("#10022: service return missing <name> or <type> in combine file: ") + filename;
-                return;
-            }
-            VulArgument va;
-            va.name = rname2.text().as_string();
-            va.type = rtype2.text().as_string();
-            pugi::xml_node rcomment2 = ret.child("comment");
-            va.comment = rcomment2 ? rcomment2.text().as_string() : string();
-            vs.ret.push_back(va);
+        // bundles
+        if (dirty_bundles) {
+            fs::path origBundleDir = proj / "bundle";
+            if (fs::exists(origBundleDir)) fs::remove_all(origBundleDir);
+            // copy directory
+            fs::copy(bakDir / "bundle", origBundleDir, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
+            dirty_bundles = false;
         }
 
-        // cppfunc
-        pugi::xml_node cpp = s.child("cppfunc");
-        if (cpp) {
-            pugi::xml_node code = cpp.child("code");
-            pugi::xml_node file = cpp.child("file");
-            pugi::xml_node name = cpp.child("name");
-            vs.cppfunc.code = code ? code.text().as_string() : string();
-            vs.cppfunc.file = file ? file.text().as_string() : string();
-            vs.cppfunc.name = name ? name.text().as_string() : string();
+        // combines
+        if (dirty_combines) {
+            fs::path origCombineDir = proj / "combine";
+            if (fs::exists(origCombineDir)) fs::remove_all(origCombineDir);
+            // copy directory
+            fs::copy(bakDir / "combine", origCombineDir, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
+            dirty_combines = false;
         }
 
-        vc.service.push_back(vs);
+        // cleanup bakDir
+        fs::remove_all(bakDir);
+    } catch (const std::exception &e) {
+        // try to cleanup bakDir, but do not remove anything else
+        try { fs::remove_all(bakDir); } catch (...) {}
+        return string("#16012: failed to replace project files: ") + e.what();
     }
 
-    // storage / storagenext / storagetick
-    auto parseStorageList = [&](const char *tag, vector<VulStorage> &out) {
-        for (pugi::xml_node st : root.children(tag)) {
-            pugi::xml_node sname = st.child("name");
-            pugi::xml_node stype = st.child("type");
-            if (!sname || !stype) {
-                err = string("#10023: ") + string(tag) + string(" item missing <name> or <type> in combine file: ") + filename;
-                return false;
-            }
-            VulStorage vs;
-            vs.name = sname.text().as_string();
-            vs.type = stype.text().as_string();
-            pugi::xml_node sval = st.child("value");
-            vs.value = sval ? sval.text().as_string() : string();
-            pugi::xml_node scomment = st.child("comment");
-            vs.comment = scomment ? scomment.text().as_string() : string();
-            out.push_back(vs);
-        }
-        return true;
-    };
-
-    if (!parseStorageList("storage", vc.storage)) return;
-    if (!parseStorageList("storagenext", vc.storagenext)) return;
-    if (!parseStorageList("storagetick", vc.storagetick)) return;
-
-    // stallable
-    pugi::xml_node stall = root.child("stallable");
-    vc.stallable = false;
-    if (stall) {
-        vc.stallable = true;
-    }
-
-    // tick / applytick / init cppfuncs
-    auto parseCppFunc = [&](const char *tag, VulCppFunc &out) {
-        pugi::xml_node node = root.child(tag);
-        if (!node) return;
-        pugi::xml_node cpp = node.child("cppfunc");
-        if (!cpp) return;
-        pugi::xml_node code = cpp.child("code");
-        pugi::xml_node file = cpp.child("file");
-        pugi::xml_node name = cpp.child("name");
-        out.code = code ? code.text().as_string() : string();
-        out.file = file ? file.text().as_string() : string();
-        out.name = name ? name.text().as_string() : string();
-    };
-
-    parseCppFunc("tick", vc.tick);
-    parseCppFunc("applytick", vc.applytick);
-    parseCppFunc("init", vc.init);
-
-    // insert into map
-    combines[vc.name] = vc;
-}
-
-void VulDesign::_loadDesignFromFile(const string &filename, string &err) {
-    err.clear();
-
-    pugi::xml_document doc;
-    pugi::xml_parse_result res = doc.load_file(filename.c_str());
-    if (!res) {
-        err = string("#10024: Failed to load design file: ") + filename + "; parser error: " + res.description();
-        return;
-    }
-
-    pugi::xml_node root = doc.child("design");
-    if (!root) {
-        err = string("#10025: Missing root <design> in file: ") + filename;
-        return;
-    }
-
-    auto parseVisual = [&](pugi::xml_node vnode, VulVisualization &vis) {
-        if (!vnode) return;
-        pugi::xml_node n;
-        n = vnode.child("x"); vis.x = n ? (long)n.text().as_llong() : 0;
-        n = vnode.child("y"); vis.y = n ? (long)n.text().as_llong() : 0;
-        n = vnode.child("w"); vis.w = n ? (long)n.text().as_llong() : 0;
-        n = vnode.child("h"); vis.h = n ? (long)n.text().as_llong() : 0;
-
-        vis.visible = false;
-        vis.enabled = false;
-        vis.selected = false;
-        n = vnode.child("visible"); if (n) { string v = n.text().as_string(); vis.visible = (v=="1"||v=="true"||v=="True"); }
-        n = vnode.child("enabled"); if (n) { string v = n.text().as_string(); vis.enabled = (v=="1"||v=="true"||v=="True"); }
-        n = vnode.child("selected"); if (n) { string v = n.text().as_string(); vis.selected = (v=="1"||v=="true"||v=="True"); }
-
-        n = vnode.child("color"); vis.color = n ? n.text().as_string() : string();
-        n = vnode.child("bordercolor"); vis.bordercolor = n ? n.text().as_string() : string();
-        n = vnode.child("borderwidth"); vis.borderwidth = n ? (unsigned int)n.text().as_llong() : 0u;
-    };
-
-    // instances
-    for (pugi::xml_node inst : root.children("instance")) {
-        pugi::xml_node nameNode = inst.child("name");
-        pugi::xml_node combineNode = inst.child("combine");
-        if (!nameNode || !combineNode) {
-            err = string("#10026: instance missing <name> or <combine> in design file: ") + filename;
-            return;
-        }
-        VulInstance vi;
-        vi.name = nameNode.text().as_string();
-        vi.combine = combineNode.text().as_string();
-        pugi::xml_node commentNode = inst.child("comment");
-        vi.comment = commentNode ? commentNode.text().as_string() : string();
-
-        // config overrides
-        for (pugi::xml_node c : inst.children("config")) {
-            pugi::xml_node cname = c.child("name");
-            pugi::xml_node cval = c.child("value");
-            if (!cname || !cval) {
-                err = string("#10027: instance config missing <name> or <value> in design file: ") + filename;
-                return;
-            }
-            vi.config_override.emplace_back(cname.text().as_string(), cval.text().as_string());
-        }
-
-        // visual
-        pugi::xml_node visNode = inst.child("visual");
-        parseVisual(visNode, vi.vis);
-
-        instances[vi.name] = vi;
-    }
-
-    // pipes
-    for (pugi::xml_node pnode : root.children("pipe")) {
-        pugi::xml_node nameNode = pnode.child("name");
-        pugi::xml_node typeNode = pnode.child("type");
-        if (!nameNode || !typeNode) {
-            err = string("#10028: pipe missing <name> or <type> in design file: ") + filename;
-            return;
-        }
-        VulPipe vp;
-        vp.name = nameNode.text().as_string();
-        vp.type = typeNode.text().as_string();
-        pugi::xml_node commentNode = pnode.child("comment");
-        vp.comment = commentNode ? commentNode.text().as_string() : string();
-        pugi::xml_node inNode = pnode.child("inputsize"); vp.inputsize = inNode ? (unsigned int)inNode.text().as_llong() : 0u;
-        pugi::xml_node outNode = pnode.child("outputsize"); vp.outputsize = outNode ? (unsigned int)outNode.text().as_llong() : 0u;
-        pugi::xml_node bufNode = pnode.child("buffersize"); vp.buffersize = bufNode ? (unsigned int)bufNode.text().as_llong() : 0u;
-        pugi::xml_node visNode = pnode.child("visual"); parseVisual(visNode, vp.vis);
-        pipes[vp.name] = vp;
-    }
-
-    // reqconn
-    for (pugi::xml_node rc : root.children("reqconn")) {
-        pugi::xml_node reqport = rc.child("reqport");
-        if (!reqport) {
-            err = string("#10029: reqconn missing <reqport> in design file: ") + filename;
-            return;
-        }
-        pugi::xml_node instn = reqport.child("instname");
-        pugi::xml_node portn = reqport.child("portname");
-        if (!instn || !portn) {
-            err = string("#10029: reqport missing <instname> or <portname> in design file: ") + filename;
-            return;
-        }
-        VulReqConnection vrc;
-        vrc.req_instance = instn.text().as_string();
-        vrc.req_name = portn.text().as_string();
-
-        pugi::xml_node servport = rc.child("servport");
-        if (!servport) {
-            err = string("#10030: reqconn missing <servport> in design file: ") + filename;
-            return;
-        }
-        pugi::xml_node sinst = servport.child("instname");
-        pugi::xml_node sport = servport.child("portname");
-        if (!sinst || !sport) {
-            err = string("#10030: reqconn missing <instname> or <portname> in design file: ") + filename;
-            return;
-        }
-        vrc.serv_instance = sinst.text().as_string();
-        vrc.serv_name = sport.text().as_string();
-
-        pugi::xml_node visNode = rc.child("visual"); parseVisual(visNode, vrc.vis);
-        req_connections.push_back(vrc);
-    }
-
-    // modpipe and pipemod
-    for (pugi::xml_node mp : root.children("modpipe")) {
-        pugi::xml_node instn = mp.child("instname");
-        pugi::xml_node portn = mp.child("portname");
-        pugi::xml_node pipen = mp.child("pipename");
-        pugi::xml_node pindex = mp.child("portindex");
-        if (!instn || !portn || !pipen || !pindex) {
-            err = string("#10032: modpipe missing fields in design file: ") + filename;
-            return;
-        }
-        VulModulePipeConnection vmp;
-        vmp.instance = instn.text().as_string();
-    vmp.pipeoutport = portn.text().as_string();
-        vmp.pipe = pipen.text().as_string();
-        vmp.portindex = (unsigned int)pindex.text().as_llong();
-        pugi::xml_node visNode = mp.child("visual"); parseVisual(visNode, vmp.vis);
-        mod_pipe_connections.push_back(vmp);
-    }
-
-    for (pugi::xml_node pm : root.children("pipemod")) {
-        pugi::xml_node instn = pm.child("instname");
-        pugi::xml_node portn = pm.child("portname");
-        pugi::xml_node pipen = pm.child("pipename");
-        pugi::xml_node pindex = pm.child("portindex");
-        if (!instn || !portn || !pipen || !pindex) {
-            err = string("#10033: pipemod missing fields in design file: ") + filename;
-            return;
-        }
-        VulPipeModuleConnection vpm;
-        vpm.instance = instn.text().as_string();
-    vpm.pipeinport = portn.text().as_string();
-        vpm.pipe = pipen.text().as_string();
-        vpm.portindex = (unsigned int)pindex.text().as_llong();
-        pugi::xml_node visNode = pm.child("visual"); parseVisual(visNode, vpm.vis);
-        pipe_mod_connections.push_back(vpm);
-    }
-
-    // stalledconn
-    for (pugi::xml_node sc : root.children("stalledconn")) {
-        pugi::xml_node src = sc.child("src");
-        pugi::xml_node dest = sc.child("dest");
-        if (!src || !dest) {
-            err = string("#10034: stalledconn missing <src> or <dest> in design file: ") + filename;
-            return;
-        }
-        pugi::xml_node sname = src.child("instname");
-        pugi::xml_node dname = dest.child("instname");
-        if (!sname || !dname) {
-            err = string("#10035: stalledconn src/dest missing <instname> in design file: ") + filename;
-            return;
-        }
-        VulStalledConnection vsc;
-        vsc.src_instance = sname.text().as_string();
-        vsc.dest_instance = dname.text().as_string();
-        pugi::xml_node visNode = sc.child("visual"); parseVisual(visNode, vsc.vis);
-        stalled_connections.push_back(vsc);
-    }
-
-    // update constraints
-    for (pugi::xml_node uc : root.children("updconstraint")) {
-        pugi::xml_node former = uc.child("former");
-        pugi::xml_node later = uc.child("later");
-        if (!former || !later) {
-            err = string("#10036: updconstraint missing <former> or <later> in design file: ") + filename;
-            return;
-        }
-        pugi::xml_node fname = former.child("instname");
-        pugi::xml_node lname = later.child("instname");
-        if (!fname || !lname) {
-            err = string("#10037: updconstraint former/later missing <instname> in design file: ") + filename;
-            return;
-        }
-        VulUpdateSequence vus;
-        vus.former_instance = fname.text().as_string();
-        vus.latter_instance = lname.text().as_string();
-        pugi::xml_node visNode = uc.child("visual"); parseVisual(visNode, vus.vis);
-        update_constraints.push_back(vus);
-    }
-
-    // blocks and texts
-    for (pugi::xml_node b : root.children("block")) {
-        pugi::xml_node nameNode = b.child("name");
-        if (!nameNode) {
-            err = string("#10038: block missing <name> in design file: ") + filename;
-            return;
-        }
-        VulVisBlock vb;
-        vb.name = nameNode.text().as_string();
-        pugi::xml_node visNode = b.child("visual"); parseVisual(visNode, vb.vis);
-        vis_blocks.push_back(vb);
-    }
-
-    for (pugi::xml_node t : root.children("text")) {
-        pugi::xml_node textNode = t.child("text");
-        if (!textNode) {
-            err = string("#10039: text missing <text> in design file: ") + filename;
-            return;
-        }
-        VulVisText vt;
-        vt.text = textNode.text().as_string();
-        pugi::xml_node visNode = t.child("visual"); parseVisual(visNode, vt.vis);
-        vis_texts.push_back(vt);
-    }
+    return string();
 }
 
 
@@ -1409,380 +1093,6 @@ string VulDesign::_checkSeqConnectionError() {
             vector<string> path;
             if (dfs(iname, path)) return cycle_msg.empty() ? string("#15009: update graph cycle detected") : cycle_msg;
         }
-    }
-
-    return string();
-}
-
-
-
-// Helper to write visualization node
-static void writeVisualNode(pugi::xml_node parent, const VulVisualization &vis) {
-    pugi::xml_node vnode = parent.append_child("visual");
-    vnode.append_child("x").text().set(std::to_string(vis.x).c_str());
-    vnode.append_child("y").text().set(std::to_string(vis.y).c_str());
-    vnode.append_child("w").text().set(std::to_string(vis.w).c_str());
-    vnode.append_child("h").text().set(std::to_string(vis.h).c_str());
-    vnode.append_child("visible").text().set(vis.visible ? "1" : "0");
-    vnode.append_child("enabled").text().set(vis.enabled ? "1" : "0");
-    vnode.append_child("selected").text().set(vis.selected ? "1" : "0");
-    if (!vis.color.empty()) vnode.append_child("color").text().set(vis.color.c_str());
-    if (!vis.bordercolor.empty()) vnode.append_child("bordercolor").text().set(vis.bordercolor.c_str());
-    vnode.append_child("borderwidth").text().set(std::to_string(vis.borderwidth).c_str());
-}
-
-void VulDesign::_saveConfigLibToFile(const string &filename, string &err) {
-    err.clear();
-    pugi::xml_document doc;
-    pugi::xml_node root = doc.append_child("configlib");
-    for (const auto &kv : config_lib) {
-        const VulConfigItem &ci = kv.second;
-        pugi::xml_node item = root.append_child("configitem");
-        item.append_child("name").text().set(ci.name.c_str());
-        item.append_child("value").text().set(ci.value.c_str());
-        if (!ci.comment.empty()) item.append_child("comment").text().set(ci.comment.c_str());
-    }
-
-    bool ok = doc.save_file(filename.c_str(), "  ");
-    if (!ok) err = string("#16001: failed to save configlib to file: ") + filename;
-}
-
-void VulDesign::_saveBundleToFile(const string &filename, const VulBundle &vb, string &err) {
-    err.clear();
-    pugi::xml_document doc;
-    pugi::xml_node root = doc.append_child("bundle");
-    root.append_child("name").text().set(vb.name.c_str());
-    if (!vb.comment.empty()) root.append_child("comment").text().set(vb.comment.c_str());
-
-    for (const VulArgument &m : vb.members) {
-        pugi::xml_node mn = root.append_child("member");
-        mn.append_child("name").text().set(m.name.c_str());
-        mn.append_child("type").text().set(m.type.c_str());
-        if (!m.comment.empty()) mn.append_child("comment").text().set(m.comment.c_str());
-    }
-
-    bool ok = doc.save_file(filename.c_str(), "  ");
-    if (!ok) err = string("#16002: failed to save bundle to file: ") + filename;
-}
-
-void VulDesign::_saveCombineToFile(const string &filename, const VulCombine &vc, string &err) {
-    err.clear();
-    pugi::xml_document doc;
-    pugi::xml_node root = doc.append_child("combine");
-    root.append_child("name").text().set(vc.name.c_str());
-    if (!vc.comment.empty()) root.append_child("comment").text().set(vc.comment.c_str());
-
-    // config entries
-    for (const VulConfig &cfg : vc.config) {
-        pugi::xml_node cn = root.append_child("config");
-        cn.append_child("name").text().set(cfg.name.c_str());
-        cn.append_child("value").text().set(cfg.value.c_str());
-        if (!cfg.comment.empty()) cn.append_child("comment").text().set(cfg.comment.c_str());
-    }
-
-    // pipein
-    for (const VulPipePort &p : vc.pipein) {
-        pugi::xml_node pn = root.append_child("pipein");
-        pn.append_child("name").text().set(p.name.c_str());
-        pn.append_child("type").text().set(p.type.c_str());
-        if (!p.comment.empty()) pn.append_child("comment").text().set(p.comment.c_str());
-    }
-    // pipeout
-    for (const VulPipePort &p : vc.pipeout) {
-        pugi::xml_node pn = root.append_child("pipeout");
-        pn.append_child("name").text().set(p.name.c_str());
-        pn.append_child("type").text().set(p.type.c_str());
-        if (!p.comment.empty()) pn.append_child("comment").text().set(p.comment.c_str());
-    }
-
-    // requests
-    for (const VulRequest &r : vc.request) {
-        pugi::xml_node rn = root.append_child("request");
-        if (!r.name.empty()) rn.append_child("name").text().set(r.name.c_str());
-        if (!r.comment.empty()) rn.append_child("comment").text().set(r.comment.c_str());
-        for (const VulArgument &a : r.arg) {
-            pugi::xml_node an = rn.append_child("arg");
-            an.append_child("name").text().set(a.name.c_str());
-            an.append_child("type").text().set(a.type.c_str());
-            if (!a.comment.empty()) an.append_child("comment").text().set(a.comment.c_str());
-        }
-        for (const VulArgument &rt : r.ret) {
-            pugi::xml_node ret = rn.append_child("return");
-            ret.append_child("name").text().set(rt.name.c_str());
-            ret.append_child("type").text().set(rt.type.c_str());
-            if (!rt.comment.empty()) ret.append_child("comment").text().set(rt.comment.c_str());
-        }
-    }
-
-    // services
-    for (const VulService &s : vc.service) {
-        pugi::xml_node sn = root.append_child("service");
-        if (!s.name.empty()) sn.append_child("name").text().set(s.name.c_str());
-        if (!s.comment.empty()) sn.append_child("comment").text().set(s.comment.c_str());
-        for (const VulArgument &a : s.arg) {
-            pugi::xml_node an = sn.append_child("arg");
-            an.append_child("name").text().set(a.name.c_str());
-            an.append_child("type").text().set(a.type.c_str());
-            if (!a.comment.empty()) an.append_child("comment").text().set(a.comment.c_str());
-        }
-        for (const VulArgument &rt : s.ret) {
-            pugi::xml_node ret = sn.append_child("return");
-            ret.append_child("name").text().set(rt.name.c_str());
-            ret.append_child("type").text().set(rt.type.c_str());
-            if (!rt.comment.empty()) ret.append_child("comment").text().set(rt.comment.c_str());
-        }
-        if (!s.cppfunc.code.empty() || !s.cppfunc.file.empty() || !s.cppfunc.name.empty()) {
-            pugi::xml_node cpp = sn.append_child("cppfunc");
-            if (!s.cppfunc.code.empty()) cpp.append_child("code").text().set(s.cppfunc.code.c_str());
-            if (!s.cppfunc.file.empty()) cpp.append_child("file").text().set(s.cppfunc.file.c_str());
-            if (!s.cppfunc.name.empty()) cpp.append_child("name").text().set(s.cppfunc.name.c_str());
-        }
-    }
-
-    // storage lists
-    auto writeStorageList = [&](const char *tag, const vector<VulStorage> &lst) {
-        for (const VulStorage &st : lst) {
-            pugi::xml_node sn = root.append_child(tag);
-            sn.append_child("name").text().set(st.name.c_str());
-            sn.append_child("type").text().set(st.type.c_str());
-            if (!st.value.empty()) sn.append_child("value").text().set(st.value.c_str());
-            if (!st.comment.empty()) sn.append_child("comment").text().set(st.comment.c_str());
-        }
-    };
-
-    writeStorageList("storage", vc.storage);
-    writeStorageList("storagenext", vc.storagenext);
-    writeStorageList("storagetick", vc.storagetick);
-
-    if (vc.stallable) root.append_child("stallable");
-
-    auto writeCppFunc = [&](const char *tag, const VulCppFunc &cf) {
-        if (cf.code.empty() && cf.file.empty() && cf.name.empty()) return;
-        pugi::xml_node tn = root.append_child(tag);
-        pugi::xml_node cpp = tn.append_child("cppfunc");
-        if (!cf.code.empty()) cpp.append_child("code").text().set(cf.code.c_str());
-        if (!cf.file.empty()) cpp.append_child("file").text().set(cf.file.c_str());
-        if (!cf.name.empty()) cpp.append_child("name").text().set(cf.name.c_str());
-    };
-
-    writeCppFunc("tick", vc.tick);
-    writeCppFunc("applytick", vc.applytick);
-    writeCppFunc("init", vc.init);
-
-    bool ok = doc.save_file(filename.c_str(), "  ");
-    if (!ok) err = string("#16003: failed to save combine to file: ") + filename;
-}
-
-void VulDesign::_saveDesignToFile(const string &filename, string &err) {
-    err.clear();
-    pugi::xml_document doc;
-    pugi::xml_node root = doc.append_child("design");
-
-    // instances
-    for (const auto &kv : instances) {
-        const VulInstance &vi = kv.second;
-        pugi::xml_node in = root.append_child("instance");
-        in.append_child("name").text().set(vi.name.c_str());
-        in.append_child("combine").text().set(vi.combine.c_str());
-        if (!vi.comment.empty()) in.append_child("comment").text().set(vi.comment.c_str());
-        for (const auto &co : vi.config_override) {
-            pugi::xml_node cn = in.append_child("config");
-            cn.append_child("name").text().set(co.first.c_str());
-            cn.append_child("value").text().set(co.second.c_str());
-        }
-        writeVisualNode(in, vi.vis);
-    }
-
-    // pipes
-    for (const auto &kv : pipes) {
-        const VulPipe &vp = kv.second;
-        pugi::xml_node pn = root.append_child("pipe");
-        pn.append_child("name").text().set(vp.name.c_str());
-        pn.append_child("type").text().set(vp.type.c_str());
-        if (!vp.comment.empty()) pn.append_child("comment").text().set(vp.comment.c_str());
-        pn.append_child("inputsize").text().set(std::to_string(vp.inputsize).c_str());
-        pn.append_child("outputsize").text().set(std::to_string(vp.outputsize).c_str());
-        pn.append_child("buffersize").text().set(std::to_string(vp.buffersize).c_str());
-        writeVisualNode(pn, vp.vis);
-    }
-
-    // reqconn
-    for (const VulReqConnection &rc : req_connections) {
-        pugi::xml_node rcn = root.append_child("reqconn");
-        pugi::xml_node rp = rcn.append_child("reqport");
-        rp.append_child("instname").text().set(rc.req_instance.c_str());
-        rp.append_child("portname").text().set(rc.req_name.c_str());
-        pugi::xml_node sn = rcn.append_child("servport");
-        sn.append_child("instname").text().set(rc.serv_instance.c_str());
-        sn.append_child("portname").text().set(rc.serv_name.c_str());
-        writeVisualNode(rcn, rc.vis);
-    }
-
-    // modpipe
-    for (const VulModulePipeConnection &mp : mod_pipe_connections) {
-        pugi::xml_node mn = root.append_child("modpipe");
-        mn.append_child("instname").text().set(mp.instance.c_str());
-        mn.append_child("portname").text().set(mp.pipeoutport.c_str());
-        mn.append_child("pipename").text().set(mp.pipe.c_str());
-        mn.append_child("portindex").text().set(std::to_string(mp.portindex).c_str());
-        writeVisualNode(mn, mp.vis);
-    }
-
-    // pipemod
-    for (const VulPipeModuleConnection &pm : pipe_mod_connections) {
-        pugi::xml_node pn = root.append_child("pipemod");
-        pn.append_child("instname").text().set(pm.instance.c_str());
-        pn.append_child("portname").text().set(pm.pipeinport.c_str());
-        pn.append_child("pipename").text().set(pm.pipe.c_str());
-        pn.append_child("portindex").text().set(std::to_string(pm.portindex).c_str());
-        writeVisualNode(pn, pm.vis);
-    }
-
-    // stalledconn
-    for (const VulStalledConnection &sc : stalled_connections) {
-        pugi::xml_node sn = root.append_child("stalledconn");
-        pugi::xml_node src = sn.append_child("src");
-        src.append_child("instname").text().set(sc.src_instance.c_str());
-        pugi::xml_node dest = sn.append_child("dest");
-        dest.append_child("instname").text().set(sc.dest_instance.c_str());
-        writeVisualNode(sn, sc.vis);
-    }
-
-    // update constraints (tag used in load: updconstraint)
-    for (const VulUpdateSequence &us : update_constraints) {
-        pugi::xml_node un = root.append_child("updconstraint");
-        pugi::xml_node former = un.append_child("former");
-        former.append_child("instname").text().set(us.former_instance.c_str());
-        pugi::xml_node later = un.append_child("later");
-        later.append_child("instname").text().set(us.latter_instance.c_str());
-        writeVisualNode(un, us.vis);
-    }
-
-    // blocks
-    for (const VulVisBlock &vb : vis_blocks) {
-        pugi::xml_node bn = root.append_child("block");
-        bn.append_child("name").text().set(vb.name.c_str());
-        writeVisualNode(bn, vb.vis);
-    }
-
-    // texts
-    for (const VulVisText &vt : vis_texts) {
-        pugi::xml_node tn = root.append_child("text");
-        tn.append_child("text").text().set(vt.text.c_str());
-        writeVisualNode(tn, vt.vis);
-    }
-
-    bool ok = doc.save_file(filename.c_str(), "  ");
-    if (!ok) err = string("#16004: failed to save design to file: ") + filename;
-}
-
-string VulDesign::saveProject() {
-    namespace fs = std::filesystem;
-    string err;
-
-    if (project_dir.empty()) return string("#16005: project_dir is empty");
-    fs::path proj(project_dir);
-    if (!fs::exists(proj) || !fs::is_directory(proj)) return string("#16005: project dir does not exist: ") + project_dir;
-
-    // create bak directory with timestamp to avoid collisions
-    std::time_t t = std::time(nullptr);
-    string bakName = string("bak_") + std::to_string((long long)t);
-    fs::path bakDir = proj / bakName;
-
-    try {
-        fs::create_directories(bakDir);
-    } catch (const std::exception &e) {
-        return string("#16006: failed to create bak directory: ") + e.what();
-    }
-
-    // prepare subdirs
-    if (dirty_bundles) {
-        try { fs::create_directories(bakDir / "bundle"); } catch (const std::exception &e) { fs::remove_all(bakDir); return string("#16006: failed to create bak bundle dir: ") + e.what(); }
-    }
-    if (dirty_combines) {
-        try { fs::create_directories(bakDir / "combine"); } catch (const std::exception &e) { fs::remove_all(bakDir); return string("#16006: failed to create bak combine dir: ") + e.what(); }
-    }
-
-    // Save version info into {projectname}.vul XML file
-    {
-        pugi::xml_document doc;
-        pugi::xml_node root = doc.append_child("project");
-        root.append_child("version").text().set((std::to_string(std::get<0>(version)) + "." + std::to_string(std::get<1>(version)) + "." + std::to_string(std::get<2>(version))).c_str());
-        string vulFileName = (bakDir / (project_name + ".vul")).string();
-        doc.save_file(vulFileName.c_str());
-    }
-
-    // Always save design.xml (top-level)
-    _saveDesignToFile((bakDir / "design.xml").string(), err);
-    if (!err.empty()) { fs::remove_all(bakDir); return err; }
-
-    // Save config lib if dirty
-    if (dirty_config_lib) {
-        _saveConfigLibToFile((bakDir / "config.xml").string(), err);
-        if (!err.empty()) { fs::remove_all(bakDir); return err; }
-    }
-
-    // Save all bundles if dirty (one file per bundle)
-    if (dirty_bundles) {
-        for (const auto &kv : bundles) {
-            const string fname = (bakDir / "bundle" / (kv.first + ".xml")).string();
-            _saveBundleToFile(fname, kv.second, err);
-            if (!err.empty()) { fs::remove_all(bakDir); return err; }
-        }
-    }
-
-    // Save all combines if dirty
-    if (dirty_combines) {
-        for (const auto &kv : combines) {
-            const string fname = (bakDir / "combine" / (kv.first + ".xml")).string();
-            _saveCombineToFile(fname, kv.second, err);
-            if (!err.empty()) { fs::remove_all(bakDir); return err; }
-        }
-    }
-
-    // At this point, all files are written to bakDir. Now atomically replace originals.
-    try {
-        // .vul file
-        fs::path origVul = proj / (project_name + ".vul");
-        if (fs::exists(origVul)) fs::remove(origVul);
-        fs::copy_file(bakDir / (project_name + ".vul"), origVul, fs::copy_options::overwrite_existing);
-
-        // design.xml
-        fs::path origDesign = proj / "design.xml";
-        if (fs::exists(origDesign)) fs::remove(origDesign);
-        fs::copy_file(bakDir / "design.xml", origDesign, fs::copy_options::overwrite_existing);
-
-        // config.xml
-        if (dirty_config_lib) {
-            if (fs::exists(proj / "config.xml")) fs::remove(proj / "config.xml");
-            fs::copy_file(bakDir / "config.xml", proj / "config.xml", fs::copy_options::overwrite_existing);
-            dirty_config_lib = false;
-        }
-
-        // bundles
-        if (dirty_bundles) {
-            fs::path origBundleDir = proj / "bundle";
-            if (fs::exists(origBundleDir)) fs::remove_all(origBundleDir);
-            // copy directory
-            fs::copy(bakDir / "bundle", origBundleDir, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
-            dirty_bundles = false;
-        }
-
-        // combines
-        if (dirty_combines) {
-            fs::path origCombineDir = proj / "combine";
-            if (fs::exists(origCombineDir)) fs::remove_all(origCombineDir);
-            // copy directory
-            fs::copy(bakDir / "combine", origCombineDir, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
-            dirty_combines = false;
-        }
-
-        // cleanup bakDir
-        fs::remove_all(bakDir);
-    } catch (const std::exception &e) {
-        // try to cleanup bakDir, but do not remove anything else
-        try { fs::remove_all(bakDir); } catch (...) {}
-        return string("#16007: failed to replace project files: ") + e.what();
     }
 
     return string();

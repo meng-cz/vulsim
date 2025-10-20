@@ -7,6 +7,7 @@ using std::vector;
 using std::pair;
 using std::string;
 using std::unordered_set;
+using std::tuple;
 
 /**
  * @brief Check if the given name is a valid identifier.
@@ -26,6 +27,13 @@ bool isValidIdentifier(const string &s);
 bool isBasicVulType(const string &s);
 
 typedef struct {
+    string project_name;
+    string project_dir;
+    tuple<int, int, int> version;               // major, minor, patch
+    vector<std::pair<string, string>> prefabs;  // name, directory path
+} VulProject;
+
+typedef struct {
     string type;
     string name;
     string comment;
@@ -36,6 +44,7 @@ typedef struct {
     string comment;
     vector<VulArgument> members;
     vector<string> nested_bundles; // Names of bundles used as member types
+    vector<string> ref_prefabs; // Names of prefabs depending on this bundle
 } VulBundle;
 
 typedef struct {
@@ -108,6 +117,22 @@ typedef struct {
     vector<VulConfig> config;
     bool stallable;
 } VulCombine;
+
+typedef struct {
+    string name;
+    string path;
+    string comment;
+    
+    vector<VulPipePort> pipein;
+    vector<VulPipePort> pipeout;
+    vector<VulRequest> request;
+    vector<VulService> service;
+    vector<VulConfig> config;
+
+    vector<string> ref_bundles; // Names of bundles this prefab depends on
+
+    bool stallable;
+} VulPrefab;
 
 typedef struct {
     long x = 0, y = 0;

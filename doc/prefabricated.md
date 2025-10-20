@@ -23,7 +23,6 @@
 
 ```
 |-- prefab
-  |-- name
   |-- comment
   |-- [config]
     |-- name
