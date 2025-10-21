@@ -14,9 +14,10 @@ else ()
         set(CMAKE_CXX_FLAGS "-std=c++17 -g -O2")
 endif ()
 
-include_directories( . )
+include_directories( ./src )
 
-file(GLOB_RECURSE ALL_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+file(GLOB CORE_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+file(GLOB TUI_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/tui/*.cpp")
 
-add_executable(vulconsole ${ALL_CXX_SRC})
+add_executable(vulconsole ${CORE_CXX_SRC} ${TUI_CXX_SRC})
 
