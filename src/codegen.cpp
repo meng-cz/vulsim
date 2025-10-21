@@ -17,6 +17,46 @@
 
 namespace fs = std::filesystem;
 
+
+/**
+ * @brief Generate C++ header code for all bundles in the design.
+ * @param design The VulDesign object containing the bundles.
+ * @param headerlines Output vector to hold the generated header lines.
+ * @param with_pragma_once Whether to include #pragma once at the top of the header.
+ * @return A unique_ptr to a vector of strings containing any error messages encountered during generation.
+ */
+unique_ptr<vector<string>> codegenBundlesHeader(VulDesign &design, vector<string> &headerlines, bool with_pragma_once) {
+
+    headerlines.push_back("// Auto-generated bundle.h");
+    headerlines.push_back("// Please do not modify this file directly");
+    headerlines.push_back("");
+    if (with_pragma_once) {
+        headerlines.push_back("#pragma once");
+        headerlines.push_back("");
+    }
+    headerlines.push_back("#include \"common.h\"");
+    headerlines.push_back("");
+    for (auto &vbentry : design.bundles) {
+        VulBundle &vb = vbentry.second;
+        headerlines.push_back("#ifndef BUNDLE_" + vb.name + "_H");
+        headerlines.push_back("#define BUNDLE_" + vb.name + "_H");
+        if (!vb.members.empty()) {
+            headerlines.push_back("typedef struct {");
+            for (const VulArgument &m : vb.members) {
+                string line = "    " + m.type + " " + m.name + ";";
+                if (!m.comment.empty()) line += " // " + m.comment;
+                headerlines.push_back(line);
+            }
+            headerlines.push_back("} " + vb.name + ";");
+        }
+        headerlines.push_back("#endif // BUNDLE_" + vb.name + "_H");
+        headerlines.push_back("");
+    }
+
+    return nullptr;
+}
+
+
 /**
  * @brief Generate C++ code for simulating a combine.
  * This includes generating the header lines ({combine_name}.h) and the C++ source lines ({combine_name}.cpp).
@@ -465,6 +505,10 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
         cpplines.push_back("#include \"" + combinepair.first + ".h\"");
     }
     cpplines.push_back("");
+    // prefab headers
+    for (const auto &prefabpair : design.prefabs) {
+        cpplines.push_back("#include \"" + prefabpair.first + ".h\"");
+    }
 
     // instance pointer declarations
     // unique_ptr<$combine$> _instance_$name$;
@@ -527,12 +571,12 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     for (const auto &vipair : design.instances) {
         const string &instname = vipair.first;
         const VulInstance &vi = vipair.second;
-        auto cbit = design.combines.find(vi.combine);
-        if (cbit == design.combines.end()) {
+        unique_ptr<VulCombine> combineptr = design.getOrFakeCombineReadonly(vi.combine);
+        if (!combineptr) {
             err->push_back(string("Error: combine not found for instance '") + instname + "': " + vi.combine);
             return err;
         }
-        const VulCombine &vc = cbit->second;
+        const VulCombine &vc = *combineptr;
         for (const VulRequest &vr : vc.request) {
             string argsig = codeGenerateFunctionArgumentSignature(vr.arg, vr.ret);
             string argnames = _genArgNames(vr.arg, vr.ret);
@@ -568,12 +612,12 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     for (const auto &vipair : design.instances) {
         const string &instname = vipair.first;
         const VulInstance &vi = vipair.second;
-        auto cbit = design.combines.find(vi.combine);
-        if (cbit == design.combines.end()) {
+        unique_ptr<VulCombine> combineptr = design.getOrFakeCombineReadonly(vi.combine);
+        if (!combineptr) {
             err->push_back(string("Error: combine not found for instance '") + instname + "': " + vi.combine);
             return err;
         }
-        const VulCombine &vc = cbit->second;
+        const VulCombine &vc = *combineptr;
         if (vc.stallable) {
             cpplines.push_back("void _stall_" + instname + "() {");
             auto connit = stalled_connect_map.find(instname);
@@ -616,12 +660,12 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     for (const auto &vipair : design.instances) {
         const string &instname = vipair.first;
         const VulInstance &vi = vipair.second;
-        auto cbit = design.combines.find(vi.combine);
-        if (cbit == design.combines.end()) {
+        unique_ptr<VulCombine> combineptr = design.getOrFakeCombineReadonly(vi.combine);
+        if (!combineptr) {
             err->push_back(string("Error: combine not found for instance '") + instname + "': " + vi.combine);
             return err;
         }
-        const VulCombine &vc = cbit->second;
+        const VulCombine &vc = *combineptr;
         cpplines.push_back("    {");
         cpplines.push_back("        " + vc.name + "::ConstructorArguments args;");
         for (const VulPipePort &pp : vc.pipein) {
@@ -824,7 +868,15 @@ unique_ptr<vector<string>> codegenProject(VulDesign &design, const string &libdi
 
     // generate bundle.h
     {
-        unique_ptr<vector<string>> bundlelines = codeGenerateBundleHeaderFile(design.bundles);
+        vector<string> bundlelines;
+        unique_ptr<vector<string>> localerr = codegenBundlesHeader(design, bundlelines);
+        if (localerr && !localerr->empty()) {
+            err->push_back(string("Error: failed to generate bundle.h"));
+            for (const string &e : *localerr) {
+                err->push_back("  " + e);
+            }
+            return err;
+        }
         // write to outdir/bundle.h
         fs::path bundlefile = outpath / "bundle.h";
         std::ofstream ofs(bundlefile);
@@ -832,7 +884,7 @@ unique_ptr<vector<string>> codegenProject(VulDesign &design, const string &libdi
             err->push_back(string("Error: failed to open output file for writing: ") + bundlefile.string());
             return err;
         }
-        for (const string &line : *bundlelines) {
+        for (const string &line : bundlelines) {
             ofs << line << std::endl;
         }
         ofs.close();
@@ -984,6 +1036,56 @@ unique_ptr<vector<string>> codegenProject(VulDesign &design, const string &libdi
         if (ec) {
             err->push_back(string("Error: failed to copy global.h from ") + globalsrc.string() + " to " + globaldst.string() + " : " + ec.message());
             return err;
+        }
+    }
+
+    // copy all prefab_dir/{prefabname}.h and prefab_dir/source/*.cpp to outdir
+    {
+        for (const auto &prefabpair : design.prefabs) {
+            const string &prefabname = prefabpair.first;
+            const VulPrefab &vp = prefabpair.second;
+            // copy prefab header
+            fs::path prefabsrc = fs::path(vp.path) / (prefabname + ".h");
+            fs::path prefabdst = outpath / (prefabname + ".h");
+            std::error_code ec;
+            fs::copy_file(prefabsrc, prefabdst, fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                err->push_back(string("Error: failed to copy prefab file from ") + prefabsrc.string() + " to " + prefabdst.string() + " : " + ec.message());
+                return err;
+            }
+            // copy prefab_dir/source/*.cpp unrecursively
+            fs::path sourcesrcdir = fs::path(vp.path) / "source";
+            fs::path sourcedstd = outpath;
+            for (auto it = fs::directory_iterator(sourcesrcdir, fs::directory_options::skip_permission_denied, ec);
+                 it != fs::directory_iterator(); it.increment(ec)) {
+                if (ec) {
+                    err->push_back(string("Error: failed while iterating prefab source dir: ") + ec.message());
+                    return err;
+                }
+
+                const fs::path src = it->path();
+                if (!fs::is_regular_file(src, ec)) {
+                    if (ec) {
+                        err->push_back(string("Error: failed to stat path: ") + src.string() + " : " + ec.message());
+                        return err;
+                    }
+                    // skip non-regular files
+                    continue;
+                }
+                if (src.extension() != ".cpp") {
+                    // skip non-cpp files
+                    continue;
+                }
+
+                fs::path dst = sourcedstd / src.filename();
+
+                // copy file
+                fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+                if (ec) {
+                    err->push_back(string("Error: failed to copy prefab source file from ") + src.string() + " to " + dst.string() + " : " + ec.message());
+                    return err;
+                }
+            }
         }
     }
 

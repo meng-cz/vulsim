@@ -17,6 +17,15 @@ using std::vector;
 using std::string;
 
 /**
+ * @brief Generate C++ header code for all bundles in the design.
+ * @param design The VulDesign object containing the bundles.
+ * @param headerlines Output vector to hold the generated header lines.
+ * @param with_pragma_once Whether to include #pragma once at the top of the header.
+ * @return A unique_ptr to a vector of strings containing any error messages encountered during generation.
+ */
+unique_ptr<vector<string>> codegenBundlesHeader(VulDesign &design, vector<string> &headerlines, bool with_pragma_once = true);
+
+/**
  * @brief Generate C++ code for simulating a combine.
  * This includes generating the header lines ({combine_name}.h) and the C++ source lines ({combine_name}.cpp).
  * @param design The VulDesign object containing the combine and related definitions.
