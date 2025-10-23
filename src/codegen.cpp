@@ -586,7 +586,7 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
                 auto reqit = connit->second.find(vr.name);
                 if (reqit != connit->second.end()) {
                     for (const auto &pair : reqit->second) {
-                        cpplines.push_back("    _instance_" + pair.first + "->_service_" + pair.second + "(" + argnames + ");");
+                        cpplines.push_back("    _instance_" + pair.first + "->" + pair.second + "(" + argnames + ");");
                     }
                 }
             }
