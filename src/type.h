@@ -88,6 +88,14 @@ typedef struct {
 } VulStorage;
 
 typedef struct {
+    string type;
+    string name;
+    string size;
+    string value;
+    string comment;
+} VulStorageArray;
+
+typedef struct {
     string name;
     string value;
     string comment;
@@ -117,6 +125,7 @@ typedef struct {
     vector<VulStorage> storage;
     vector<VulStorage> storagenext;
     vector<VulStorage> storagetick;
+    vector<VulStorageArray> storagenextarray;
     VulCppFunc tick;
     VulCppFunc applytick;
     VulCppFunc init;

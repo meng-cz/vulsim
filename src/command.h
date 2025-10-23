@@ -164,6 +164,21 @@ string cmdSetupCombineStorageNext(VulDesign &design, const string &combinename, 
 string cmdSetupCombineStorageTick(VulDesign &design, const string &combinename, const string &storagename, const string &storagetype, const string &value, const string &comment);
 
 /**
+ * @brief Add, update, or remove a storage-next item in a combine.
+ * If the storage-next item already exists, its type, value, and comment will be updated.
+ * If storagetype is empty, the storage-next item will be removed.
+ * @param design The VulDesign object to modify.
+ * @param combinename The name of the combine to modify.
+ * @param storagename The name of the storage-next item to add, update, or remove.
+ * @param storagetype The type of the storage-next item. If empty, the storage-next item will be removed.
+ * @param storagesize The size of the storage-next item. Cannot be empty if storagetype is not empty.
+ * @param value An optional initial value for the storage-next item.
+ * @param comment An optional comment for the storage-next item.
+ * @return An empty string on success, or an error message on failure.
+ */
+string cmdSetupCombineStorageNextArray(VulDesign &design, const string &combinename, const string &storagename, const string &storagetype, const string &storagesize, const string &value, const string &comment);
+
+/**
  * @brief Set up the tick function for a combine.
  * If all parameters are empty, the tick function will be disabled.
  * @param design The VulDesign object to modify.

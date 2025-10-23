@@ -38,6 +38,7 @@ using std::shared_ptr;
      serv -> service
      st -> storage
      stn -> storagenext
+     stna -> storagenextarray
      stt -> storagetick
      pi -> pipein
      po -> pipeout
@@ -85,6 +86,7 @@ using std::shared_ptr;
      combine request|service rename <combine> <oldname> <newname>
      combine storage add|update|remove <combine> <storage> <type> [--value "..."] [--comment "..."]
      combine storagenext / storagetick 同上
+     combine storagenextarray add|update|remove <combine> <storage> <type> <size> [--value "..."] [--comment "..."]
 
  Instance 操作:
      instance add <name> <combine> [--comment "..."]

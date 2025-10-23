@@ -311,6 +311,36 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
         applytick_field.push_back(s.name + " = " + s.value + ";");
     }
 
+    // generate storagenextarray
+    for (const VulStorageArray &s : vc.storagenextarray) {
+        // Member Field +：
+        // StorageNextArray<$type$> _storagenextarray_$name$;
+        // /* $comment$ */
+        // $type$ (&) $name$_get(int64 index) { return _storagenextarray_$name$.get(index); };
+        // /* $comment$ */
+        // void $name$_setnext(int64 index, $type$ (&) value, uint8 priority) { _storagenextarray_$name$.setnext(index, value, priority); } ;
+        
+        // Constructor Field +:
+        // _storagenextarray_$name$ = StorageNextArray<$type$>(size (, value));
+        
+        // Applytick Field +:
+        // _storagenextarray_$name$.apply_tick();
+        string cmt = (s.comment.empty() ? (string("// ") + s.name) : (string("// ") + s.comment));
+        string typestr = (isBasicVulType(s.type) ? s.type : (s.type + " &"));
+        member_field.push_back("StorageNextArray<" + s.type + "> _storagenextarray_" + s.name + ";");
+        member_field.push_back("// " + cmt);
+        member_field.push_back(typestr + " " + s.name + "_get(int64 index) { return _storagenextarray_" + s.name + ".get(index); };");
+        member_field.push_back("// " + cmt);
+        member_field.push_back("void " + s.name + "_setnext(int64 index, " + typestr + " value, uint8 priority) { _storagenextarray_" + s.name + ".setnext(index, value, priority); } ;");
+        member_field.push_back("");
+        if (s.value.empty()) {
+            constructor_field.push_back("this->_storagenextarray_" + s.name + " = StorageNextArray<" + s.type + ">(" + s.size + ");");
+        } else {
+            constructor_field.push_back("this->_storagenextarray_" + s.name + " = StorageNextArray<" + s.type + ">(" + s.size + ", " + s.value + ");");
+        }
+        applytick_field.push_back("_storagenextarray_" + s.name + ".apply_tick();");
+    }
+
     // generate config
     for (const VulConfig &c : vc.config) {
         // Member Field +：

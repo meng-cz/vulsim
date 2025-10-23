@@ -452,6 +452,34 @@ string serializeParseCombineFromFile(const string &filename, VulCombine &vc) {
         return e3;
     }
 
+    // storagenextarray / storagearray(un-implemented)
+    auto parseStorageArrayList = [&](const char *tag, vector<VulStorageArray> &out) -> string {
+        for (pugi::xml_node st : root.children(tag)) {
+            pugi::xml_node sname = st.child("name");
+            pugi::xml_node stype = st.child("type");
+            pugi::xml_node ssize = st.child("size");
+            if (!sname || !stype || !ssize) {
+                return string("missing <name> or <type> or <size> in combine file: ") + filename;
+            }
+            VulStorageArray vsa;
+            vsa.name = sname.text().as_string();
+            vsa.type = stype.text().as_string();
+            vsa.size = ssize.text().as_string();
+            pugi::xml_node sval = st.child("value");
+            vsa.value = sval ? sval.text().as_string() : string();
+            pugi::xml_node scomment = st.child("comment");
+            vsa.comment = scomment ? scomment.text().as_string() : string();
+            out.push_back(vsa);
+        }
+        return string("");
+    };
+
+    string e4 = parseStorageArrayList("storagenextarray", vc.storagenextarray);
+    if (!e4.empty()) {
+        e4 = string("storagenextarray parse error: ") + e4;
+        return e4;
+    }
+
     // stallable
     pugi::xml_node stall = root.child("stallable");
     vc.stallable = false;
@@ -573,6 +601,20 @@ string serializeSaveCombineToFile(const string &filename, const VulCombine &vc) 
     writeStorageList("storage", vc.storage);
     writeStorageList("storagenext", vc.storagenext);
     writeStorageList("storagetick", vc.storagetick);
+
+    // storage array lists
+    auto writeStorageArrayList = [&](const char *tag, const vector<VulStorageArray> &lst) {
+        for (const VulStorageArray &st : lst) {
+            pugi::xml_node sn = root.append_child(tag);
+            sn.append_child("name").text().set(st.name.c_str());
+            sn.append_child("type").text().set(st.type.c_str());
+            sn.append_child("size").text().set(st.size.c_str());
+            if (!st.value.empty()) sn.append_child("value").text().set(st.value.c_str());
+            if (!st.comment.empty()) sn.append_child("comment").text().set(st.comment.c_str());
+        }
+    };
+    
+    writeStorageArrayList("storagenextarray", vc.storagenextarray);
 
     if (vc.stallable) root.append_child("stallable");
 

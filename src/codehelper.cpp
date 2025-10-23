@@ -153,6 +153,27 @@ unique_ptr<vector<string>> codeGenerateHelperLines(VulCombine &vc) {
         code->push_back("");
     }
 
+    // Storagenextarray declarations
+    // /* $comment$ */
+    // $type$ (&) $name$_get(int64 index);
+    // /* $comment$ */
+    // void $name$_setnext(int64 index, $type$ (&) value, uint8 priority);
+    if (!vc.storagenextarray.empty()) code->push_back("// Storagenextarray declarations");
+    for (auto &s : vc.storagenextarray) {
+        string cmt = (s.comment.empty() ? (string("// ") + s.name) : (string("// ") + s.comment));
+        code->push_back(cmt);
+        if (isBasicVulType(s.type)) {
+            code->push_back(s.type + " " + s.name + "_get(int64 index);");
+            code->push_back(cmt);
+            code->push_back("void " + s.name + "_setnext(int64 index, " + s.type + " value, uint8 priority);");
+        } else {
+            code->push_back(s.type + " & " + s.name + "_get(int64 index);");
+            code->push_back(cmt);
+            code->push_back("void " + s.name + "_setnext(int64 index, " + s.type + " & value, uint8 priority);");
+        }
+        code->push_back("");
+    }
+
     // Request/Service function declarations
     // /*
     // * $comment$

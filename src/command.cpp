@@ -41,6 +41,7 @@ string isLocalNameConflict(const VulCombine &vc, const string &name) {
     for (const VulStorage &s : vc.storage) if (s.name == name) return "Storage name conflict";
     for (const VulStorage &s : vc.storagenext) if (s.name == name) return "Storagenext name conflict";
     for (const VulStorage &s : vc.storagetick) if (s.name == name) return "Storagetick name conflict";
+    for (const VulStorageArray &s : vc.storagenextarray) if (s.name == name) return "Storagenextarray name conflict";
     return "";
 }
 
@@ -952,6 +953,98 @@ string cmdSetupCombineStorageTick(VulDesign &design, const string &combinename, 
     design.dirty_combines = true;
     return string();
 }
+
+
+/**
+ * @brief Add, update, or remove a storage-array item in specific storage category in a combine.
+ * If the storage item already exists, its type and comment will be updated.
+ * If storagetype is empty, the storage item will be removed.
+ * @param storages Reference to the vector of VulStorageArray items in the combine.
+ * @param storagename The name of the storage item to add, update, or remove.
+ * @param storagetype The type of the storage item. If empty, the storage item will be removed.
+ * @param storatesize The size of the storage item. Cannot be empty if storagetype is not empty.
+ * @param comment An optional comment for the storage item.
+ * @return An empty string on success, or an error message on failure.
+ */
+string _cmdSetupStorageArrayCommon(VulCombine &vc, vector<VulStorageArray> &storages, const string &storagename, const string &storagetype, const string &storatesize, const string &comment) {
+    if (storagename.empty()) return "#22040: storage name cannot be empty";
+
+    // Remove storage if storagetype is empty
+    if (storagetype.empty()) {
+        for (auto it = storages.begin(); it != storages.end(); ++it) {
+            if (it->name == storagename) {
+                storages.erase(it);
+                return string();
+            }
+        }
+        return string("#22041: storage '") + storagename + "' not found";
+    }
+
+    if (storatesize.empty()) {
+        return string("#22042: storage size cannot be empty for storage '") + storagename + "'";
+    }
+
+    // Add or update storage
+    for (VulStorageArray &s : storages) {
+        if (s.name == storagename) {
+            s.type = storagetype;
+            s.size = storatesize;
+            s.comment = comment;
+            return string();
+        }
+    }
+
+    // not found -> add new storage item
+
+    string conflict = isLocalNameConflict(vc, storagename);
+    if (!conflict.empty()) return string("#22039: cannot add storage '") + storagename + "': " + conflict;
+
+    VulStorageArray ns;
+    ns.name = storagename;
+    ns.type = storagetype;
+    ns.size = storatesize;
+    ns.comment = comment;
+    storages.push_back(ns);
+    return string();
+}
+
+/**
+ * @brief Add, update, or remove a storage-next item in a combine.
+ * If the storage-next item already exists, its type, value, and comment will be updated.
+ * If storagetype is empty, the storage-next item will be removed.
+ * @param design The VulDesign object to modify.
+ * @param combinename The name of the combine to modify.
+ * @param storagename The name of the storage-next item to add, update, or remove.
+ * @param storagetype The type of the storage-next item. If empty, the storage-next item will be removed.
+ * @param storagesize The size of the storage-next item. Cannot be empty if storagetype is not empty.
+ * @param value An optional initial value for the storage-next item.
+ * @param comment An optional comment for the storage-next item.
+ * @return An empty string on success, or an error message on failure.
+ */
+string cmdSetupCombineStorageNextArray(VulDesign &design, const string &combinename, const string &storagename, const string &storagetype, const string &storagesize, const string &value, const string &comment) {
+    if (combinename.empty()) return "#22048: combine name cannot be empty";
+    auto it = design.combines.find(combinename);
+    if (it == design.combines.end()) return string("#22049: combine '") + combinename + "' not found";
+
+    VulCombine &vc = it->second;
+
+    string err = _cmdSetupStorageArrayCommon(vc, vc.storagenextarray, storagename, storagetype, storagesize, comment);
+    if (!err.empty()) return err;
+
+    if (!storagetype.empty()) {
+        for (VulStorageArray &s : vc.storagenextarray) {
+            if (s.name == storagename) {
+                s.value = value;
+                s.size = storagesize;
+                break;
+            }
+        }
+    }
+
+    design.dirty_combines = true;
+    return string();
+}
+
 
 /**
  * @brief Set up the tick function for a combine.

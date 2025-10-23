@@ -241,6 +241,39 @@ Applytick Field +:
 _storagenext_$name$.apply_tick();
 ```
 
+## storagenextarray
+
+包含$name$, $type$, $size$, $value$, $comment$标签
+
+Member Field +：
+```cpp
+StorageNextArray<$type$> _storagenextarray_$name$;
+/* $comment$ */
+$type$ (&) $name$_get(int64 index) { return _storagenextarray_$name$.get(index); };
+/* $comment$ */
+void $name$_setnext(int64 index, $type$ (&) value, uint8 priority) { _storagenextarray_$name$.setnext(index, value, priority); } ;
+```
+
+Constructor Field +:
+```
+_storagenextarray_$name$ = StorageNextArray<$type$>(size (, value));
+```
+
+
+Helper Field +:
+```cpp
+/* $comment$ */
+$type$ (&) $name$_get(int64 index);
+/* $comment$ */
+void $name$_setnext(int64 index, $type$ (&) value, uint8 priority);
+```
+
+Applytick Field +:
+```cpp
+_storagenextarray_$name$.apply_tick();
+```
+
+
 ## storagetick
 
 包含$name$, $type$, $value$, $comment$标签，必须为基本类型

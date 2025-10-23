@@ -421,7 +421,7 @@ unique_ptr<vector<string>> _consoleCombine(VulDesign &design, vector<string> &ar
         return output;
     }
 
-    // sub-operations: config, pipein, pipeout, storage, storagenext, storagetick, request, service
+    // sub-operations: config, pipein, pipeout, storage, storagenext, storagetick, storagenextarray, request, service
     if (sub == "config") {
         if (args.size() < 2) { output->push_back("Error: missing action"); return output; }
         string action = toLower(args[1]);
@@ -494,6 +494,31 @@ unique_ptr<vector<string>> _consoleCombine(VulDesign &design, vector<string> &ar
             if (sub == "storage") res = cmdSetupCombineStorage(design, comb, name, "", "", "");
             else if (sub == "storagenext") res = cmdSetupCombineStorageNext(design, comb, name, "", "", "");
             else res = cmdSetupCombineStorageTick(design, comb, name, "", "", "");
+            if (res.empty()) output->push_back(string("OK: ") + sub + " removed"); else output->push_back(res);
+            return output;
+        }
+        output->push_back(string("Unknown action for ") + sub);
+        return output;
+    }
+
+    if (sub == "storagenextarray") {
+        if (args.size() < 2) { output->push_back("Error: missing action"); return output; }
+        string action = toLower(args[1]);
+        if (action == "add" || action == "update") {
+            if (args.size() < 6) { output->push_back("Error: Usage: combine " + sub + " " + action + " <combine> <name> <type> [--value <val>] [--comment <c>]"); return output; }
+            string comb = args[2]; string name = args[3]; string type = args[4]; string size = args[5]; string value; string comment;
+            for (size_t i = 6; i + 1 < args.size(); ++i) {
+                if (args[i] == "--value") { value = args[i+1]; i++; }
+                else if (args[i] == "--comment" || args[i] == "-c") { comment = args[i+1]; i++; }
+            }
+            string res = cmdSetupCombineStorageNextArray(design, comb, name, type, size, value, comment);
+            if (res.empty()) output->push_back(string("OK: ") + sub + " " + action + " succeeded"); else output->push_back(res);
+            return output;
+        }
+        if (action == "remove") {
+            if (args.size() < 4) { output->push_back("Error: Usage: combine " + sub + " remove <combine> <name>"); return output; }
+            string comb = args[2]; string name = args[3];
+            string res = cmdSetupCombineStorageNextArray(design, comb, name, "", "", "", "");
             if (res.empty()) output->push_back(string("OK: ") + sub + " removed"); else output->push_back(res);
             return output;
         }
