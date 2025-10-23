@@ -86,6 +86,8 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     // init code fields
     vector<string> constructor_args_field;
     vector<string> constructor_field;
+    vector<string> deconstructor_field;
+    vector<string> init_field;
     vector<string> member_field;
     vector<string> function_field;
     vector<string> tick_field;
@@ -383,7 +385,7 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     _extractCodeIntoField(vc.applytick, user_applytick_field);
 
     // generate init
-    _extractCodeIntoField(vc.init, constructor_field);
+    _extractCodeIntoField(vc.init, init_field);
 
     // generate stallable
     if (vc.stallable) {
@@ -431,11 +433,10 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     headerlines.push_back("        int32 _dummy = 0; // to avoid empty class");
     headerlines.push_back("    };");
     headerlines.push_back("");
-    headerlines.push_back("    " + vc.name + "(ConstructorArguments & arg) {");
-    for (const string &line : constructor_field) headerlines.push_back("        " + line);
-    headerlines.push_back("    };");
-    headerlines.push_back("    ~" + vc.name + "() {};");
+    headerlines.push_back("    " + vc.name + "(ConstructorArguments & arg);");
+    headerlines.push_back("    ~" + vc.name + "();");
     headerlines.push_back("");
+    headerlines.push_back("    void init();");
     headerlines.push_back("    void all_current_tick();");
     headerlines.push_back("    void all_current_applytick();");
     headerlines.push_back("    void user_current_tick();");
@@ -448,6 +449,19 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
 
     // cpplines
     cpplines.push_back("#include \"" + vc.name + ".h\"");
+    cpplines.push_back("");
+    cpplines.push_back(vc.name + "::" + vc.name + "(ConstructorArguments & arg) {");
+    for (const string &line : constructor_field) cpplines.push_back("    " + line);
+    cpplines.push_back("    init();");
+    cpplines.push_back("}");
+    cpplines.push_back("");
+    cpplines.push_back(vc.name + "::~" + vc.name + "() {");
+    for (const string &line : deconstructor_field) cpplines.push_back("    " + line);
+    cpplines.push_back("}");
+    cpplines.push_back("");
+    cpplines.push_back("void " + vc.name + "::init() {");
+    for (const string &line : init_field) cpplines.push_back("    " + line);
+    cpplines.push_back("}");
     cpplines.push_back("");
     for (const string &line : function_field) cpplines.push_back(line);
     cpplines.push_back("void " + vc.name + "::all_current_tick() {");

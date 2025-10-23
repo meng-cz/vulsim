@@ -20,13 +20,10 @@ public:
         int32 __dummy = 0;
     };
 
-    $name$(ConstructorArguments & arg) {
-        // Constructor Field
-    };
-    ~$name$() {
-        // De-Constructor Field
-    };
+    $name$(ConstructorArguments & arg);
+    ~$name$();
 
+    void init();
     void all_current_tick();
     void all_current_applytick();
     void user_current_tick();
@@ -38,6 +35,19 @@ public:
 $name$.cpp:
 ```cpp
 #include "$$name$$.h"
+
+$name$::$name$(ConstructorArguments & arg) {
+    // Constructor Field
+    init();
+};
+$name$::~$name$() {
+    // De-Constructor Field
+};
+
+void $name$::init() {
+    // Init Field
+}
+
 // Function Field
 
 void $name$::all_current_tick() {
