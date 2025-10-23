@@ -52,6 +52,7 @@ using std::shared_ptr;
      show instance                          # 列出所有实例及其所属 combine
      show pipe                               # 列出所有 pipes
      show config                             # 列出设计级 config 项
+     show connect                            # 列出所有连接关系
 
  Config 操作:
      config add <name> <value> [--comment "..."]
@@ -74,7 +75,7 @@ using std::shared_ptr;
      combine rename <old> <new>
      combine duplicate <old> <new>
      combine delete <name>
-     combine updatecpps <combine>   # 生成或更新 init/tick/applytick/service 的 cpp 帮助文件并汇报损坏文件
+     combine updatecpps [<combine>]   # 生成或更新 init/tick/applytick/service 的 cpp 帮助文件并汇报损坏文件
 
  Combine 内部成员:
      combine config add|update|remove <combine> <configname> [<ref>] [--comment "..."]

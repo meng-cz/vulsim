@@ -31,6 +31,7 @@ unique_ptr<vector<string>> _consoleShow(VulDesign &design, vector<string> &args)
     //      show instance                          # 列出所有实例及其所属 combine
     //      show pipe                               # 列出所有 pipes
     //      show config                             # 列出设计级 config 项
+    //      show connect                            # 列出所有连接关系
 
     auto toLower = [](const string &s) {
         string r = s;
@@ -47,6 +48,7 @@ unique_ptr<vector<string>> _consoleShow(VulDesign &design, vector<string> &args)
     if (token == "i") token = "instance";
     if (token == "p") token = "pipe";
     if (token == "cf") token = "config";
+    if (token == "co") token = "connect";
 
     // no args -> summary
     if (token.empty()) {
@@ -203,6 +205,36 @@ unique_ptr<vector<string>> _consoleShow(VulDesign &design, vector<string> &args)
         return output;
     }
 
+    if (token == "connect" || token == "connections") {
+        output->push_back("Connections:");
+
+        output->push_back("  Req Connections:");
+        if (design.req_connections.empty()) { output->push_back("    (none)"); }
+        for (const VulReqConnection &rc : design.req_connections) {
+            output->push_back(string("    ") + rc.req_instance + "." + rc.req_name + " -> " + rc.serv_instance + "." + rc.serv_name);
+        }
+
+        output->push_back("  Module-Pipe Connections:");
+        if (design.mod_pipe_connections.empty()) { output->push_back("    (none)"); }
+        for (const VulModulePipeConnection &mpc : design.mod_pipe_connections) {
+            output->push_back(string("    ") + mpc.instance + "." + mpc.pipeoutport + " -> " + mpc.pipe + "[" + std::to_string(mpc.portindex) + "]");
+        }
+
+        output->push_back("  Pipe-Module Connections:");
+        if (design.pipe_mod_connections.empty()) { output->push_back("    (none)"); }
+        for (const VulPipeModuleConnection &pmc : design.pipe_mod_connections) {
+            output->push_back(string("    ") + pmc.pipe + "[" + std::to_string(pmc.portindex) + "] -> " + pmc.instance + "." + pmc.pipeinport);
+        }
+
+        output->push_back("  Stalled Connections:");
+        if (design.stalled_connections.empty()) { output->push_back("    (none)"); }
+        for (const VulStalledConnection &sc : design.stalled_connections) {
+            output->push_back(string("    ") + sc.src_instance + " -> " + sc.dest_instance);
+        }
+
+        return output;
+    }
+
     // unknown token
     output->push_back(string("Unknown show target: '") + token + "'");
     return output;
@@ -353,7 +385,32 @@ unique_ptr<vector<string>> _consoleCombine(VulDesign &design, vector<string> &ar
             output->push_back("Error: design has unsaved combine changes. Save the project before updating combine C++ files.");
             return output;
         }
-        if (args.size() < 2) { output->push_back("Error: missing args. Usage: combine updatecpps <combine>"); return output; }
+        if (args.size() < 2) {
+            // update all combines
+            vector<string> allbroken;
+            for (const auto &kv : design.combines) {
+                const string &comb = kv.first;
+                vector<string> broken;
+                string res = cmdUpdateCombineCppFileHelpers(design, comb, broken);
+                if (!res.empty()) {
+                    output->push_back(res);
+                    continue;
+                }
+                if (!broken.empty()) {
+                    allbroken.insert(allbroken.end(), broken.begin(), broken.end());
+                    output->push_back(string("Combine '") + comb + "' has broken files:");
+                    for (const auto &f : broken) output->push_back(string("  ") + f);
+                } else {
+                    output->push_back(string("OK: updatecpps for '") + comb + "' completed (no broken files)");
+                }
+            }
+            if (allbroken.empty()) {
+                output->push_back("All combine C++ files updated successfully with no broken files.");
+            } else {
+                output->push_back("Some combines have broken files. Please check the above messages.");
+            }
+            return output;
+        }
         string comb = args[1]; vector<string> broken; string res = cmdUpdateCombineCppFileHelpers(design, comb, broken);
         if (!res.empty()) { output->push_back(res); return output; }
         if (broken.empty()) output->push_back(string("OK: updatecpps for '") + comb + "' completed (no broken files)");
