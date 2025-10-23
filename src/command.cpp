@@ -2173,26 +2173,17 @@ string cmdConnectReqToServ(VulDesign &design, const string &reqinstname, const s
     if (servinstname.empty()) return "#25062: service instance name cannot be empty";
     if (servportname.empty()) return "#25063: service port name cannot be empty";
 
+    // cannot connect with itself
+    if (reqinstname == servinstname) return string("#25076: cannot connect request and service within the same instance '") + reqinstname + "'";
+
     auto rik = design.instances.find(reqinstname);
     if (rik == design.instances.end()) return string("#25064: instance '") + reqinstname + "' not found";
 
-    auto sik = design.instances.find(servinstname);
-    if (sik == design.instances.end()) return string("#25065: instance '") + servinstname + "' not found";
-
-    // find combines
     const string &reqcomb = rik->second.combine;
     auto rcit = design.combines.find(reqcomb);
     if (rcit == design.combines.end()) return string("#25066: combine '") + reqcomb + "' not found for instance '" + reqinstname + "'";
 
-    const string &servcomb = sik->second.combine;
-    auto scop = design.combines.find(servcomb);
-    if (scop == design.combines.end()) return string("#25067: combine '") + servcomb + "' not found for instance '" + servinstname + "'";
-
-    // cannot connect with itself
-    if (reqinstname == servinstname) return string("#25076: cannot connect request and service within the same instance '") + reqinstname + "'";
-
     const VulCombine &rvc = rcit->second;
-    const VulCombine &svc = scop->second;
 
     // find request definition
     const VulRequest *reqdef = nullptr;
@@ -2201,6 +2192,34 @@ string cmdConnectReqToServ(VulDesign &design, const string &reqinstname, const s
     }
     if (!reqdef) return string("#25068: request '") + reqportname + "' not found in combine '" + reqcomb + "'";
 
+    auto sik = design.instances.find(servinstname);
+    if (sik == design.instances.end()) {
+        // pipe has a clear service without arg and return, allow this special case
+        if (design.pipes.find(servinstname) != design.pipes.end() && servportname == "clear") {
+            if (reqdef->ret.empty()) {
+                // add connection
+                VulReqConnection nc;
+                nc.req_instance = reqinstname;
+                nc.req_name = reqportname;
+                nc.serv_instance = servinstname;
+                nc.serv_name = servportname;
+                design.req_connections.push_back(nc);
+                design.dirty_combines = true;
+                return string();
+            } else {
+                return string("#25077: request '") + reqportname + "' of instance '" + reqinstname + "' has return values and cannot connect to pipe 'clear' service";
+            }
+        } else {
+            return string("#25065: instance '") + servinstname + "' not found";
+        }
+    }
+
+    const string &servcomb = sik->second.combine;
+    auto scop = design.combines.find(servcomb);
+    if (scop == design.combines.end()) return string("#25067: combine '") + servcomb + "' not found for instance '" + servinstname + "'";
+
+    const VulCombine &svc = scop->second;
+
     // find service definition
     const VulService *servdef = nullptr;
     for (const VulService &s : svc.service) {
@@ -2208,19 +2227,25 @@ string cmdConnectReqToServ(VulDesign &design, const string &reqinstname, const s
     }
     if (!servdef) return string("#25069: service '") + servportname + "' not found in combine '" + servcomb + "'";
 
-    // check argument types: sequences must match exactly (names ignored)
-    if (reqdef->arg.size() != servdef->arg.size()) return string("#25072: argument count mismatch between request '") + reqportname + "' and service '" + servportname + "'";
-    for (size_t i = 0; i < reqdef->arg.size(); ++i) {
-        if (reqdef->arg[i].type != servdef->arg[i].type) {
-            return string("#25073: argument type mismatch at index ") + std::to_string(i) + " between request '" + reqportname + "' and service '" + servportname + "'";
+    // check argument types and return types: sequences must match exactly (names ignored)
+    // Except for: Service without arg and ret can be connected to Request with arg without ret.
+    if (servdef->arg.empty() && servdef->ret.empty()) {
+        if (!reqdef->ret.empty()) {
+            return string("#25078: request '") + reqportname + "' of instance '" + reqinstname + "' has return values and cannot connect to service '" + servportname + "' without return";
         }
-    }
+    } else {
+        if (reqdef->arg.size() != servdef->arg.size()) return string("#25072: argument count mismatch between request '") + reqportname + "' and service '" + servportname + "'";
+        for (size_t i = 0; i < reqdef->arg.size(); ++i) {
+            if (reqdef->arg[i].type != servdef->arg[i].type) {
+                return string("#25073: argument type mismatch at index ") + std::to_string(i) + " between request '" + reqportname + "' and service '" + servportname + "'";
+            }
+        }
 
-    // check return types: sequences must match exactly
-    if (reqdef->ret.size() != servdef->ret.size()) return string("#25074: return count mismatch between request '") + reqportname + "' and service '" + servportname + "'";
-    for (size_t i = 0; i < reqdef->ret.size(); ++i) {
-        if (reqdef->ret[i].type != servdef->ret[i].type) {
-            return string("#25075: return type mismatch at index ") + std::to_string(i) + " between request '" + reqportname + "' and service '" + servportname + "'";
+        if (reqdef->ret.size() != servdef->ret.size()) return string("#25074: return count mismatch between request '") + reqportname + "' and service '" + servportname + "'";
+        for (size_t i = 0; i < reqdef->ret.size(); ++i) {
+            if (reqdef->ret[i].type != servdef->ret[i].type) {
+                return string("#25075: return type mismatch at index ") + std::to_string(i) + " between request '" + reqportname + "' and service '" + servportname + "'";
+            }
         }
     }
 

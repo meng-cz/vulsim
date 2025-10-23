@@ -816,6 +816,7 @@ string VulDesign::_checkTypeError() {
  * (3) All connections must match in argument and return types exactly in type and sequence.
  * (4) Request without return can connect to multiple services or not connect at all.
  * (5) All requests with return must be connected to one service.
+ * (6) Except for: Service without arg and ret can be connected to Request with arg without ret.
  */
 string VulDesign::_checkReqConnectionError() {
 
@@ -851,7 +852,8 @@ string VulDesign::_checkReqConnectionError() {
         auto sInstIt = instances.find(servInst);
         if (sInstIt == instances.end()) {
             // pipe has a clear service without arg and return, allow this special case
-            if(pipes.find(servInst) != pipes.end() && servName == "clear" && reqDef->arg.empty() && reqDef->ret.empty()) {
+            // (6) Except for: Service without arg and ret can be connected to Request with arg without ret.
+            if(pipes.find(servInst) != pipes.end() && servName == "clear" && reqDef->ret.empty()) {
                     continue;
             }
 
@@ -876,6 +878,11 @@ string VulDesign::_checkReqConnectionError() {
         }
 
         // (3) type matching: args and returns must match exactly in type and order
+        // (6) Except for: Service without arg and ret can be connected to Request with arg without ret.
+        if (servDef->arg.empty() && servDef->ret.empty() && reqDef->ret.empty()) {
+            // allow any args on request
+            continue;
+        }
         // args
         if (reqDef->arg.size() != servDef->arg.size()) {
             return string("#13007: argument count mismatch between request '") + rc.req_name + "' (" + rc.req_instance + ") and service '" + servName + "' (" + servInst + ")";

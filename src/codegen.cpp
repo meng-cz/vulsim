@@ -586,7 +586,35 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
                 auto reqit = connit->second.find(vr.name);
                 if (reqit != connit->second.end()) {
                     for (const auto &pair : reqit->second) {
-                        cpplines.push_back("    _instance_" + pair.first + "->" + pair.second + "(" + argnames + ");");
+                        string servinst = pair.first;
+                        string servname = pair.second;
+                        if (design.instances.find(servinst) == design.instances.end()) {
+                            if (design.pipes.find(servinst) != design.pipes.end() && servname == "clear") {
+                                cpplines.push_back("    _pipe_" + servinst + "->clear();");
+                            } else {
+                                err->push_back(string("Error: combine not found for instance '") + servinst + "': " + design.instances.at(servinst).combine);
+                                return err;
+                            }
+                        } else {
+                            unique_ptr<VulCombine> servcombineptr = design.getOrFakeCombineReadonly(design.instances.at(servinst).combine);
+                            VulService *vserv = nullptr;
+                            for (const VulService &s : servcombineptr->service) {
+                                if (s.name == servname) {
+                                    vserv = const_cast<VulService *>(&s);
+                                    break;
+                                }
+                            }
+                            if (vserv) {
+                                if (vserv->arg.empty() && vserv->ret.empty()) {
+                                    cpplines.push_back("    _instance_" + servinst + "->" + servname + "();");
+                                } else {
+                                    cpplines.push_back("    _instance_" + servinst + "->" + servname + "(" + argnames + ");");
+                                }
+                            } else {
+                                err->push_back(string("Error: service not found for combine '") + servcombineptr->name + "' service '" + servname + "'");
+                                return err;
+                            }
+                        }
                     }
                 }
             }

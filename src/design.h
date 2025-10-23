@@ -123,6 +123,7 @@ public:
      * (3) All connections must match in argument and return types exactly in type and sequence.
      * (4) Request without return can connect to multiple services or not connect at all.
      * (5) All requests with return must be connected to one service.
+     * (6) Except for: Service without arg and ret can be connected to Request with arg without ret.
      */
     string _checkReqConnectionError();
 
