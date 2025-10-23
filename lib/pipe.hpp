@@ -3,7 +3,7 @@
 #include "common.h"
 
 template <typename T>
-class PipeInputPort {
+class PipePopPort {
 public:
     bool can_pop() {
         return valid;
@@ -12,6 +12,8 @@ public:
         return value;
     }
     void pop() {
+        if (!valid) return;
+        valid = false;
         accepted = true;
     }
 
@@ -20,20 +22,59 @@ public:
     bool accepted = false;
 };
 template <typename T>
-class PipeOutputPort {
+class PipePushPort {
 public:
     bool can_push() {
         return ready;
     }
     void push(const T & value) {
+        if (!ready) return;
         accepted = true;
+        ready = false;
         this->value = value;
     }
-    bool ready = false;
+    bool ready = true;
     T value;
     bool accepted = false;
 };
 
+
+template <typename T>
+class SimpleHandshakePipe {
+
+public:
+
+    array<PipePopPort<T>, 1> outputs;
+    array<PipePushPort<T>, 1> inputs;
+
+    void apply_tick() {
+        if (clear_flag) {
+            clear_flag = false;
+            outputs[0].valid = false;
+            outputs[0].accepted = false;
+            inputs[0].ready = true;
+            inputs[0].accepted = false;
+            return;
+        }
+
+        if (outputs[0].accepted) {
+            outputs[0].accepted = false;
+        }
+        if (inputs[0].accepted && !outputs[0].valid) {
+            outputs[0].valid = true;
+            outputs[0].value = inputs[0].value;
+            inputs[0].accepted = false;
+            inputs[0].ready = true;
+        }
+    }
+
+    void clear() {
+        clear_flag = true;
+    }
+
+protected:
+    bool clear_flag = false;
+};
 
 template <typename T, int Depth = 0, int InNum = 1, int OutNum = 1>
 class Pipe {
@@ -42,10 +83,25 @@ public:
 static_assert(InNum > 0 && OutNum > 0, "Pipe input_num and output_num must be greater than 0");
 static_assert(Depth >= 0, "Pipe depth must be non-negative");
 
-    array<PipeInputPort<T>, OutNum> outputs;
-    array<PipeOutputPort<T>, InNum> inputs;
+    array<PipePopPort<T>, OutNum> outputs;
+    array<PipePushPort<T>, InNum> inputs;
 
     void apply_tick() {
+        if (clear_flag) {
+            clear_flag = false;
+            fifo.clear();
+            for(uint32 i = 0; i < OutNum; i++) {
+                outputs[i].valid = false;
+                outputs[i].accepted = false;
+            }
+            for(uint32 i = 0; i < InNum; i++) {
+                inputs[i].ready = true;
+                inputs[i].accepted = false;
+            }
+            return;
+        }
+        
+
         uint32 remained_output = 0;
         for(uint32 i = 0; i < OutNum; i++) {
             if(outputs[i].valid && outputs[i].accepted) {
@@ -85,7 +141,12 @@ static_assert(Depth >= 0, "Pipe depth must be non-negative");
         }
     }
 
+    void clear() {
+        clear_flag = true;
+    }
+
 protected:
+    bool clear_flag = false;
     list<T> fifo;
 }; 
 

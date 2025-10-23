@@ -17,6 +17,17 @@
 
 namespace fs = std::filesystem;
 
+enum class PipeType {
+    def_pipe,
+    simple_handshake
+};
+
+PipeType detectPipeType(const VulPipe &vp) {
+    if (vp.inputsize == 1 && vp.outputsize == 1 && vp.buffersize == 0) {
+        return PipeType::simple_handshake;
+    }
+    return PipeType::def_pipe;
+}
 
 /**
  * @brief Generate C++ header code for all bundles in the design.
@@ -98,7 +109,7 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     // generate pipein
     for (const VulPipePort &pp : vc.pipein) {
         // Member Field +：
-        // PipeInputPort<$type$> * _pipein_$name$;
+        // PipePopPort<$type$> * _pipein_$name$;
         // /* $comment$ */
         // bool $name$_can_pop() { return _pipein_$name$->can_pop(); };
         // /* $comment$ */
@@ -107,14 +118,14 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
         // void $name$_pop() { _pipein_$name$->pop(); };
 
         // Constructor Arguments Field +:
-        // PipeInputPort<$type$> * _pipein_$name$;
+        // PipePopPort<$type$> * _pipein_$name$;
 
         // Constructor Field +:
         // this->_pipein_$name$ = arg._pipein_$name$;
 
         string cmtstr = (pp.comment.empty() ? (pp.name) : (pp.comment));
         string typestr = (isBasicVulType(pp.type) ? pp.type : (pp.type + " &"));
-        member_field.push_back("PipeInputPort<" + pp.type + "> * _pipein_" + pp.name + ";");
+        member_field.push_back("PipePopPort<" + pp.type + "> * _pipein_" + pp.name + ";");
         member_field.push_back("// " + cmtstr);
         member_field.push_back("bool " + pp.name + "_can_pop() { return _pipein_" + pp.name + "->can_pop(); };");
         member_field.push_back("// " + cmtstr);
@@ -122,34 +133,34 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
         member_field.push_back("// " + cmtstr);
         member_field.push_back("void " + pp.name + "_pop() { _pipein_" + pp.name + "->pop(); };");
         member_field.push_back("");
-        constructor_args_field.push_back("PipeInputPort<" + pp.type + "> * _pipein_" + pp.name + ";");
+        constructor_args_field.push_back("PipePopPort<" + pp.type + "> * _pipein_" + pp.name + ";");
         constructor_field.push_back("this->_pipein_" + pp.name + " = arg._pipein_" + pp.name + ";");
     }
 
     // generate pipeout
     for (const VulPipePort &pp : vc.pipeout) {
         // Member Field +:
-        // PipeOutputPort<$type$> * _pipeout_$name$;
+        // PipePushPort<$type$> * _pipeout_$name$;
         // /* $comment$ */
         // bool $name$_can_push() { return _pipeout_$name$->can_push(); } ;
         // /* $comment$ */
         // void $name$_push($type$ (&) value) { _pipeout_$name$->push(value) } ;
 
         // Constructor Arguments Field +:
-        // PipeOutputPort<$type$> * _pipeout_$name$;
+        // PipePushPort<$type$> * _pipeout_$name$;
 
         // Constructor Field +:
         // this->_pipeout_$name$ = arg._pipeout_$name$;
 
         string cmtstr = (pp.comment.empty() ? (pp.name) : (pp.comment));
         string typestr = (isBasicVulType(pp.type) ? pp.type : (pp.type + " &"));
-        member_field.push_back("PipeOutputPort<" + pp.type + "> * _pipeout_" + pp.name + ";");
+        member_field.push_back("PipePushPort<" + pp.type + "> * _pipeout_" + pp.name + ";");
         member_field.push_back("// " + cmtstr);
         member_field.push_back("bool " + pp.name + "_can_push() { return _pipeout_" + pp.name + "->can_push(); } ;");
         member_field.push_back("// " + cmtstr);
         member_field.push_back("void " + pp.name + "_push(" + typestr + " value) { _pipeout_" + pp.name + "->push(value); } ;");
         member_field.push_back("// " + cmtstr);
-        constructor_args_field.push_back("PipeOutputPort<" + pp.type + "> * _pipeout_" + pp.name + ";");
+        constructor_args_field.push_back("PipePushPort<" + pp.type + "> * _pipeout_" + pp.name + ";");
         constructor_field.push_back("this->_pipeout_" + pp.name + " = arg._pipeout_" + pp.name + ";");
     }
 
@@ -521,15 +532,22 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
 
     // pipe pointer declarations
     // unique_ptr<Pipe<$type$, $buf$, $in$, $out$>> _pipe_$name$;
+    // unique_ptr<SimpleHandshakePipe<$type$> _pipe_$name$;
     for (const auto &pipepair : design.pipes) {
         const string &pipename = pipepair.first;
         const VulPipe &vp = pipepair.second;
-        cpplines.push_back("unique_ptr<Pipe<" +
-            vp.type + ", "
-            + std::to_string(vp.buffersize) + ", "
-            + std::to_string(vp.inputsize) + ", "
-            + std::to_string(vp.outputsize)
-            + ">> _pipe_" + pipename + ";");
+        PipeType type = detectPipeType(vp);
+        if (type == PipeType::simple_handshake) {
+            cpplines.push_back("unique_ptr<SimpleHandshakePipe<" + vp.type + ">> _pipe_" + pipename + ";");
+        } else {
+            // default pipe
+            cpplines.push_back("unique_ptr<Pipe<" +
+                vp.type + ", "
+                + std::to_string(vp.buffersize) + ", "
+                + std::to_string(vp.inputsize) + ", "
+                + std::to_string(vp.outputsize)
+                + ">> _pipe_" + pipename + ";");
+        }
     }
     cpplines.push_back("");
 
@@ -664,15 +682,22 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     // Pipe Init Field
     // Call constructors for pipes
     // _pipe_$name$ = make_unique<Pipe<$type$, $buf$, $in$, $out$>>();
+    // _pipe_$name$ = make_unique<SimpleHandshakePipe<$type$>();
     for (const auto &pipepair : design.pipes) {
         const string &pipename = pipepair.first;
         const VulPipe &vp = pipepair.second;
-        cpplines.push_back("    _pipe_" + pipename + " = make_unique<Pipe<" +
-            vp.type + ", "
-            + std::to_string(vp.buffersize) + ", "
-            + std::to_string(vp.inputsize) + ", "
-            + std::to_string(vp.outputsize)
-            + ">>();");
+        PipeType type = detectPipeType(vp);
+        if (type == PipeType::simple_handshake) {
+            cpplines.push_back("    _pipe_" + pipename + " = make_unique<SimpleHandshakePipe<" + vp.type + ">>();");
+        } else {
+            // default pipe
+            cpplines.push_back("    _pipe_" + pipename + " = make_unique<Pipe<" +
+                vp.type + ", "
+                + std::to_string(vp.buffersize) + ", "
+                + std::to_string(vp.inputsize) + ", "
+                + std::to_string(vp.outputsize)
+                + ">>();");
+        }
     }
     // Instance Init Field
     // Call constructor for instance

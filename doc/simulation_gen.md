@@ -25,6 +25,7 @@ using std::make_unique;
 // Pipe Field
 // To store all pipes with a unique_ptr for each
 // unique_ptr<Pipe<$type$, $buf$, $in$, $out$>> _pipe_$name$;
+// unique_ptr<SimpleHandshakePipe<$type$> _pipe_$name$;
 
 // Req Connection Field
 // For each instance.request a global function is setup to call all connected service
@@ -43,6 +44,7 @@ void init_simulation() {
     // Pipe Init Field
     // Call constructors for pipes
     // _pipe_$name$ = make_unique<Pipe<$type$, $buf$, $in$, $out$>>();
+    // _pipe_$name$ = make_unique<SimpleHandshakePipe<$type$>();
 
     // Instance Init Field
     // Call constructor for instance

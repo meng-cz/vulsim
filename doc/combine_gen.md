@@ -67,7 +67,7 @@ xxx.cpp
 
 Member Field +：
 ```cpp
-PipeInputPort<$type$> * _pipein_$name$;
+PipePopPort<$type$> * _pipein_$name$;
 /* $comment$ */
 bool $name$_can_pop() { return _pipein_$name$->can_pop(); };
 /* $comment$ */
@@ -78,7 +78,7 @@ void $name$_pop() { _pipein_$name$->pop(); };
 
 Constructor Arguments Field +:
 ```cpp
-PipeInputPort<$type$> * _pipein_$name$;
+PipePopPort<$type$> * _pipein_$name$;
 ```
 
 Constructor Field +:
@@ -102,7 +102,7 @@ void $name$_pop();
 
 Member Field +：
 ```cpp
-PipeOutputPort<$type$> * _pipeout_$name$;
+PipePushPort<$type$> * _pipeout_$name$;
 /* $comment$ */
 bool $name$_can_push() { return _pipeout_$name$->can_push(); } ;
 /* $comment$ */
@@ -111,7 +111,7 @@ void $name$_push($type$ (&) value) { _pipeout_$name$->push(value) } ;
 
 Constructor Arguments Field +:
 ```cpp
-PipeOutputPort<$type$> * _pipeout_$name$;
+PipePushPort<$type$> * _pipeout_$name$;
 ```
 
 Constructor Field +:
