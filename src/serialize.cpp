@@ -827,37 +827,37 @@ string serializeSavePrefabToFile(const string &filename, const VulPrefab &prefab
 
 // Helper to write visualization node
 static void _serializeWriteVisualNode(pugi::xml_node parent, const VulVisualization &vis) {
-    pugi::xml_node vnode = parent.append_child("visual");
-    vnode.append_child("x").text().set(std::to_string(vis.x).c_str());
-    vnode.append_child("y").text().set(std::to_string(vis.y).c_str());
-    vnode.append_child("w").text().set(std::to_string(vis.w).c_str());
-    vnode.append_child("h").text().set(std::to_string(vis.h).c_str());
-    vnode.append_child("visible").text().set(vis.visible ? "1" : "0");
-    vnode.append_child("enabled").text().set(vis.enabled ? "1" : "0");
-    vnode.append_child("selected").text().set(vis.selected ? "1" : "0");
-    if (!vis.color.empty()) vnode.append_child("color").text().set(vis.color.c_str());
-    if (!vis.bordercolor.empty()) vnode.append_child("bordercolor").text().set(vis.bordercolor.c_str());
-    vnode.append_child("borderwidth").text().set(std::to_string(vis.borderwidth).c_str());
+    // pugi::xml_node vnode = parent.append_child("visual");
+    // vnode.append_child("x").text().set(std::to_string(vis.x).c_str());
+    // vnode.append_child("y").text().set(std::to_string(vis.y).c_str());
+    // vnode.append_child("w").text().set(std::to_string(vis.w).c_str());
+    // vnode.append_child("h").text().set(std::to_string(vis.h).c_str());
+    // vnode.append_child("visible").text().set(vis.visible ? "1" : "0");
+    // vnode.append_child("enabled").text().set(vis.enabled ? "1" : "0");
+    // vnode.append_child("selected").text().set(vis.selected ? "1" : "0");
+    // if (!vis.color.empty()) vnode.append_child("color").text().set(vis.color.c_str());
+    // if (!vis.bordercolor.empty()) vnode.append_child("bordercolor").text().set(vis.bordercolor.c_str());
+    // vnode.append_child("borderwidth").text().set(std::to_string(vis.borderwidth).c_str());
 }
 
 static void _serializeParseVisualNode(const pugi::xml_node &vnode, VulVisualization &vis) {
     if (!vnode) return;
-    pugi::xml_node n;
-    n = vnode.child("x"); vis.x = n ? (long)n.text().as_llong() : 0;
-    n = vnode.child("y"); vis.y = n ? (long)n.text().as_llong() : 0;
-    n = vnode.child("w"); vis.w = n ? (long)n.text().as_llong() : 0;
-    n = vnode.child("h"); vis.h = n ? (long)n.text().as_llong() : 0;
+    // pugi::xml_node n;
+    // n = vnode.child("x"); vis.x = n ? (long)n.text().as_llong() : 0;
+    // n = vnode.child("y"); vis.y = n ? (long)n.text().as_llong() : 0;
+    // n = vnode.child("w"); vis.w = n ? (long)n.text().as_llong() : 0;
+    // n = vnode.child("h"); vis.h = n ? (long)n.text().as_llong() : 0;
 
-    vis.visible = false;
-    vis.enabled = false;
-    vis.selected = false;
-    n = vnode.child("visible"); if (n) { string v = n.text().as_string(); vis.visible = (v=="1"||v=="true"||v=="True"); }
-    n = vnode.child("enabled"); if (n) { string v = n.text().as_string(); vis.enabled = (v=="1"||v=="true"||v=="True"); }
-    n = vnode.child("selected"); if (n) { string v = n.text().as_string(); vis.selected = (v=="1"||v=="true"||v=="True"); }
+    // vis.visible = false;
+    // vis.enabled = false;
+    // vis.selected = false;
+    // n = vnode.child("visible"); if (n) { string v = n.text().as_string(); vis.visible = (v=="1"||v=="true"||v=="True"); }
+    // n = vnode.child("enabled"); if (n) { string v = n.text().as_string(); vis.enabled = (v=="1"||v=="true"||v=="True"); }
+    // n = vnode.child("selected"); if (n) { string v = n.text().as_string(); vis.selected = (v=="1"||v=="true"||v=="True"); }
 
-    n = vnode.child("color"); vis.color = n ? n.text().as_string() : string();
-    n = vnode.child("bordercolor"); vis.bordercolor = n ? n.text().as_string() : string();
-    n = vnode.child("borderwidth"); vis.borderwidth = n ? (unsigned int)n.text().as_llong() : 0u;
+    // n = vnode.child("color"); vis.color = n ? n.text().as_string() : string();
+    // n = vnode.child("bordercolor"); vis.bordercolor = n ? n.text().as_string() : string();
+    // n = vnode.child("borderwidth"); vis.borderwidth = n ? (unsigned int)n.text().as_llong() : 0u;
 }
 
 /**
