@@ -793,6 +793,7 @@ unique_ptr<vector<string>> _consolePipe(VulDesign &design, vector<string> &args)
         string name = args[1];
         string type = args[2];
         unsigned int inputsize = 1, outputsize = 1, buffersize = 0;
+        bool handshake = false;
         string comment;
         size_t idx = 3;
         for (size_t i = idx; i < args.size(); ++i) {
@@ -800,8 +801,9 @@ unique_ptr<vector<string>> _consolePipe(VulDesign &design, vector<string> &args)
             else if (args[i] == "--outputsize" && i+1 < args.size()) { outputsize = static_cast<unsigned int>(std::stoul(args[i+1])); i++; }
             else if (args[i] == "--buffersize" && i+1 < args.size()) { buffersize = static_cast<unsigned int>(std::stoul(args[i+1])); i++; }
             else if ((args[i] == "--comment" || args[i] == "-c") && i+1 < args.size()) { comment = args[i+1]; i++; }
+            else if (args[i] == "--handshake" || args[i] == "-h") { handshake = true; }
         }
-        string res = cmdUpdatePipe(design, name, type, comment, inputsize, outputsize, buffersize);
+        string res = cmdUpdatePipe(design, name, type, comment, inputsize, outputsize, buffersize, handshake);
         if (res.empty()) output->push_back(string("OK: pipe '") + name + " updated"); else output->push_back(res);
         return output;
     }

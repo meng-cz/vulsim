@@ -185,9 +185,24 @@ typedef struct {
     unsigned int inputsize;
     unsigned int outputsize;
     unsigned int buffersize;
+    bool handshake;
 
     VulVisualization vis;
 } VulPipe;
+
+enum class VulPipeType {
+    invalid,
+    simple_handshake,       // one-input, one-output, handshake
+    simple_nonhandshake,    // one-input, one-output, non-handshake
+    buffered_handshake,     // multi-input, multi-output, buffered handshake
+};
+
+/**
+ * @brief Detect the type of a VulPipe based on its properties.
+ * @param vp The VulPipe to analyze.
+ * @return The detected VulPipeType.
+ */
+VulPipeType detectVulPipeType(const VulPipe &vp);
 
 typedef struct {
     string req_instance;

@@ -1893,7 +1893,7 @@ string cmdSetupInstanceConfigOverride(VulDesign &design, const string &instancen
  * @param buffersize The buffer size of the pipe (0 for default).
  * @return An empty string on success, or an error message on failure.
  */
-string cmdUpdatePipe(VulDesign &design, const string &name, const string &type, const string &comment, unsigned int inputsize, unsigned int outputsize, unsigned int buffersize) {
+string cmdUpdatePipe(VulDesign &design, const string &name, const string &type, const string &comment, unsigned int inputsize, unsigned int outputsize, unsigned int buffersize, bool handshake) {
     if (name.empty()) return "#24001: pipe name cannot be empty";
     if (!isValidIdentifier(name)) return string("#24002: invalid pipe name '") + name + "'";
 
@@ -1948,6 +1948,7 @@ string cmdUpdatePipe(VulDesign &design, const string &name, const string &type, 
         vp.inputsize = inputsize;
         vp.outputsize = outputsize;
         vp.buffersize = buffersize;
+        vp.handshake = handshake;
         design.dirty_combines = true; // pipe changes affect overall design checks
         return string();
     }
@@ -1963,6 +1964,7 @@ string cmdUpdatePipe(VulDesign &design, const string &name, const string &type, 
     np.inputsize = inputsize;
     np.outputsize = outputsize;
     np.buffersize = buffersize;
+    np.handshake = handshake;
     design.pipes[name] = np;
     design.dirty_combines = true; // no separate dirty_pipes flag
     return string();

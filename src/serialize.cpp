@@ -983,6 +983,7 @@ string serializeParseDesignFromFile(const string &filename,
         pugi::xml_node inNode = pnode.child("inputsize"); vp.inputsize = inNode ? (unsigned int)inNode.text().as_llong() : 1u;
         pugi::xml_node outNode = pnode.child("outputsize"); vp.outputsize = outNode ? (unsigned int)outNode.text().as_llong() : 1u;
         pugi::xml_node bufNode = pnode.child("buffersize"); vp.buffersize = bufNode ? (unsigned int)bufNode.text().as_llong() : 0u;
+        pugi::xml_node hskNode = pnode.child("handshake"); vp.handshake = hskNode ? true : false;
         pugi::xml_node visNode = pnode.child("visual"); _serializeParseVisualNode(visNode, vp.vis);
         pipes[vp.name] = vp;
     }
@@ -1170,6 +1171,7 @@ string serializeSaveDesignToFile(const string &filename,
         pn.append_child("inputsize").text().set(std::to_string(vp.inputsize).c_str());
         pn.append_child("outputsize").text().set(std::to_string(vp.outputsize).c_str());
         pn.append_child("buffersize").text().set(std::to_string(vp.buffersize).c_str());
+        if (vp.handshake) pn.append_child("handshake");
         _serializeWriteVisualNode(pn, vp.vis);
     }
 

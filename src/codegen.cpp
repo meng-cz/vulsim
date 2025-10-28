@@ -17,18 +17,6 @@
 
 namespace fs = std::filesystem;
 
-enum class PipeType {
-    def_pipe,
-    simple_handshake
-};
-
-PipeType detectPipeType(const VulPipe &vp) {
-    if (vp.inputsize == 1 && vp.outputsize == 1 && vp.buffersize == 0) {
-        return PipeType::simple_handshake;
-    }
-    return PipeType::def_pipe;
-}
-
 /**
  * @brief Generate C++ header code for all bundles in the design.
  * @param design The VulDesign object containing the bundles.
@@ -575,22 +563,27 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     cpplines.push_back("");
 
     // pipe pointer declarations
-    // unique_ptr<Pipe<$type$, $buf$, $in$, $out$>> _pipe_$name$;
+    // unique_ptr<BufferedHandshakePipe<$type$, $buf$, $in$, $out$>> _pipe_$name$;
     // unique_ptr<SimpleHandshakePipe<$type$> _pipe_$name$;
+    // unique_ptr<SimpleNonHandshakePipe<$type$> _pipe_$name$;
     for (const auto &pipepair : design.pipes) {
         const string &pipename = pipepair.first;
         const VulPipe &vp = pipepair.second;
-        PipeType type = detectPipeType(vp);
-        if (type == PipeType::simple_handshake) {
+        VulPipeType type = detectVulPipeType(vp);
+        if (type == VulPipeType::simple_handshake) {
             cpplines.push_back("unique_ptr<SimpleHandshakePipe<" + vp.type + ">> _pipe_" + pipename + ";");
-        } else {
-            // default pipe
-            cpplines.push_back("unique_ptr<Pipe<" +
+        } else if(type == VulPipeType::simple_nonhandshake) {
+            cpplines.push_back("unique_ptr<SimpleNonHandshakePipe<" + vp.type + ">> _pipe_" + pipename + ";");
+        } else if(type == VulPipeType::buffered_handshake) {
+            cpplines.push_back("unique_ptr<BufferedHandshakePipe<" +
                 vp.type + ", "
                 + std::to_string(vp.buffersize) + ", "
                 + std::to_string(vp.inputsize) + ", "
                 + std::to_string(vp.outputsize)
                 + ">> _pipe_" + pipename + ";");
+        } else {
+            err->push_back(string("Error: unknown pipe type for pipe '") + pipename + "'");
+            return err;
         }
     }
     cpplines.push_back("");
@@ -725,22 +718,27 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
     cpplines.push_back("void init_simulation() {");
     // Pipe Init Field
     // Call constructors for pipes
-    // _pipe_$name$ = make_unique<Pipe<$type$, $buf$, $in$, $out$>>();
+    // _pipe_$name$ = make_unique<BufferedHandshakePipe<$type$, $buf$, $in$, $out$>>();
     // _pipe_$name$ = make_unique<SimpleHandshakePipe<$type$>();
+    // _pipe_$name$ = make_unique<SimpleNonHandshakePipe<$type$>();
     for (const auto &pipepair : design.pipes) {
         const string &pipename = pipepair.first;
         const VulPipe &vp = pipepair.second;
-        PipeType type = detectPipeType(vp);
-        if (type == PipeType::simple_handshake) {
+        VulPipeType type = detectVulPipeType(vp);
+        if (type == VulPipeType::simple_handshake) {
             cpplines.push_back("    _pipe_" + pipename + " = make_unique<SimpleHandshakePipe<" + vp.type + ">>();");
-        } else {
-            // default pipe
-            cpplines.push_back("    _pipe_" + pipename + " = make_unique<Pipe<" +
+        } else if(type == VulPipeType::simple_nonhandshake) {
+            cpplines.push_back("    _pipe_" + pipename + " = make_unique<SimpleNonHandshakePipe<" + vp.type + ">>();");
+        } else if(type == VulPipeType::buffered_handshake) {
+            cpplines.push_back("    _pipe_" + pipename + " = make_unique<BufferedHandshakePipe<" +
                 vp.type + ", "
                 + std::to_string(vp.buffersize) + ", "
                 + std::to_string(vp.inputsize) + ", "
                 + std::to_string(vp.outputsize)
                 + ">>();");
+        } else {
+            err->push_back(string("Error: unknown pipe type for pipe '") + pipename + "'");
+            return err;
         }
     }
     // Instance Init Field

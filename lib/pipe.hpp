@@ -76,8 +76,44 @@ protected:
     bool clear_flag = false;
 };
 
+template <typename T>
+class SimpleNonHandshakePipe {
+
+public:
+
+    array<PipePopPort<T>, 1> outputs;
+    array<PipePushPort<T>, 1> inputs;
+
+    void apply_tick() {
+        if (clear_flag) {
+            clear_flag = false;
+            outputs[0].valid = false;
+            outputs[0].accepted = false;
+            inputs[0].ready = true;
+            inputs[0].accepted = false;
+            return;
+        }
+
+        outputs[0].accepted = false;
+        if (inputs[0].accepted) {
+            outputs[0].valid = true;
+            outputs[0].value = inputs[0].value;
+        }
+
+        // always ready to accept new data
+        inputs[0].ready = true;
+    }
+
+    void clear() {
+        clear_flag = true;
+    }
+
+protected:
+    bool clear_flag = false;
+};
+
 template <typename T, int Depth = 0, int InNum = 1, int OutNum = 1>
-class Pipe {
+class BufferedHandshakePipe {
 public:
 
 static_assert(InNum > 0 && OutNum > 0, "Pipe input_num and output_num must be greater than 0");

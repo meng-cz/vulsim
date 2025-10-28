@@ -362,9 +362,10 @@ string cmdSetupInstanceConfigOverride(VulDesign &design, const string &instancen
  * @param inputsize The input size of the pipe (0 for unlimited).
  * @param outputsize The output size of the pipe (0 for unlimited).
  * @param buffersize The buffer size of the pipe (0 for default).
+ * @param handshake Whether the pipe uses handshake.
  * @return An empty string on success, or an error message on failure.
  */
-string cmdUpdatePipe(VulDesign &design, const string &name, const string &type, const string &comment, unsigned int inputsize, unsigned int outputsize, unsigned int buffersize);
+string cmdUpdatePipe(VulDesign &design, const string &name, const string &type, const string &comment, unsigned int inputsize, unsigned int outputsize, unsigned int buffersize, bool handshake);
 
 /**
  * @brief Rename a pipe in the design.

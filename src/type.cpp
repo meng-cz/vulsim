@@ -120,3 +120,23 @@ void fakeCombineFromPrefab(const VulPrefab &prefab, VulCombine &out_combine) {
     out_combine.config = prefab.config;
     out_combine.stallable = prefab.stallable;
 }
+
+/**
+ * @brief Detect the type of a VulPipe based on its properties.
+ * @param vp The VulPipe to analyze.
+ * @return The detected VulPipeType.
+ */
+VulPipeType detectVulPipeType(const VulPipe &vp) {
+    if (vp.inputsize == 1 && vp.outputsize == 1) {
+        if (vp.handshake) {
+            return VulPipeType::simple_handshake;
+        } else {
+            return VulPipeType::simple_nonhandshake;
+        }
+    } else if (vp.inputsize >= 1 && vp.outputsize >= 1 && vp.handshake) {
+        return VulPipeType::buffered_handshake;
+    } else {
+        return VulPipeType::invalid;
+    }
+}
+

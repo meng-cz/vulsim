@@ -97,8 +97,8 @@ using std::shared_ptr;
      instance config remove <instance> <configname>
 
  Pipe 操作:
-     pipe add <name> <type> [--inputsize N] [--outputsize N] [--buffersize N] [--comment "..."]
-     pipe update <name> <type> [--inputsize N] [--outputsize N] [--buffersize N] [--comment "..."]
+     pipe add <name> <type> [--inputsize N] [--outputsize N] [--buffersize N] [--comment "..."] [-h/--handshake]
+     pipe update <name> <type> [--inputsize N] [--outputsize N] [--buffersize N] [--comment "..."] [-h/--handshake]
      pipe rename <old> <new>
      pipe delete <name>
 
