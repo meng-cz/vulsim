@@ -21,3 +21,13 @@ file(GLOB TUI_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/tui/*.cpp")
 
 add_executable(vulconsole ${CORE_CXX_SRC} ${TUI_CXX_SRC})
 
+
+file(GLOB_RECURSE GUI_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.cpp")
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+
+qt_standard_project_setup()
+
+qt_add_executable(vuldesigner ${CORE_CXX_SRC} ${GUI_CXX_SRC})
+target_link_libraries(vuldesigner PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+
