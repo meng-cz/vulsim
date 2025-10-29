@@ -418,7 +418,7 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     headerlines.push_back("    class ConstructorArguments {");
     headerlines.push_back("    public:");
     for (const string &line : constructor_args_field) headerlines.push_back("        " + line);
-    headerlines.push_back("        int32 _dummy = 0; // to avoid empty class");
+    headerlines.push_back("        string __instance_name;");
     headerlines.push_back("    };");
     headerlines.push_back("");
     headerlines.push_back("    " + vc.name + "(ConstructorArguments & arg);");
@@ -430,6 +430,8 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     headerlines.push_back("    void user_current_tick();");
     headerlines.push_back("    void user_current_applytick();");
     headerlines.push_back("");
+    headerlines.push_back("    string __instance_name;");
+    headerlines.push_back("");
     for (const string &line : member_field) headerlines.push_back("    " + line);
     headerlines.push_back("");
     headerlines.push_back("};");
@@ -440,6 +442,7 @@ unique_ptr<vector<string>> codegenCombine(VulDesign &design, const string &combi
     cpplines.push_back("");
     cpplines.push_back(vc.name + "::" + vc.name + "(ConstructorArguments & arg) {");
     for (const string &line : constructor_field) cpplines.push_back("    " + line);
+    cpplines.push_back("    this->__instance_name = arg.__instance_name;");
     cpplines.push_back("    init();");
     cpplines.push_back("}");
     cpplines.push_back("");
@@ -797,6 +800,7 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
             }
             cpplines.push_back("        args." + override.first + " = " + configstmt + ";");
         }
+        cpplines.push_back("        args.__instance_name = \"" + instname + "\";");
         cpplines.push_back("        _instance_" + instname + " = make_unique<" + vc.name + ">(args);");
         cpplines.push_back("    }");
     }

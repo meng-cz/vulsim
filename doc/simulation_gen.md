@@ -55,6 +55,7 @@ void init_simulation() {
     //     // for request: args._request_$name$ = _request_$instname$_$name$;
     //     // for stallable: args._external_stall = _stall_$instname$;
     //     // for config: args.$name$ = $GEN_CONFIG_STATEMENT$;
+    //      args.__instance_name = "$instname$";
     //     _instance_$name$ = make_unique<$combine$>(args);
     // }
 }

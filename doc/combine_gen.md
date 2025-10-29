@@ -17,7 +17,7 @@ public:
     class ConstructorArguments {
     public:
         // Constructor Arguments Field
-        int32 __dummy = 0;
+        string __instance_name;
     };
 
     $name$(ConstructorArguments & arg);
@@ -28,6 +28,8 @@ public:
     void all_current_applytick();
     void user_current_tick();
     void user_current_applytick();
+
+    string __instance_name;
     
     // Member Field
 };
@@ -38,6 +40,7 @@ $name$.cpp:
 
 $name$::$name$(ConstructorArguments & arg) {
     // Constructor Field
+    this->__instance_name = arg.__instance_name;
     init();
 };
 $name$::~$name$() {
