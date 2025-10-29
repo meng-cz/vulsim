@@ -113,6 +113,7 @@ public:
      * (1) All types must be valid VulSim data types within: bundles, combines, and pipes.
      * (2) All types must be valid VulSim Basic Data Types within: storagetick
      * (3) All bundle types must not be looped (i.e. a bundle cannot contain itself directly or indirectly).
+     * (4) All pipe definitions must be valid according to their properties.
      */
     string _checkTypeError();
 

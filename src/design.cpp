@@ -669,6 +669,7 @@ string VulDesign::_checkNameError() {
  * (1) All types must be valid VulSim data types within: bundles, combines, and pipes.
  * (2) All types must be valid VulSim Basic Data Types within: storagetick
  * (3) All bundle types must not be looped (i.e. a bundle cannot contain itself directly or indirectly).
+ * (4) All pipe definitions must be valid according to their properties.
  */
 string VulDesign::_checkTypeError() {
     // All type dependencies of bundles have been pre-extracted into their vb.nested_bundles
@@ -744,11 +745,15 @@ string VulDesign::_checkTypeError() {
     }
 
     // (1) Validate pipes
+    // (4) All pipe definitions must be valid according to their properties.
     for (const auto &pk : pipes) {
         const string &pname = pk.first;
         const VulPipe &vp = pk.second;
         if (!isValidTypeName(vp.type)) {
             return string("#12011: pipe '") + pname + " has invalid type '" + vp.type + "'";
+        }
+        if (detectVulPipeType(vp) == VulPipeType::invalid) {
+            return string("#12013: pipe '") + pname + "' has invalid properties for its type detection";
         }
     }
 
