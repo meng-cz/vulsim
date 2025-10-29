@@ -574,13 +574,9 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
             cpplines.push_back("unique_ptr<SimpleHandshakePipe<" + vp.type + ">> _pipe_" + pipename + ";");
         } else if(type == VulPipeType::simple_nonhandshake) {
             cpplines.push_back("unique_ptr<SimpleNonHandshakePipe<" + vp.type + ">> _pipe_" + pipename + ";");
-        } else if(type == VulPipeType::buffered_handshake) {
-            cpplines.push_back("unique_ptr<BufferedHandshakePipe<" +
-                vp.type + ", "
-                + std::to_string(vp.buffersize) + ", "
-                + std::to_string(vp.inputsize) + ", "
-                + std::to_string(vp.outputsize)
-                + ">> _pipe_" + pipename + ";");
+        } else if(type == VulPipeType::simple_buffered) {
+            cpplines.push_back("unique_ptr<SimpleBufferedPipe<" +
+                vp.type + ", " + std::to_string(vp.buffersize) + ">> _pipe_" + pipename + ";");
         } else {
             err->push_back(string("Error: unknown pipe type for pipe '") + pipename + "'");
             return err;
@@ -729,13 +725,9 @@ unique_ptr<vector<string>> codegenSimulation(VulDesign &design, vector<string> &
             cpplines.push_back("    _pipe_" + pipename + " = make_unique<SimpleHandshakePipe<" + vp.type + ">>();");
         } else if(type == VulPipeType::simple_nonhandshake) {
             cpplines.push_back("    _pipe_" + pipename + " = make_unique<SimpleNonHandshakePipe<" + vp.type + ">>();");
-        } else if(type == VulPipeType::buffered_handshake) {
-            cpplines.push_back("    _pipe_" + pipename + " = make_unique<BufferedHandshakePipe<" +
-                vp.type + ", "
-                + std::to_string(vp.buffersize) + ", "
-                + std::to_string(vp.inputsize) + ", "
-                + std::to_string(vp.outputsize)
-                + ">>();");
+        } else if(type == VulPipeType::simple_buffered) {
+            cpplines.push_back("    _pipe_" + pipename + " = make_unique<SimpleBufferedPipe<" +
+                vp.type + ", " + std::to_string(vp.buffersize) + ">>();");
         } else {
             err->push_back(string("Error: unknown pipe type for pipe '") + pipename + "'");
             return err;

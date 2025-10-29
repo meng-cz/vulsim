@@ -127,14 +127,14 @@ void fakeCombineFromPrefab(const VulPrefab &prefab, VulCombine &out_combine) {
  * @return The detected VulPipeType.
  */
 VulPipeType detectVulPipeType(const VulPipe &vp) {
-    if (vp.inputsize == 1 && vp.outputsize == 1) {
+    if (vp.inputsize == 1 && vp.outputsize == 1 && vp.buffersize == 0) {
         if (vp.handshake) {
             return VulPipeType::simple_handshake;
         } else {
             return VulPipeType::simple_nonhandshake;
         }
-    } else if (vp.inputsize >= 1 && vp.outputsize >= 1 && vp.handshake) {
-        return VulPipeType::buffered_handshake;
+    } else if (vp.inputsize == 1 && vp.outputsize == 1 && vp.handshake) {
+        return VulPipeType::simple_buffered;
     } else {
         return VulPipeType::invalid;
     }

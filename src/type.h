@@ -194,7 +194,8 @@ enum class VulPipeType {
     invalid,
     simple_handshake,       // one-input, one-output, handshake
     simple_nonhandshake,    // one-input, one-output, non-handshake
-    buffered_handshake,     // multi-input, multi-output, buffered handshake
+    simple_buffered,        // one-input, one-output, buffered handshake
+    // buffered_handshake,     // multi-input, multi-output, buffered handshake
 };
 
 /**
