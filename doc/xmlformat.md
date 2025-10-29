@@ -93,9 +93,10 @@
     |-- name
     |-- type
     |-- (comment)
-    |-- inputsize
-    |-- outputsize
-    |-- buffersize
+    |-- (inputsize)
+    |-- (outputsize)
+    |-- (buffersize)
+    |-- (handshake)
     |-- visual
   |-- [reqconn]
     |-- reqport

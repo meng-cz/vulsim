@@ -980,9 +980,9 @@ string serializeParseDesignFromFile(const string &filename,
         vp.type = typeNode.text().as_string();
         pugi::xml_node commentNode = pnode.child("comment");
         vp.comment = commentNode ? commentNode.text().as_string() : string();
-        pugi::xml_node inNode = pnode.child("inputsize"); vp.inputsize = inNode ? (unsigned int)inNode.text().as_llong() : 1u;
-        pugi::xml_node outNode = pnode.child("outputsize"); vp.outputsize = outNode ? (unsigned int)outNode.text().as_llong() : 1u;
-        pugi::xml_node bufNode = pnode.child("buffersize"); vp.buffersize = bufNode ? (unsigned int)bufNode.text().as_llong() : 0u;
+        pugi::xml_node inNode = pnode.child("inputsize"); vp.inputsize = inNode ? inNode.text().as_uint() : 1u;
+        pugi::xml_node outNode = pnode.child("outputsize"); vp.outputsize = outNode ? outNode.text().as_uint() : 1u;
+        pugi::xml_node bufNode = pnode.child("buffersize"); vp.buffersize = bufNode ? bufNode.text().as_uint() : 0u;
         pugi::xml_node hskNode = pnode.child("handshake"); vp.handshake = hskNode ? true : false;
         pugi::xml_node visNode = pnode.child("visual"); _serializeParseVisualNode(visNode, vp.vis);
         pipes[vp.name] = vp;
@@ -1168,9 +1168,9 @@ string serializeSaveDesignToFile(const string &filename,
         pn.append_child("name").text().set(vp.name.c_str());
         pn.append_child("type").text().set(vp.type.c_str());
         if (!vp.comment.empty()) pn.append_child("comment").text().set(vp.comment.c_str());
-        pn.append_child("inputsize").text().set(std::to_string(vp.inputsize).c_str());
-        pn.append_child("outputsize").text().set(std::to_string(vp.outputsize).c_str());
-        pn.append_child("buffersize").text().set(std::to_string(vp.buffersize).c_str());
+        if (vp.inputsize != 1) pn.append_child("inputsize").text().set(std::to_string(vp.inputsize).c_str());
+        if (vp.outputsize != 1) pn.append_child("outputsize").text().set(std::to_string(vp.outputsize).c_str());
+        if (vp.buffersize != 0) pn.append_child("buffersize").text().set(std::to_string(vp.buffersize).c_str());
         if (vp.handshake) pn.append_child("handshake");
         _serializeWriteVisualNode(pn, vp.vis);
     }
