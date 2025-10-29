@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+
+<prefab>
+    <comment>A simple memory block that can load/store some 64-bits integers within one cycle.</comment>
+    <config>
+        <name>BaseAddress</name>
+        <value>0</value>
+        <comment>Base address for this memory block</comment>
+    </config>
+    <config>
+        <name>SizeMegaBytes</name>
+        <value>1024</value>
+        <comment>Size of this memory block in MB</comment>
+    </config>
+    <service>
+        <name>memory_load</name>
+        <comment>Load 64-bits from memory block.</comment>
+        <arg>
+            <name>address</name>
+            <type>uint64</type>
+            <comment>Address to load from. Aligned to 8 bytes.</comment>
+        </arg>
+        <return>
+            <name>data</name>
+            <type>uint64</type>
+            <comment>Loaded data.</comment>
+        </return>
+    </service>
+    <service>
+        <name>memory_store</name>
+        <comment>Store 64-bits to memory block.</comment>
+        <arg>
+            <name>address</name>
+            <type>uint64</type>
+            <comment>Address to store to. Aligned to 8 bytes.</comment>
+        </arg>
+        <arg>
+            <name>data</name>
+            <type>uint64</type>
+            <comment>Stored data.</comment>
+        </arg>
+    </service>
+</prefab>
