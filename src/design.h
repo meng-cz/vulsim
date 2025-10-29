@@ -85,6 +85,14 @@ public:
      */
     string addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles);
 
+    /**
+     * @brief Remove a prefab from the design.
+     * @param name The name of the prefab to remove.
+     * @param removed_bundles Output parameter to receive the names of bundles that were removed as a result.
+     * @return An empty string on success, or an error message on failure.
+     */
+    string removePrefab(const string &name, vector<string> &removed_bundles);
+
     vector<VulVisBlock> vis_blocks;
     vector<VulVisText> vis_texts;
 

@@ -54,6 +54,12 @@ using std::shared_ptr;
      show pipe                               # 列出所有 pipes
      show config                             # 列出设计级 config 项
      show connect                            # 列出所有连接关系
+     show prefab                             # 列出所有已加载的预制件
+     show prefab <prefab-name>               # 显示指定预制件的详细信息（包含定义的 bundles 和 combines）
+
+ Prefab 操作:
+     prefab load <prefab-dir>        # 加载预制件目录下的预制件定义和源码文件
+     prefab unload <prefab-name>     # 卸载指定名称的预制件
 
  Config 操作:
      config add <name> <value> [--comment "..."]

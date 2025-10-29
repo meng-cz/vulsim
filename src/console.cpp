@@ -7,6 +7,7 @@
 #include "console.h"
 #include "command.h"
 #include "codegen.h"
+#include "serialize.h"
 
 #include <sstream>
 #include <algorithm>
@@ -233,6 +234,93 @@ unique_ptr<vector<string>> _consoleShow(VulDesign &design, vector<string> &args)
         }
 
         return output;
+    }
+
+    if (token == "prefab" || token == "prefabs") {
+        if (args.size() == 1) {
+            output->push_back("Prefabs:");
+            for (const auto &kv : design.prefabs) {
+                const VulPrefab &p = kv.second;
+                string s = string("  ") + p.name;
+                if (!p.path.empty()) s += string(" -> ") + p.path;
+                output->push_back(s);
+            }
+            return output;
+        } else {
+            string pname = args[1];
+            auto it = design.prefabs.find(pname);
+            if (it == design.prefabs.end()) {
+                output->push_back(string("Error: prefab '") + pname + "' not found");
+                return output;
+            }
+            const VulPrefab &pf = it->second;
+            output->push_back(string("Prefab: ") + pf.name);
+            if (!pf.comment.empty()) output->push_back(string("  comment: ") + pf.comment);
+            if (!pf.path.empty()) output->push_back(string("  path: ") + pf.path);
+            output->push_back(string("  stallable: ") + (pf.stallable ? "true" : "false"));
+
+            output->push_back("  pipein:");
+            if (pf.pipein.empty()) { output->push_back("    (none)"); }
+            for (const VulPipePort &p : pf.pipein) {
+                string s = string("    ") + p.name + " : " + p.type;
+                if (!p.comment.empty()) s += string(" // ") + p.comment;
+                output->push_back(s);
+            }
+
+            output->push_back("  pipeout:");
+            if (pf.pipeout.empty()) { output->push_back("    (none)"); }
+            for (const VulPipePort &p : pf.pipeout) {
+                string s = string("    ") + p.name + " : " + p.type;
+                if (!p.comment.empty()) s += string(" // ") + p.comment;
+                output->push_back(s);
+            }
+
+            output->push_back("  requests:");
+            if (pf.request.empty()) { output->push_back("    (none)"); }
+            for (const VulRequest &r : pf.request) {
+                string s = string("    ") + r.name + "(";
+                for (size_t i = 0; i < r.arg.size(); ++i) { if (i) s += ", "; s += r.arg[i].type; }
+                s += ") -> (";
+                for (size_t i = 0; i < r.ret.size(); ++i) { if (i) s += ", "; s += r.ret[i].type; }
+                s += ")";
+                if (!r.comment.empty()) s += string(" // ") + r.comment;
+                output->push_back(s);
+            }
+
+            output->push_back("  services:");
+            if (pf.service.empty()) { output->push_back("    (none)"); }
+            for (const VulService &s : pf.service) {
+                string line_s = string("    ") + s.name + "(";
+                for (size_t i = 0; i < s.arg.size(); ++i) { if (i) line_s += ", "; line_s += s.arg[i].type + string(" ") + s.arg[i].name; }
+                line_s += ") -> (";
+                for (size_t i = 0; i < s.ret.size(); ++i) { if (i) line_s += ", "; line_s += s.ret[i].type + string(" ") + s.ret[i].name; }
+                line_s += ")";
+                if (!s.comment.empty()) line_s += string(" // ") + s.comment;
+                output->push_back(line_s);
+            }
+
+            output->push_back("  config:");
+            if (pf.config.empty()) { output->push_back("    (none)"); }
+            for (const VulConfig &c : pf.config) {
+                string s = string("    ") + c.name + " = '" + c.value + "'";
+                if (!c.comment.empty()) s += string(" // ") + c.comment;
+                output->push_back(s);
+            }
+
+            // print bundles that this prefab depends on according to design.bundles (bundle.ref_prefabs contains this prefab)
+            output->push_back("  dependent bundles (in design):");
+            bool any = false;
+            for (const auto &bkv : design.bundles) {
+                const VulBundle &vb = bkv.second;
+                if (std::find(vb.ref_prefabs.begin(), vb.ref_prefabs.end(), pf.name) != vb.ref_prefabs.end()) {
+                    output->push_back(string("    ") + vb.name);
+                    any = true;
+                }
+            }
+            if (!any) output->push_back("    (none)");
+
+            return output;
+        }
     }
 
     // unknown token
@@ -829,6 +917,87 @@ unique_ptr<vector<string>> _consolePipe(VulDesign &design, vector<string> &args)
 }
 
 /**
+ * @brief Handle the 'prefab' command to manipulate prefabs in the design.
+ * @param design The VulDesign object to modify.
+ * @param args The arguments passed to the 'prefab' command.
+ * @return A unique_ptr to a vector<string> containing the output messages.
+ */
+unique_ptr<vector<string>> _consolePrefab(VulDesign &design, vector<string> &args) {
+    auto output = std::make_unique<vector<string>>();
+    if (args.empty()) {
+        output->push_back("Usage: prefab load <prefab-dir> | unload <prefab-name>");
+        return output;
+    }
+    auto toLower = [](const string &s) {
+        string r = s;
+        std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c){ return std::tolower(c); });
+        return r;
+    };
+
+    string sub = toLower(args[0]);
+
+    if (sub == "load") {
+        if (args.size() < 2) { output->push_back("Error: missing prefab directory. Usage: prefab load <prefab-dir>"); return output; }
+        // load prefab-dir/prefab-dir-name.xml
+        string dir = args[1];
+        std::filesystem::path p(dir);
+        string prefabName = p.filename().string();
+        std::filesystem::path filepath = (p / (prefabName + ".xml"));
+        // load prefab.xml
+        VulPrefab vp;
+        string err;
+        err = serializeParsePrefabFromFile(filepath.string(), vp);
+        if (!err.empty()) {
+            output->push_back(string("Error: failed to load prefab from '") + filepath.string () + "': " + err);
+            return output;
+        }
+        // load bundles from prefab-dir/bundle/*.xml
+        vector<VulBundle> bundles;
+        std::filesystem::path bundleDir = (p / "bundle");;
+        if (std::filesystem::exists(bundleDir) && std::filesystem::is_directory(bundleDir)) {
+            for (const auto & entry : std::filesystem::directory_iterator(bundleDir)) {
+                if (entry.path().extension() == ".xml") {
+                    VulBundle vb;
+                    string berr = serializeParseBundleFromFile(entry.path().string(), vb);
+                    if (!berr.empty()) {
+                        output->push_back(string("Error: failed to load bundle from '") + entry.path().string () + "': " + berr);
+                        return output;
+                    }
+                    bundles.push_back(vb);
+                    vp.ref_bundles.push_back(vb.name);
+                }
+            }
+        }
+        err = design.addPrefab(vp, bundles);
+        if (!err.empty()) {
+            output->push_back(string("Error: failed to add prefab '") + prefabName + "': " + err);
+            return output;
+        }
+        output->push_back(string("OK: prefab '") + prefabName + "' loaded");;
+        return output;
+    }
+
+    if (sub == "unload") {
+        if (args.size() < 2) { output->push_back("Error: missing prefab name. Usage: prefab unload <prefab-name>"); return output; }
+        string prefabName = args[1];
+        vector<string> removed_bundles;
+        string err = design.removePrefab(prefabName, removed_bundles);
+        if (!err.empty()) {
+            output->push_back(string("Error: failed to unload prefab '") + prefabName + "': " + err);
+            return output;
+        }
+        output->push_back(string("OK: prefab '") + prefabName + "' unloaded");
+        for (const auto &bn : removed_bundles) {
+            output->push_back(string("      bundle '") + bn + "' also removed");
+        }
+        return output;
+    }
+
+    output->push_back(string("Unknown prefab subcommand: '") + sub + "'");
+    return output;
+}
+
+/**
  * @brief Handle the 'connect' command to create connections between instances, pipes, requests, and services.
  * @param design The VulDesign object to modify.
  * @param args The arguments passed to the 'connect' command.
@@ -1319,11 +1488,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
         return _consoleLoad(args);
     }
 
-    if (cmd == "save") {
-        vector<string> args = args_from(1);
-        return _consoleSave(args);
-    }
-
     if (cmd == "new") {
         auto output = std::make_unique<vector<string>>();
         if (toks.size() < 3) { output->push_back("Error: missing args. Usage: new <project-name> <project-dir>"); return output; }
@@ -1343,29 +1507,36 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
         return output;
     }
 
+    // Commands that require a loaded design and dispatch to specific handlers
+    if (!design) {
+        auto output = std::make_unique<vector<string>>();
+        output->push_back("Error: no design loaded");
+        return output;
+    }
+
+    if (cmd == "save") {
+        vector<string> args = args_from(1);
+        return _consoleSave(args);
+    }
+
     if (cmd == "close") {
         auto output = std::make_unique<vector<string>>();
-        if (design) {
-            string res = design->saveProject();
-            if (!res.empty()) { output->push_back(res); return output; }
-            design.reset();
-            output->push_back("OK: project closed");
-            return output;
-        }
-        output->push_back("Error: no design loaded");
+        string res = design->saveProject();
+        if (!res.empty()) { output->push_back(res); return output; }
+        design.reset();
+        output->push_back("OK: project closed");
         return output;
     }
 
     if (cmd == "cancel") {
         auto output = std::make_unique<vector<string>>();
-        if (design) { design.reset(); output->push_back("OK: project unloaded (unsaved)"); return output; }
-        output->push_back("Error: no design loaded");
+        design.reset();
+        output->push_back("OK: project unloaded (unsaved)");
         return output;
     }
 
     if (cmd == "info") {
         auto output = std::make_unique<vector<string>>();
-        if (!design) { output->push_back("Error: no design loaded"); return output; }
         output->push_back(string("project_dir: ") + design->project_dir);
         output->push_back(string("project_name: ") + design->project_name);
         return output;
@@ -1373,7 +1544,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
 
     if (cmd == "genbundleh") {
         auto output = std::make_unique<vector<string>>();
-        if (!design) { output->push_back("Error: no design loaded"); return output; }
 
         // must not be dirty
         if (design->dirty_bundles) {
@@ -1410,13 +1580,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
             output->push_back(string("Error: exception writing file: ") + e.what());
             return output;
         }
-    }
-
-    // Commands that require a loaded design and dispatch to specific handlers
-    if (!design) {
-        auto output = std::make_unique<vector<string>>();
-        output->push_back("Error: no design loaded");
-        return output;
     }
 
     // map top-level commands to handler functions
@@ -1462,8 +1625,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
 
     if (cmd == "validate") {
         auto output = std::make_unique<vector<string>>();
-        // must have a clean design
-        if (!design) { output->push_back("Error: no design loaded"); return output; }
         // save it first
         string res = design->saveProject();
         if (!res.empty()) { output->push_back(res); return output; }
@@ -1475,8 +1636,6 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
 
     if (cmd == "generate") {
         auto output = std::make_unique<vector<string>>();
-        // must have a clean design
-        if (!design) { output->push_back("Error: no design loaded"); return output; }
         // save it first
         {
             string res = design->saveProject();

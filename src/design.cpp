@@ -398,6 +398,58 @@ string VulDesign::addPrefab(VulPrefab &prefab, vector<VulBundle> &dep_bundles) {
     return string("");
 }
 
+/**
+ * @brief Remove a prefab from the design.
+ * @param name The name of the prefab to remove.
+ * @return An empty string on success, or an error message on failure.
+ */
+string VulDesign::removePrefab(const string &name, vector<string> &removed_bundles) {
+    // check prefab exists
+    auto pit = prefabs.find(name);
+    if (pit == prefabs.end()) {
+        return string("Prefab not found: ") + name;
+    }
+
+    // ensure no instance refers to a combine with this prefab's name
+    for (const auto &kv : instances) {
+        const VulInstance &inst = kv.second;
+        if (inst.combine == name) {
+            return string("Cannot remove prefab '") + name + "': instance '" + kv.first + "' uses combine '" + name + "'";
+        }
+    }
+
+    // For each bundle referenced by this prefab (and more generally any bundle that lists this prefab in ref_prefabs),
+    // either remove the prefab name from the bundle's ref_prefabs, or delete the bundle if its only dependency is this prefab.
+    vector<string> bundlesToDelete;
+    for (auto &bkv : bundles) {
+        auto &ref_prefabs = bkv.second.ref_prefabs;
+        auto it = std::find(ref_prefabs.begin(), ref_prefabs.end(), name);
+        if (it != ref_prefabs.end()) {
+            // if this bundle only has this prefab as dependency, schedule it for deletion
+            if (ref_prefabs.size() == 1) {
+                bundlesToDelete.push_back(bkv.first);
+            } else {
+                // otherwise just remove this prefab from its reference list
+                ref_prefabs.erase(it);
+            }
+        }
+    }
+
+    // erase scheduled bundles
+    for (const auto &bn : bundlesToDelete) {
+        bundles.erase(bn);
+        removed_bundles.push_back(bn);
+    }
+
+    // finally remove the prefab itself
+    prefabs.erase(pit);
+
+    // mark bundles dirty so they will be saved
+    dirty_bundles = true;
+
+    return string("");
+}
+
 string VulDesign::saveProject() {
     namespace fs = std::filesystem;
     string err;
