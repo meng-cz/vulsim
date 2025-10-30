@@ -313,7 +313,7 @@ unique_ptr<VulDesign> VulDesign::loadFromFile(const string &filename, string &er
         const string &prefab_name = pentry.first;
         const string &prefab_dir = pentry.second;
         fs::path prefab_dir_path = prefab_dir;
-        fs::path prefab_file = prefab_dir_path / (prefab_name + ".vulp");
+        fs::path prefab_file = prefab_dir_path / (prefab_name + ".xml");
         VulPrefab prefab;
         err = serializeParsePrefabFromFile(prefab_file.string(), prefab);
         if (!err.empty()) {

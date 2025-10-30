@@ -2,7 +2,7 @@
 
 ```
 |-- PrefabName
-  |-- PrefabName.vulp
+  |-- PrefabName.xml
   |-- PrefabName.h
   |-- bundle
     |-- bundles.xml
