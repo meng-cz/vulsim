@@ -18,7 +18,7 @@ using std::shared_ptr;
  Terminal 命令手册（示例语法，参数需按项目约定填写）
 
  项目操作:
-     new <project-name> <project-dir>   # 新建一个设计项目（创建 project_dir 和 project.vul）
+     new <project-dir>               # 新建一个设计项目（创建 project_dir 和 project_dir_name.vul）
      load <project-file-or-dir>      # 加载一个设计项目（打开 project.vul或project_dir）
      save [<project-file-or-dir>]    # 保存当前设计到磁盘（可选目标路径另存为）
      close                           # 关闭当前项目（释放内存、清除状态）

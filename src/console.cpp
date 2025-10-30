@@ -1490,10 +1490,16 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
 
     if (cmd == "new") {
         auto output = std::make_unique<vector<string>>();
-        if (toks.size() < 3) { output->push_back("Error: missing args. Usage: new <project-name> <project-dir>"); return output; }
+        if (toks.size() < 2) { output->push_back("Error: missing args. Usage: new <project-dir>"); return output; }
         if (design) { output->push_back("Error: a design is already loaded. Close it before creating a new one."); return output; }
-        string projname = toks[1];
-        string projdir = toks[2];
+        string projdir = toks[1];
+
+        std::filesystem::path p(projdir);
+        if (std::filesystem::exists(p)) {
+            output->push_back(string("Error: target project directory already exists: ") + projdir);
+            return output;
+        }
+        string projname = p.filename().string();
 
         string err;
         auto d = VulDesign::initNewDesign(projname, projdir, err);
@@ -1586,6 +1592,11 @@ unique_ptr<vector<string>> VulConsole::performCommand(const string &cmdline) {
     if (cmd == "show") {
         vector<string> args = args_from(1);
         return _consoleShow(*design, args);
+    }
+
+    if (cmd == "prefab") {
+        vector<string> args = args_from(1);
+        return _consolePrefab(*design, args);
     }
 
     if (cmd == "config") {
