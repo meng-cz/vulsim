@@ -210,6 +210,7 @@ string cmdUpdateBundle(VulDesign &design, const string &name, const string &comm
         VulBundle vb;
         vb.name = name;
         vb.comment = comment;
+        vb.ref_prefabs.push_back("_user_");
         design.bundles[name] = vb;
     }
     design.dirty_bundles = true;
