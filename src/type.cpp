@@ -39,6 +39,38 @@ bool isValidIdentifier(const string &name) {
     return true;
 }
 
+/**
+ * @brief Replace all occurrences of an identifier in a string with a new identifier.
+ * Only whole-word matches are replaced.
+ * @param s The input string.
+ * @param old_name The identifier to be replaced.
+ * @param new_name The new identifier to replace with.
+ * @return A new string with the replacements made.
+ */
+string identifierReplace(const string &s, const string &old_name, const string &new_name) {
+    if (old_name.empty()) return s;
+    string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (std::isalpha(c) || s[i] == '_') {
+            size_t j = i + 1;
+            while (j < s.size()) {
+                unsigned char cj = static_cast<unsigned char>(s[j]);
+                if (std::isalnum(cj) || s[j] == '_') ++j; else break;
+            }
+            string ident = s.substr(i, j - i);
+            if (ident == old_name) out += new_name; else out += ident;
+            i = j;
+        } else {
+            out.push_back(s[i]);
+            ++i;
+        }
+    }
+    return out;
+}
+
 
 /**
  * Check if the given type is a valid VulSim Basic Data Type.

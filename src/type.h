@@ -24,6 +24,16 @@ using std::tuple;
 bool isValidIdentifier(const string &s);
 
 /**
+ * @brief Replace all occurrences of an identifier in a string with a new identifier.
+ * Only whole-word matches are replaced.
+ * @param s The input string.
+ * @param old_name The identifier to be replaced.
+ * @param new_name The new identifier to replace with.
+ * @return A new string with the replacements made.
+ */
+string identifierReplace(const string &s, const string &old_name, const string &new_name);
+
+/**
  * @brief Check if the given type is a valid VulSim Basic Data Type.
  * List of valid basic types:
  * uint8, uint16, uint32, uint64, uint128, int8, int16, int32, int64, int128, bool
