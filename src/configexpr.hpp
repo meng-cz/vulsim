@@ -577,4 +577,18 @@ inline ConfigRealValue evaluateConfigValueExpression(const ASTNode &node, uint32
     }
 }
 
+inline unique_ptr<vector<ConfigName>> parseReferencedIdentifier(const string &valuestr, uint32_t &errpos, string &err) {
+    auto tokens = tokenizeConfigValueExpression(valuestr, errpos, err);
+    if (!tokens) return nullptr;
+    auto ast = parseConfigValueExpression(*tokens, errpos, err);
+    if (!ast) return nullptr;
+    auto out = make_unique<vector<ConfigName>>();
+    for (const auto &t : *tokens) {
+        if (t.type == TokenType::Identifier) {
+            out->push_back(t.text);
+        }
+    }
+    return out;
+}
+
 } // namespace config_parser

@@ -48,11 +48,22 @@ typedef string ConfigValue;
 class VulConfigLib {
 
 public:
+
+    const GroupName DefaultGroupName = "__default__";
+
     /**
      * @brief Get the singleton instance of the VulConfigLib.
      * @return A shared_ptr to the VulConfigLib instance.
      */
     static shared_ptr<VulConfigLib> getInstance();
+
+    /**
+     * @brief Check if a config item name already exists in the config library.
+     * @param name The config item name to check.
+     */
+    inline bool checkNameConflict(const ConfigName &name) const {
+        return config_items.find(name) != config_items.end();
+    }
 
     /**
      * @brief List all config groups/components in the config library.
@@ -89,6 +100,13 @@ public:
     ) const;
 
     /**
+     * @brief Get all config items in topological order based on their references.
+     * @param out_sorted_items Output vector to hold the names of config items in topological order.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    ErrorMsg getAllConfigItemsTopoSort(vector<ConfigName> &out_sorted_items) const;
+
+    /**
      * @brief Get the value string of a config item.
      * @param item_name The name of the config item to get.
      * @param out_value Output parameter to hold the value string of the config item.
@@ -115,6 +133,17 @@ public:
      * @return An ErrorMsg indicating failure, empty if success.
      */
     ErrorMsg insertConfigItem(const GroupName &group_name, const ConfigName &item_name, const ConfigValue &item_value);
+
+    /**
+     * @brief Insert a new config item into the config library.
+     * Duplicate names across groups are not allowed.
+     * @param item_name The name of the config item.
+     * @param item_value The value of the config item.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    inline ErrorMsg insertConfigItem(const ConfigName &item_name, const ConfigValue &item_value) {
+        return insertConfigItem(DefaultGroupName, item_name, item_value);
+    }
 
     /**
      * @brief Insert a new config group with multiple config items into the config library.

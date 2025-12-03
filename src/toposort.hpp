@@ -27,6 +27,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <memory>
+#include <algorithm>
 #include <queue>
 
 using std::string;
@@ -62,8 +63,12 @@ inline unique_ptr<vector<string>> topologicalSort(
         }
     }
 
+    std::vector<string> temp;
+    temp.reserve(indeg.size());
+    for (const auto &p : indeg) if (p.second == 0) temp.push_back(p.first);
+    std::sort(temp.begin(), temp.end());
     std::queue<string> q;
-    for (const auto &p : indeg) if (p.second == 0) q.push(p.first);
+    for (const auto &item : temp) q.push(item);
 
     while (!q.empty()) {
         string u = q.front(); q.pop();

@@ -208,6 +208,29 @@ ErrorMsg VulConfigLib::getConfigRealValue(const ConfigName &item_name, ConfigRea
     return "";
 }
 
+/**
+ * @brief Get all config items in topological order based on their references.
+ * @param out_sorted_items Output vector to hold the names of config items in topological order.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg VulConfigLib::getAllConfigItemsTopoSort(vector<ConfigName> &out_sorted_items) const {
+    unordered_set<ConfigName> all_items;
+    for (const auto &entry : config_items) {
+        all_items.insert(entry.first);
+    }
+    vector<ConfigName> out_loop_nodes;
+    auto sorted_items_ptr = topologicalSort(all_items, references, out_loop_nodes);
+    if (!sorted_items_ptr) {
+        string looped_items_str;
+        for (const auto &it : out_loop_nodes) {
+            if (!looped_items_str.empty()) looped_items_str += ", ";
+            looped_items_str += it;
+        }
+        return EStr(EItemConfRefLooped, "Config items have circular references: " + looped_items_str);
+    }
+    out_sorted_items = std::move(*sorted_items_ptr);
+    return "";
+}
 
 /**
  * @brief Insert a new config item into the config library.
