@@ -368,6 +368,15 @@ ErrorMsg VulBundleLib::renameBundle(const BundleName &old_name, const BundleName
             }
         }
     }
+    for (const auto &ref_name : entry.references) {
+        auto ref_iter = bundles.find(ref_name);
+        if (ref_iter != bundles.end()) [[likely]] {
+            auto &ref_entry = ref_iter->second;
+            // update reverse references set
+            ref_entry.reverse_references.erase(old_name);
+            ref_entry.reverse_references.insert(new_name);
+        }
+    }
     // update tag_bundles
     for (const auto &tag : entry.tags) {
         auto tag_iter = tag_bundles.find(tag);
@@ -386,7 +395,7 @@ ErrorMsg VulBundleLib::renameBundle(const BundleName &old_name, const BundleName
     }
     // insert new entry and erase old one
     bundles[new_name] = entry;
-    bundles.erase(iter);
+    bundles.erase(old_name);
     return "";
 }
 
