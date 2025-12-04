@@ -23,8 +23,7 @@
 #pragma once
 
 #include "errormsg.hpp"
-
-#include <inttypes.h>
+#include "type.h"
 
 #include <vector>
 #include <string>
@@ -44,6 +43,12 @@ typedef int64_t ConfigRealValue;
 typedef string GroupName;
 typedef string ConfigName;
 typedef string ConfigValue;
+
+typedef struct {
+    ConfigName      name;
+    ConfigValue     value;
+    Comment         comment;
+} VulConfigItem;
 
 class VulConfigLib {
 
@@ -76,28 +81,17 @@ public:
      * Output items are sorted by name.
      * @param group_name The component/group name to list config items from.
      * @param out_items Output vector to hold the names of config items.
-     * @param out_values Output vector to hold the values of config items.
-     * @param out_real_values Output vector to hold the real values of config items.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg listConfigItems(
-        const GroupName &group_name,
-        vector<ConfigName> &out_items,
-        vector<ConfigValue> &out_values,
-        vector<ConfigRealValue> &out_real_values
-    ) const;
+    ErrorMsg listConfigItems(const GroupName &group_name, vector<VulConfigItem> &out_items) const;
 
     /**
      * @brief Get the value string and real value of a config item.
      * @param item_name The name of the config item to get.
-     * @param out_value Output parameter to hold the value string of the config item.
-     * @param out_real_value Output parameter to hold the integer value of the config item.
+     * @param out_item Output parameter to hold the VulConfigItem.
+     * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg getConfigItem(
-        const ConfigName &item_name,
-        ConfigValue &out_value,
-        ConfigRealValue &out_real_value
-    ) const;
+    ErrorMsg getConfigItem(const ConfigName &item_name, VulConfigItem &out_item) const;
 
     /**
      * @brief Get all config items in topological order based on their references.
@@ -128,21 +122,19 @@ public:
      * Duplicate names across groups are not allowed.
      * New group will be created if it does not exist.
      * @param group_name The component/group name the config item belongs to.
-     * @param item_name The name of the config item.
-     * @param item_value The value of the config item.
+     * @param config_item The VulConfigItem to insert.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg insertConfigItem(const GroupName &group_name, const ConfigName &item_name, const ConfigValue &item_value);
+    ErrorMsg insertConfigItem(const GroupName &group_name, const VulConfigItem &config_item);
 
     /**
      * @brief Insert a new config item into the config library.
      * Duplicate names across groups are not allowed.
-     * @param item_name The name of the config item.
-     * @param item_value The value of the config item.
+     * @param config_item The VulConfigItem to insert.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    inline ErrorMsg insertConfigItem(const ConfigName &item_name, const ConfigValue &item_value) {
-        return insertConfigItem(DefaultGroupName, item_name, item_value);
+    inline ErrorMsg insertConfigItem(const VulConfigItem &config_item) {
+        return insertConfigItem(DefaultGroupName, config_item);
     }
 
     /**
@@ -150,10 +142,10 @@ public:
      * Duplicate names across groups are not allowed.
      * New group will be created if it does not exist.
      * @param group_name The component/group name to insert.
-     * @param items A map of config item names to their values.
+     * @param items A vector of VulConfigItems to insert.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg insertConfigGroup(const GroupName &group_name, const unordered_map<ConfigName, ConfigValue> &items);
+    ErrorMsg insertConfigGroup(const GroupName &group_name, const vector<VulConfigItem> &items);
 
     /**
      * @brief Rename a config item in the config library.
@@ -169,10 +161,10 @@ public:
     /**
      * @brief Update the value of an existing config item.
      * @param item_name The name of the config item to update.
-     * @param new_value The new value to set for the config item.
+     * @param new_item The new VulConfigItem to set for the config item.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg updateConfigItemValue(const ConfigName &item_name, const ConfigValue &new_value);
+    ErrorMsg updateConfigItemValue(const ConfigName &item_name, const VulConfigItem &new_item);
 
     /**
      * @brief Remove a config item from the config library.
@@ -226,34 +218,21 @@ protected:
     VulConfigLib() = default;
 
     typedef struct {
-        ConfigValue         str_value;
+        VulConfigItem       item;
+        GroupName           group;
         ConfigRealValue     real_value;
-        GroupName           group; // group this config item belongs to
-    } ConfigItem;
-    unordered_map<ConfigName, ConfigItem> config_items; // config item name -> ConfigItem
-    unordered_map<ConfigName, unordered_set<ConfigName>> references; // config item name -> set of config items it references
-    unordered_map<ConfigName, unordered_set<ConfigName>> reverse_references; // config item name -> set of config items that reference it
+        unordered_set<ConfigName>   references;
+        unordered_set<ConfigName>   reverse_references;
+    } ConfigEntry;
 
+    unordered_map<ConfigName, ConfigEntry> config_items; // config item name -> ConfigEntry
     unordered_map<GroupName, unordered_set<ConfigName>> groups; // group name -> set of config item names
     
     struct SnapshotEntry {
-        unordered_map<ConfigName, ConfigItem> config_items;
-        unordered_map<ConfigName, unordered_set<ConfigName>> references;
-        unordered_map<ConfigName, unordered_set<ConfigName>> reverse_references;
+        unordered_map<ConfigName, ConfigEntry> config_items;
         unordered_map<GroupName, unordered_set<ConfigName>> groups;
     };
     unordered_map<uint64_t, SnapshotEntry> snapshots;
 
-    unique_ptr<vector<ConfigName>> _parseConfigReferences(
-        const ConfigValue &value,
-        uint32_t &out_error_pos,
-        ErrorMsg &err
-    ) const;
-
-    ConfigRealValue _calculateConfigRealValue (
-        const ConfigValue &value,
-        uint32_t &out_error_pos,
-        ErrorMsg &err
-    ) const;
 };
 

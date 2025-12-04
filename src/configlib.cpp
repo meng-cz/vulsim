@@ -34,62 +34,6 @@ using std::unique_ptr;
 using std::make_unique;
 
 
-unique_ptr<vector<ConfigName>> VulConfigLib::_parseConfigReferences(
-    const ConfigValue &value,
-    uint32_t &out_error_pos,
-    ErrorMsg &err
-) const {
-    using namespace config_parser;
-    out_error_pos = 0; err.clear();
-    auto tokens = tokenizeConfigValueExpression(value, out_error_pos, err);
-    if (!tokens) {
-        return nullptr;
-    }
-    unique_ptr<vector<ConfigName>> result = make_unique<vector<ConfigName>>();
-    for (const auto &tok : *tokens) {
-        if (tok.type == TokenType::Identifier) {
-            result->push_back(tok.text);
-        }
-    }
-    return result;
-}
-
-ConfigRealValue VulConfigLib::_calculateConfigRealValue (
-    const ConfigValue &value,
-    uint32_t &out_error_pos,
-    ErrorMsg &err
-) const {
-    using namespace config_parser;
-    out_error_pos = 0; err.clear();
-    auto tokens = tokenizeConfigValueExpression(value, out_error_pos, err);
-    if (!tokens) {
-        return 0;
-    }
-    // replace Identifier tokens with their values
-    for (auto &tok : *tokens) {
-        if (tok.type == TokenType::Identifier) {
-            // lookup value
-            auto iter = config_items.find(tok.text);
-            if (iter != config_items.end()) {
-                tok.type = TokenType::Number;
-                tok.value = iter->second.real_value;
-            } else {
-                err = string("Undefined config identifier: ") + tok.text;
-                out_error_pos = static_cast<uint32_t>(tok.pos);
-                return 0;
-            }
-        }
-    }
-    auto ast = parseConfigValueExpression(*tokens, out_error_pos, err);
-    if (!ast) {
-        return 0;
-    }
-    ConfigRealValue result = evaluateConfigValueExpression(*ast, out_error_pos, err);
-    if (!err.empty()) {
-        return 0;
-    }
-    return result;
-}
 
 static shared_ptr<VulConfigLib> _instance;
 
@@ -122,16 +66,9 @@ void VulConfigLib::listGroups(vector<GroupName> &out_groups) const {
  * Output items are sorted by name.
  * @param group_name The component/group name to list config items from.
  * @param out_items Output vector to hold the names of config items.
- * @param out_values Output vector to hold the values of config items.
- * @param out_real_values Output vector to hold the real values of config items.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulConfigLib::listConfigItems(
-    const GroupName &group_name,
-    vector<ConfigName> &out_items,
-    vector<ConfigValue> &out_values,
-    vector<ConfigRealValue> &out_real_values
-) const {
+ErrorMsg VulConfigLib::listConfigItems(const GroupName &group_name, vector<VulConfigItem> &out_items) const {
     auto iter = groups.find(group_name);
     if (iter == groups.end()) {
         return EStr(EItemConfGroupNameNotFound, string("Group not found: ") + group_name);
@@ -146,14 +83,10 @@ ErrorMsg VulConfigLib::listConfigItems(
     }
     std::sort(tmp_items.begin(), tmp_items.end());
     out_items.clear();
-    out_values.clear();
-    out_real_values.clear();
     for (const auto &item_name : tmp_items) {
         auto item_iter = config_items.find(item_name);
         if (item_iter != config_items.end()) {
-            out_items.push_back(item_name);
-            out_values.push_back(item_iter->second.str_value);
-            out_real_values.push_back(item_iter->second.real_value);
+            out_items.push_back(item_iter->second.item);
         }
     }
     return "";
@@ -162,20 +95,15 @@ ErrorMsg VulConfigLib::listConfigItems(
 /**
  * @brief Get the value string and real value of a config item.
  * @param item_name The name of the config item to get.
- * @param out_value Output parameter to hold the value string of the config item.
- * @param out_real_value Output parameter to hold the integer value of the config item.
+ * @param out_item Output parameter to hold the VulConfigItem.
+ * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulConfigLib::getConfigItem(
-    const ConfigName &item_name,
-    ConfigValue &out_value,
-    ConfigRealValue &out_real_value
-) const {
+ErrorMsg VulConfigLib::getConfigItem(const ConfigName &item_name, VulConfigItem &out_item) const{
     auto iter = config_items.find(item_name);
     if (iter == config_items.end()) {
         return EStr(EItemConfNameNotFound, string("Config item not found: ") + item_name);
     }
-    out_value = iter->second.str_value;
-    out_real_value = iter->second.real_value;
+    out_item = iter->second.item;
     return "";
 }
 
@@ -190,7 +118,7 @@ ErrorMsg VulConfigLib::getConfigStrValue(const ConfigName &item_name, ConfigValu
     if (iter == config_items.end()) {
         return EStr(EItemConfNameNotFound, string("Config item not found: ") + item_name);
     }
-    out_value = iter->second.str_value;
+    out_value = iter->second.item.value;
     return "";
 }
 
@@ -216,11 +144,13 @@ ErrorMsg VulConfigLib::getConfigRealValue(const ConfigName &item_name, ConfigRea
  */
 ErrorMsg VulConfigLib::getAllConfigItemsTopoSort(vector<ConfigName> &out_sorted_items) const {
     unordered_set<ConfigName> all_items;
+    unordered_map<ConfigName, unordered_set<ConfigName>> rev_references;
     for (const auto &entry : config_items) {
         all_items.insert(entry.first);
+        rev_references[entry.first] = entry.second.reverse_references;
     }
     vector<ConfigName> out_loop_nodes;
-    auto sorted_items_ptr = topologicalSort(all_items, references, out_loop_nodes);
+    auto sorted_items_ptr = topologicalSort(all_items, rev_references, out_loop_nodes);
     if (!sorted_items_ptr) {
         string looped_items_str;
         for (const auto &it : out_loop_nodes) {
@@ -238,56 +168,42 @@ ErrorMsg VulConfigLib::getAllConfigItemsTopoSort(vector<ConfigName> &out_sorted_
  * Duplicate names across groups are not allowed.
  * New group will be created if it does not exist.
  * @param group_name The component/group name the config item belongs to.
- * @param item_name The name of the config item.
- * @param item_value The value of the config item.
+ * @param config_item The VulConfigItem to insert.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulConfigLib::insertConfigItem(const GroupName &group_name, const ConfigName &item_name, const ConfigValue &item_value) {
-    if (config_items.find(item_name) != config_items.end()) {
-        return EStr(EItemConfNameDup, string("Duplicate config item name: ") + item_name);
+ErrorMsg VulConfigLib::insertConfigItem(const GroupName &group_name, const VulConfigItem &config_item) {
+    if (config_items.find(config_item.name) != config_items.end()) {
+        return EStr(EItemConfNameDup, string("Duplicate config item name: ") + config_item.name);
     }
-    if (!isValidIdentifier(item_name)) {
-        return EStr(EItemConfNameInvalid, string("Invalid config item name: ") + item_name);
+    if (!isValidIdentifier(config_item.name)) {
+        return EStr(EItemConfNameInvalid, string("Invalid config item name: ") + config_item.name);
     }
     if (!isValidIdentifier(group_name)) {
         return EStr(EItemConfGroupNameInvalid, string("Invalid config group name: ") + group_name);
     }
-    uint32_t errpos = 0;
-    ErrorMsg err;
-    auto reference_items = _parseConfigReferences(item_value, errpos, err);
+    ConfigRealValue real_value = 0;
+    unordered_set<ConfigName> seen_configs;
+    ErrorMsg err = calculateConfigExpression(config_item.value, real_value, seen_configs);
     if (!err.empty()) {
-        return EStr(EItemConfValueTokenInvalid, string("Invalid config value grammar at position ") + std::to_string(errpos) + string(": ") + err);
-    }
-    for (const auto &ref_item : *reference_items) {
-        if (config_items.find(ref_item) == config_items.end()) {
-            return EStr(EItemConfRefNotFound, string("Config value references undefined item: ") + ref_item);
-        }
-    }
-    ConfigRealValue real_value = _calculateConfigRealValue(item_value, errpos, err);
-    if (!err.empty()) {
-        return EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value at position ") + std::to_string(errpos) + string(": ") + err);
+        return err;
     }
 
     // insert item
-    ConfigItem new_item;
-    new_item.str_value = item_value;
-    new_item.real_value = real_value;
-    new_item.group = group_name;
-    config_items[item_name] = new_item;
+    config_items[config_item.name] = ConfigEntry {
+        config_item,
+        group_name,
+        real_value,
+        seen_configs,
+        unordered_set<ConfigName>{}
+    };
 
     // insert into group
     if (groups.find(group_name) == groups.end()) {
-        groups[group_name] = unordered_set<ConfigName>{item_name};
+        groups[group_name] = unordered_set<ConfigName>{config_item.name};
     } else {
-        groups[group_name].insert(item_name);
+        groups[group_name].insert(config_item.name);
     }
 
-    // update references
-    references[item_name] = unordered_set<ConfigName>();
-    for (const auto &ref_item : *reference_items) {
-        reverse_references[ref_item].insert(item_name);
-        references[item_name].insert(ref_item);
-    }
 
     return "";
 }
@@ -297,27 +213,31 @@ ErrorMsg VulConfigLib::insertConfigItem(const GroupName &group_name, const Confi
  * Duplicate names across groups are not allowed.
  * New group will be created if it does not exist.
  * @param group_name The component/group name to insert.
- * @param items A map of config item names to their values.
+ * @param items A vector of VulConfigItems to insert.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulConfigLib::insertConfigGroup(const GroupName &group_name, const unordered_map<ConfigName, ConfigValue> &items) {
+ErrorMsg VulConfigLib::insertConfigGroup(const GroupName &group_name, const vector<VulConfigItem> &items) {
     if (!isValidIdentifier(group_name)) {
         return EStr(EItemConfGroupNameInvalid, string("Invalid config group name: ") + group_name);
     }
     unordered_map<ConfigName, unordered_set<ConfigName>> ingroup_reverse_references;
     unordered_set<ConfigName> ingroup_items;
+    unordered_map<ConfigName, const VulConfigItem*> item_map;
     for (const auto &entry : items) {
-        const ConfigName &item_name = entry.first;
-        const ConfigValue &item_value = entry.second;
+        const ConfigName &item_name = entry.name;
         if (config_items.find(item_name) != config_items.end()) {
             return EStr(EItemConfNameDup, string("Duplicate config item name: ") + item_name);
         }
         if (!isValidIdentifier(item_name)) {
             return EStr(EItemConfNameInvalid, string("Invalid config item name: ") + item_name);
         }
+        ingroup_items.insert(item_name);
+        item_map[item_name] = &entry;
+    }
+    for (const auto &entry : items) {
         uint32_t errpos = 0;
         ErrorMsg err;
-        auto reference_items = _parseConfigReferences(item_value, errpos, err);
+        auto reference_items = config_parser::parseReferencedIdentifier(entry.value, errpos, err);
         if (!err.empty()) {
             return EStr(EItemConfValueTokenInvalid, string("Invalid config value grammar at position ") + std::to_string(errpos) + string(": ") + err);
         }
@@ -325,11 +245,10 @@ ErrorMsg VulConfigLib::insertConfigGroup(const GroupName &group_name, const unor
             if (config_items.find(ref_item) == config_items.end()) {
                 return EStr(EItemConfRefNotFound, string("Config value references undefined item: ") + ref_item);
             }
-            if (items.find(ref_item) != items.end()) {
-                ingroup_reverse_references[ref_item].insert(item_name);
+            if (ingroup_items.find(ref_item) != ingroup_items.end()) {
+                ingroup_reverse_references[ref_item].insert(entry.name);
             }
         }
-        ingroup_items.insert(item_name);
     }
     vector<ConfigName> looped_items;
     auto topo_sorted_items = topologicalSort(ingroup_items, ingroup_reverse_references, looped_items);
@@ -345,7 +264,7 @@ ErrorMsg VulConfigLib::insertConfigGroup(const GroupName &group_name, const unor
     // save context before insertion
     uint64_t snapshot_id = snapshot();
     for (const auto &item_name : *topo_sorted_items) {
-        ErrorMsg res = insertConfigItem(group_name, item_name, items.at(item_name));
+        ErrorMsg res = insertConfigItem(group_name, *item_map[item_name]);
         if (!res.empty()) {
             // rollback
             rollback(snapshot_id);
@@ -370,26 +289,29 @@ ErrorMsg VulConfigLib::renameConfigItem(const ConfigName &old_name, const Config
     if (old_name == new_name) {
         return "";
     }
-    if (config_items.find(old_name) == config_items.end()) {
+    auto iter = config_items.find(old_name);
+    if (iter == config_items.end()) {
         return EStr(EItemConfNameNotFound, string("Config item not found: ") + old_name);
     }
+    auto &item = iter->second;
     if (config_items.find(new_name) != config_items.end()) {
         return EStr(EItemConfNameDup, string("Duplicate config item name: ") + new_name);
     }
     if (!isValidIdentifier(new_name)) {
         return EStr(EItemConfNameInvalid, string("Invalid config item name: ") + new_name);
     }
-    if (!update_references) {
-        auto rev_iter = reverse_references.find(old_name);
-        if (rev_iter != reverse_references.end() && !rev_iter->second.empty()) {
-            return EStr(EItemConfRenameRef, string("Config item '") + old_name + string("' is referenced by other config items"));
+    if (!update_references) {;
+        if (item.reverse_references.size() > 0) {
+            string ref_confs;
+            for (const auto &ref_by_item : item.reverse_references) {
+                if (!ref_confs.empty()) ref_confs += ", ";
+                ref_confs += ref_by_item;
+            }
+            return EStr(EItemConfRenameRef, string("Config item '") + old_name + string("' is referenced by other config items: ") + ref_confs);
         }
     }
 
     // proceed with renaming
-    config_items[new_name] = config_items[old_name];
-    config_items.erase(old_name);
-    auto &item = config_items[new_name];
 
     // update groups
     auto group_iter = groups.find(item.group);
@@ -399,28 +321,26 @@ ErrorMsg VulConfigLib::renameConfigItem(const ConfigName &old_name, const Config
     }
 
     // update references
-    auto ref_iter = references.find(old_name);
-    if (ref_iter != references.end()) {
-        references[new_name] = ref_iter->second;
-        references.erase(old_name);
+    for (const auto &ref_item : item.references) {
+        auto &ref_item_entry = config_items[ref_item];
+        ref_item_entry.reverse_references.erase(old_name);
+        ref_item_entry.reverse_references.insert(new_name);
     }
-    auto rev_ref_iter = reverse_references.find(old_name);
-    if (rev_ref_iter != reverse_references.end()) {
-        for (const auto &ref_by_item : rev_ref_iter->second) {
-            auto &ref_by_item_entry = config_items[ref_by_item];
-            // update value string with word replacement
-            ref_by_item_entry.str_value = identifierReplace(
-                ref_by_item_entry.str_value,
-                old_name,
-                new_name
-            );
-            // update references of ref_by_item_entry
-            if (references.find(ref_by_item) != references.end()) {
-                references[ref_by_item].erase(old_name);
-                references[ref_by_item].insert(new_name);
-            }
-        }
+    // update reverse references
+    for (const auto &ref_by_item : item.reverse_references) {
+        auto &ref_by_item_entry = config_items[ref_by_item];
+        ref_by_item_entry.references.erase(old_name);
+        ref_by_item_entry.references.insert(new_name);
+        ref_by_item_entry.item.value = identifierReplace(
+            ref_by_item_entry.item.value,
+            old_name,
+            new_name
+        );
     }
+
+    // rename the item
+    config_items[new_name] = item;
+    config_items.erase(old_name);
 
     // update bundle lib
     VulBundleLib::getInstance()->externalConfigRename(old_name, new_name);
@@ -430,70 +350,69 @@ ErrorMsg VulConfigLib::renameConfigItem(const ConfigName &old_name, const Config
 /**
  * @brief Update the value of an existing config item.
  * @param item_name The name of the config item to update.
- * @param new_value The new value to set for the config item.
+ * @param new_item The new VulConfigItem to set for the config item.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulConfigLib::updateConfigItemValue(const ConfigName &item_name, const ConfigValue &new_value) {
-    if (config_items.find(item_name) == config_items.end()) {
+ErrorMsg VulConfigLib::updateConfigItemValue(const ConfigName &item_name, const VulConfigItem &new_item) {
+    auto iter = config_items.find(item_name);
+    if (iter == config_items.end()) {
         return EStr(EItemConfNameNotFound, string("Config item not found: ") + item_name);
     }
-    // parse references and evaluate new value
-    uint32_t errpos = 0;
-    ErrorMsg err;
-    auto reference_items = _parseConfigReferences(new_value, errpos, err);
-    if (!err.empty()) {
-        return EStr(EItemConfValueTokenInvalid, string("Invalid config value grammar at position ") + std::to_string(errpos) + string(": ") + err);
-    }
-    for (const auto &ref_item : *reference_items) {
-        if (config_items.find(ref_item) == config_items.end()) {
-            return EStr(EItemConfRefNotFound, string("Config value references undefined item: ") + ref_item);
-        }
-    }
-    ConfigRealValue real_value = _calculateConfigRealValue(new_value, errpos, err);
-    if (!err.empty()) {
-        return EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value at position ") + std::to_string(errpos) + string(": ") + err);
+    auto &entry = iter->second;
+    auto &item = entry.item;
+
+    if (item.value == new_item.value) {
+        // no change
+        item.comment = new_item.comment;
+        return "";
     }
 
-    // update the config item value and references
-    auto &item = config_items[item_name];
-    ConfigRealValue old_real_value = item.real_value;
-    item.str_value = new_value;
-    item.real_value = real_value;
+    // parse references and evaluate new value
+    ConfigRealValue real_value = 0;
+    unordered_set<ConfigName> seen_configs;
+    ErrorMsg err = calculateConfigExpression(new_item.value, real_value, seen_configs);
+    if (!err.empty()) {
+        return err;
+    }
+
+    // update
+    ConfigRealValue old_real_value = entry.real_value;
+    item.value = new_item.value;
+    item.comment = new_item.comment;
+    entry.real_value = real_value;
 
     // update references
-    auto old_references = references[item_name];
-    unordered_set<ConfigName> new_references;
-    for (const auto &ref_item : *reference_items) {
-        new_references.insert(ref_item);
-    }
+    auto old_references = entry.references;
     // remove old reverse references
     for (const auto &old_ref_item : old_references) {
-        reverse_references[old_ref_item].erase(item_name);
+        config_items[old_ref_item].reverse_references.erase(item_name);
     }
     // add new reverse references
-    for (const auto &new_ref_item : new_references) {
-        reverse_references[new_ref_item].insert(item_name);
+    for (const auto &new_ref_item : seen_configs) {
+        config_items[new_ref_item].reverse_references.insert(item_name);
     }
-    references[item_name] = new_references;
+    entry.references = seen_configs;
 
     if (old_real_value != real_value) {
         // update dependent items' real values (recursive)
         std::queue<ConfigName> to_update;
-        for (const auto &dep_item : reverse_references[item_name]) {
+        for (const auto &dep_item : entry.reverse_references) {
             to_update.push(dep_item);
         }
         while (!to_update.empty()) {
             ConfigName current_item_name = to_update.front();
             to_update.pop();
             auto &current_item = config_items[current_item_name];
-            ConfigRealValue updated_real_value = _calculateConfigRealValue(current_item.str_value, errpos, err);
+            ConfigRealValue updated_real_value = 0;
+            unordered_set<ConfigName> dummy_seen;
+            err = calculateConfigExpression(current_item.item.value, updated_real_value, dummy_seen);
             if (!err.empty()) {
-                return EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value of dependent item '") + current_item_name + string("' at position ") + std::to_string(errpos) + string(": ") + err);
+                return err + ", in dependent config item: " + current_item_name;
             }
             if (current_item.real_value != updated_real_value) {
                 current_item.real_value = updated_real_value;
                 // enqueue its dependents
-                for (const auto &dep_item : reverse_references[current_item_name]) {
+                for (const auto &dep_item : current_item.reverse_references) {
                     to_update.push(dep_item);
                 }
             }
@@ -510,12 +429,18 @@ ErrorMsg VulConfigLib::updateConfigItemValue(const ConfigName &item_name, const 
  * @return An ErrorMsg indicating failure, empty if success.
  */
 ErrorMsg VulConfigLib::removeConfigItem(const ConfigName &item_name) {
-    if (config_items.find(item_name) == config_items.end()) {
+    auto iter = config_items.find(item_name);
+    if (iter == config_items.end()) {
         return EStr(EItemConfNameNotFound, string("Config item not found: ") + item_name);
     }
-    auto rev_iter = reverse_references.find(item_name);
-    if (rev_iter != reverse_references.end() && !rev_iter->second.empty()) {
-        return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' is referenced by other config items"));
+    auto &entry = iter->second;
+    if (!entry.reverse_references.empty()) {
+        string ref_confs;
+        for (const auto &ref_by_item : entry.reverse_references) {
+            if (!ref_confs.empty()) ref_confs += ", ";
+            ref_confs += ref_by_item;
+        }
+        return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' is referenced by other config items: ") + ref_confs);
     }
     auto bundlelib = VulBundleLib::getInstance();
     auto referencing_bundles = bundlelib->externalConfigReferenced(item_name);
@@ -531,14 +456,9 @@ ErrorMsg VulConfigLib::removeConfigItem(const ConfigName &item_name) {
     }
 
     // remove references
-    auto iter = references.find(item_name);
-    if (iter != references.end()) {
-        for (const auto &ref_item : iter->second) {
-            reverse_references[ref_item].erase(item_name);
-        }
-        references.erase(item_name);
+    for (const auto &ref_item : entry.references) {
+        config_items[ref_item].reverse_references.erase(item_name);
     }
-    reverse_references.erase(item_name);
     // remove from groups
     auto &item = config_items[item_name];
     auto group_iter = groups.find(item.group);
@@ -570,12 +490,9 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
 
     // check external references to group items
     for (const auto &item_name : group_items) {
-        auto rev_iter = reverse_references.find(item_name);
-        if (rev_iter != reverse_references.end()) {
-            for (const auto &ref_by_item : rev_iter->second) {
-                if (group_items.find(ref_by_item) == group_items.end()) {
-                    return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' in group '") + group_name + string("' is referenced by other config item: ") + ref_by_item);
-                }
+        for (const auto &ref_by_item : config_items[item_name].reverse_references) {
+            if (group_items.find(ref_by_item) == group_items.end()) {
+                return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' in group '") + group_name + string("' is referenced by other config item: ") + ref_by_item);
             }
         }
         auto referencing_bundles = bundlelib->externalConfigReferenced(item_name);
@@ -593,14 +510,10 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
 
     // proceed with removal
     for (const auto &item_name : group_items) {
-        auto iter = references.find(item_name);
-        if (iter != references.end()) {
-            for (const auto &ref_item : iter->second) {
-                reverse_references[ref_item].erase(item_name);
-            }
-            references.erase(item_name);
+        // remove references
+        for (const auto &ref_item : config_items[item_name].references) {
+            config_items[ref_item].reverse_references.erase(item_name);
         }
-        reverse_references.erase(item_name);
         config_items.erase(item_name);
     }
     groups.erase(group_iter);
@@ -660,8 +573,6 @@ uint64_t VulConfigLib::snapshot() {
     uint64_t snapshot_id = next_snapshot_id++;
     snapshots[snapshot_id] = SnapshotEntry{
         config_items,
-        references,
-        reverse_references,
         groups
     };
     return snapshot_id;
@@ -675,8 +586,6 @@ void VulConfigLib::rollback(uint64_t snapshot_id) {
     auto iter = snapshots.find(snapshot_id);
     if (iter != snapshots.end()) {
         config_items = iter->second.config_items;
-        references = iter->second.references;
-        reverse_references = iter->second.reverse_references;
         groups = iter->second.groups;
     }
     commit(snapshot_id);
