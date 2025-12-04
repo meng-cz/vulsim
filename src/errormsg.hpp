@@ -66,4 +66,26 @@ constexpr uint32_t EItemConfValueEmpty = 30010;
 constexpr uint32_t EItemConfValueTokenInvalid = 30011;
 constexpr uint32_t EItemConfValueGrammerInvalid = 30012;
 
+constexpr uint32_t ErrBundLib = 31000;
+constexpr uint32_t EItemBundNameDup = 31000;
+constexpr uint32_t EItemBundNameInvalid = 31001;
+constexpr uint32_t EItemBundNameNotFound = 31002;
+constexpr uint32_t EItemBundTagDup = 31003;
+constexpr uint32_t EItemBundTagInvalid = 31004;
+constexpr uint32_t EItemBundTagNotFound = 31005;
+constexpr uint32_t EItemBundRefNotFound = 31006;
+constexpr uint32_t EItemBundRefLooped = 31007;
+constexpr uint32_t EItemBundRenameRef = 31008;
+constexpr uint32_t EItemBundRemoveRef = 31009;
+constexpr uint32_t EItemBundTypeMixed = 31010;
+constexpr uint32_t EItemBundEnumInvalid = 31011;
+constexpr uint32_t EItemBundEnumValueDup = 31012;
+constexpr uint32_t EItemBundEnumNameDup = 31013;
+constexpr uint32_t EItemBundConstGrammarInvalid = 31014;
+constexpr uint32_t EItemBundConfRefNotFound = 31015;
+constexpr uint32_t EItemBundMemNameInvalid = 31016;
+constexpr uint32_t EItemBundMemLengthInvalid = 31017;
+constexpr uint32_t EItemBundRenameTagged = 31018;
+constexpr uint32_t EItemBundUpdateTagged = 31019;
+
 

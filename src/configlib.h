@@ -190,6 +190,18 @@ public:
      */
     ErrorMsg removeConfigGroup(const GroupName &group_name);
 
+    /**
+     * @brief Calculate the integer value of a config expression string.
+     * @param value The config expression string to calculate.
+     * @param out_real_value Output parameter to hold the calculated integer value.
+     * @param seen_coonfigs Set of config names seen during the calculation to detect cycles.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    ErrorMsg calculateConfigExpression(
+        const ConfigValue &value,
+        ConfigRealValue &out_real_value,
+        unordered_set<ConfigName> &seen_configs
+    ) const;
 
 protected:
 

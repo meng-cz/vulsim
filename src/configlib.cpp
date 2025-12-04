@@ -24,6 +24,7 @@
 #include "type.h"
 #include "toposort.hpp"
 #include "configexpr.hpp"
+#include "bundlelib.h"
 
 #include <algorithm>
 #include <functional>
@@ -426,6 +427,9 @@ ErrorMsg VulConfigLib::renameConfigItem(const ConfigName &old_name, const Config
             }
         }
     }
+
+    // update bundle lib
+    VulBundleLib::getInstance()->externalConfigRename(old_name, new_name);
     return "";
 }
 
@@ -586,3 +590,45 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
     return "";
 }
 
+/**
+ * @brief Calculate the integer value of a config expression string.
+ * @param value The config expression string to calculate.
+ * @param out_real_value Output parameter to hold the calculated integer value.
+ * @param seen_configs Set of config names seen during the calculation to detect cycles.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg VulConfigLib::calculateConfigExpression(
+    const ConfigValue &value,
+    ConfigRealValue &out_real_value,
+    unordered_set<ConfigName> &seen_configs
+) const {
+    uint32_t errpos = 0;
+    ErrorMsg err;
+    auto tokens = config_parser::tokenizeConfigValueExpression(value, errpos, err);
+    if (!tokens) {
+        return EStr(EItemConfValueTokenInvalid, string("Invalid token grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
+    }
+    // replace Identifier tokens with their values
+    for (auto &tok : *tokens) {
+        if (tok.type == config_parser::TokenType::Identifier) {
+            // lookup value
+            auto iter = config_items.find(tok.text);
+            if (iter != config_items.end()) {
+                seen_configs.insert(tok.text);
+                tok.type = config_parser::TokenType::Number;
+                tok.value = iter->second.real_value;
+            } else {
+                return EStr(EItemConfRefNotFound, string("Undefined config identifier: ") + tok.text + string(": ") + value);
+            }
+        }
+    }
+    auto ast = config_parser::parseConfigValueExpression(*tokens, errpos, err);
+    if (!ast) {
+        return EStr(EItemConfValueGrammerInvalid, string("Invalid grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
+    }
+    out_real_value = config_parser::evaluateConfigValueExpression(*ast, errpos, err);
+    if (!err.empty()) {
+        return EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
+    }
+    return "";
+}
