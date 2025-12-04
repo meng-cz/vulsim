@@ -1,8 +1,25 @@
-/*
- * Copyright (c) 2025 Meng-CZ
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
+// MIT License
+
+// Copyright (c) 2025 Meng Chengzhen, in Shandong University
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 
 #include "type.h"
 
@@ -25,7 +42,7 @@ bool isValidIdentifier(const string &name) {
         "register","reinterpret_cast","return","short","signed","sizeof","static","static_assert","static_cast",
         "struct","switch","template","this","thread_local","throw","true","try","typedef","typeid","typename",
         "union","unsigned","using","virtual","void","volatile","wchar_t","while","xor","xor_eq",
-        "uint8", "uint16", "uint32", "uint64", "uint128", "int8", "int16", "int32", "int64", "int128"
+        "uint8", "uint16", "uint32", "uint64", "uint128", "int8", "int16", "int32", "int64", "int128", "UInt"
     };
     if (name.empty()) return false;
     // first char: letter or underscore
@@ -36,6 +53,8 @@ bool isValidIdentifier(const string &name) {
         if (!(std::isalnum(c) || name[i] == '_')) return false;
     }
     if (cpp_keywords.find(name) != cpp_keywords.end()) return false;
+    // cannot start with "__"
+    if (name.size() >= 2 && name[0] == '_' && name[1] == '_') return false;
     return true;
 }
 
@@ -89,86 +108,5 @@ bool isBasicVulType(const string &type) {
         "bool"
     };
     return std::find(validTypes.begin(), validTypes.end(), type) != validTypes.end();
-}
-
-/**
- * @brief Extract referenced config item names from a VulConfig's value string.
- * This function parses the value string to identify identifiers.
- * @param vc The VulConfig object to extract references for. The references field will be populated.
- */
-void extractConfigReferences(VulConfig &vc) {
-    // Simple lexer: split into identifiers, numbers, operators, and parentheses
-    const string &value = vc.value;
-    vc.references.clear();
-    size_t i = 0;
-    while (i < value.size()) {
-        char c = value[i];
-        if (std::isspace((unsigned char)c)) {  i++; continue; }
-        if (std::isalpha((unsigned char)c) || c == '_') {
-            // identifier
-            size_t j = i + 1;
-            while (j < value.size() && (std::isalnum((unsigned char)value[j]) || value[j] == '_')) j++;
-            string ident = value.substr(i, j - i);
-            // get ident
-            vc.references.insert(ident);
-            i = j;
-            continue;
-        }
-        if (std::isdigit((unsigned char)c)) {
-            // number literal (integer)
-            size_t j = i + 1;
-            while (j < value.size() && (
-                std::isdigit((unsigned char)value[j]) ||
-                value[j] == 'x' || value[j] == 'X' ||
-                value[j] == 'u' || value[j] == 'U' ||
-                value[j] == 'l' || value[j] == 'L'
-            )) j++; // allow hex (0x), unsigned (u), long (l) suffixes
-            i = j;
-            continue;
-        }
-        // operators or punctuation: copy as-is (handles + - * / % ( ) etc.)
-        i++;
-    }
-}
-
-/**
- * @brief Create a fake VulCombine from a VulPrefab for design-time representation.
- * @param prefab The VulPrefab to convert.
- * @param out_combine The output VulCombine object to populate.
- */
-void fakeCombineFromPrefab(const VulPrefab &prefab, VulCombine &out_combine) {
-    out_combine.name = prefab.name;
-    out_combine.comment = prefab.comment;
-    out_combine.pipein = prefab.pipein;
-    out_combine.pipeout = prefab.pipeout;
-    out_combine.request = prefab.request;
-    out_combine.service = prefab.service;
-    out_combine.storage.clear();
-    out_combine.storagenext.clear();
-    out_combine.storagetick.clear();
-    out_combine.tick = VulCppFunc();
-    out_combine.applytick = VulCppFunc();
-    out_combine.init = VulCppFunc();
-    out_combine.config = prefab.config;
-    out_combine.stallable = prefab.stallable;
-}
-
-/**
- * @brief Detect the type of a VulPipe based on its properties.
- * @param vp The VulPipe to analyze.
- * @return The detected VulPipeType.
- */
-VulPipeType detectVulPipeType(const VulPipe &vp) {
-    if (vp.inputsize == 1 && vp.outputsize == 1 && vp.buffersize == 0) {
-        if (vp.handshake) {
-            return VulPipeType::simple_handshake;
-        } else {
-            return VulPipeType::simple_nonhandshake;
-        }
-    } else if (vp.inputsize == 1 && vp.outputsize == 1 && vp.handshake) {
-        return VulPipeType::simple_buffered;
-    } else {
-        return VulPipeType::invalid;
-    }
 }
 

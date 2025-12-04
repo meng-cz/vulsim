@@ -1,10 +1,25 @@
-/*
- * Copyright (c) 2025 Meng-CZ
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
+// MIT License
 
-#include "console.h"
+// Copyright (c) 2025 Meng Chengzhen, in Shandong University
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 
 #include <iostream>
 #include <string>
@@ -12,83 +27,7 @@
 #include <fstream>
 
 int main(int argc, char *argv[]) {
-    VulConsole console;
-    std::string line;
-
-    if (argc > 1) {
-        // shell file mode: read script file and execute each non-empty line as a console command
-        std::ifstream ifs(argv[1]);
-        if (!ifs) {
-            std::cerr << "Error: cannot open script file: " << argv[1] << std::endl;
-            return 1;
-        }
-
-        uint64_t lineno = 1;
-
-        while (std::getline(ifs, line)) {
-            // trim leading/trailing whitespace
-            size_t start = 0;
-            while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) ++start;
-            size_t end = line.size();
-            while (end > start && std::isspace(static_cast<unsigned char>(line[end - 1]))) --end;
-            if (start >= end) continue; // empty line
-
-            std::string cmd = line.substr(start, end - start);
-            // skip comment lines starting with '#'
-            if (!cmd.empty() && cmd[0] == '#') continue;
-
-            // print [lineno], prefix and command
-            std::cout << "[" << lineno << "] " << console.getPrefix() << cmd << std::endl;
-            std::cout.flush();
-
-            auto out = console.performCommand(cmd);
-            if (out) {
-                for (const auto &l : *out) std::cout << l << std::endl;
-                // check success: first line must start with "OK"
-                if (out->empty() || (*out)[0].rfind("OK", 0) != 0) {
-                    std::cerr << "Error: command failed at line " << lineno << ": " << cmd << std::endl;
-                    return 1;
-                }
-            } else {
-                std::cerr << "Error: command produced no output at line " << lineno << ": " << cmd << std::endl;
-                return 1;
-            }
-        }
-
-        return 0;
-    }
-
-    while (true) {
-        // print prompt
-        std::cout << console.getPrefix();
-        std::cout.flush();
-
-        if (!std::getline(std::cin, line)) {
-            // EOF
-            std::cout << std::endl;
-            break;
-        }
-
-        // trim leading/trailing whitespace
-        size_t start = 0;
-        while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start])))
-            ++start;
-        size_t end = line.size();
-        while (end > start && std::isspace(static_cast<unsigned char>(line[end - 1])))
-            --end;
-        if (start >= end)
-            continue; // empty line
-
-        std::string cmd = line.substr(start, end - start);
-        if (cmd == "exit" || cmd == "quit")
-            break;
-
-        auto out = console.performCommand(cmd);
-        if (out) {
-            for (const auto &l : *out)
-                std::cout << l << std::endl;
-        }
-    }
+    
 
     return 0;
 }

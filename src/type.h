@@ -1,10 +1,30 @@
-/*
- * Copyright (c) 2025 Meng-CZ
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
+// MIT License
+
+// Copyright (c) 2025 Meng Chengzhen, in Shandong University
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 
 #pragma once
+
+#include <inttypes.h>
+
 #include <string>
 #include <vector>
 #include <unordered_set>
@@ -14,6 +34,16 @@ using std::pair;
 using std::string;
 using std::unordered_set;
 using std::tuple;
+
+static_assert(sizeof(uint8_t) == 1, "uint8_t size error");
+static_assert(sizeof(uint16_t) == 2, "uint16_t size error");
+static_assert(sizeof(uint32_t) == 4, "uint32_t size error");
+static_assert(sizeof(uint64_t) == 8, "uint64_t size error");
+static_assert(sizeof(int8_t) == 1, "int8_t size error");
+static_assert(sizeof(int16_t) == 2, "int16_t size error");
+static_assert(sizeof(int32_t) == 4, "int32_t size error");
+static_assert(sizeof(int64_t) == 8, "int64_t size error");
+
 
 /**
  * @brief Check if the given name is a valid identifier.
@@ -42,227 +72,4 @@ string identifierReplace(const string &s, const string &old_name, const string &
  */
 bool isBasicVulType(const string &s);
 
-typedef struct {
-    string project_name;
-    string project_dir;
-    tuple<int, int, int> version;               // major, minor, patch
-    vector<std::pair<string, string>> prefabs;  // name, directory path
-} VulProject;
-
-typedef struct {
-    string type;
-    string name;
-    string comment;
-} VulArgument;
-
-typedef struct {
-    string name;
-    string comment;
-    vector<VulArgument> members;
-    vector<string> nested_bundles; // Names of bundles used as member types
-    vector<string> ref_prefabs; // Names of prefabs depending on this bundle
-} VulBundle;
-
-typedef struct {
-    string code;    // Raw C++ code to include
-    string file;    // Using code from this file if code is empty
-    string name;    // Function name
-} VulCppFunc;
-
-typedef struct {
-    string name;
-    string type;
-    string comment;
-} VulPipePort;
-
-typedef struct {
-    string name;
-    string comment;
-    vector<VulArgument> arg;
-    vector<VulArgument> ret;
-} VulRequest;
-
-typedef struct {
-    string name;
-    string comment;
-    vector<VulArgument> arg;
-    vector<VulArgument> ret;
-    VulCppFunc cppfunc;
-} VulService;
-
-typedef struct {
-    string type;
-    string name;
-    string value;
-    string comment;
-} VulStorage;
-
-typedef struct {
-    string type;
-    string name;
-    string size;
-    string value;
-    string comment;
-} VulStorageArray;
-
-typedef struct {
-    string name;
-    string value;
-    string comment;
-} VulConfigItem;
-
-typedef struct {
-    string name;
-    string comment;
-    string value;
-    unordered_set<string> references; // names of config items referenced by this value
-} VulConfig;
-
-/**
- * @brief Extract referenced config item names from a VulConfig's value string.
- * This function parses the value string to identify identifiers.
- * @param vc The VulConfig object to extract references for. The references field will be populated.
- */
-void extractConfigReferences(VulConfig &vc);
-
-typedef struct {
-    string name;
-    string comment;
-    vector<VulPipePort> pipein;
-    vector<VulPipePort> pipeout;
-    vector<VulRequest> request;
-    vector<VulService> service;
-    vector<VulStorage> storage;
-    vector<VulStorage> storagenext;
-    vector<VulStorage> storagetick;
-    vector<VulStorageArray> storagenextarray;
-    VulCppFunc tick;
-    VulCppFunc applytick;
-    VulCppFunc init;
-    vector<VulConfig> config;
-    bool stallable;
-} VulCombine;
-
-typedef struct {
-    string name;
-    string path;
-    string comment;
-    
-    vector<VulPipePort> pipein;
-    vector<VulPipePort> pipeout;
-    vector<VulRequest> request;
-    vector<VulService> service;
-    vector<VulConfig> config;
-
-    vector<string> ref_bundles; // Names of bundles this prefab depends on
-
-    bool stallable;
-} VulPrefab;
-
-/**
- * @brief Create a fake VulCombine from a VulPrefab for design-time representation.
- * @param prefab The VulPrefab to convert.
- * @param out_combine The output VulCombine object to populate.
- */
-void fakeCombineFromPrefab(const VulPrefab &prefab, VulCombine &out_combine);
-
-typedef struct {
-    long x = 0, y = 0;
-    long w = 0, h = 0;
-
-    bool visible = true;
-    bool enabled = true;
-    bool selected = false;
-
-    string color;
-    string bordercolor;
-    unsigned int borderwidth = 1;
-} VulVisualization;
-
-typedef struct {
-    string name;
-    string comment;
-    string combine;
-    vector<pair<string, string>> config_override;
-
-    VulVisualization vis;
-} VulInstance;
-
-typedef struct {
-    string name;
-    string type;
-    string comment;
-    unsigned int inputsize;
-    unsigned int outputsize;
-    unsigned int buffersize;
-    bool handshake;
-
-    VulVisualization vis;
-} VulPipe;
-
-enum class VulPipeType {
-    invalid,
-    simple_handshake,       // one-input, one-output, handshake
-    simple_nonhandshake,    // one-input, one-output, non-handshake
-    simple_buffered,        // one-input, one-output, buffered handshake
-    // buffered_handshake,     // multi-input, multi-output, buffered handshake
-};
-
-/**
- * @brief Detect the type of a VulPipe based on its properties.
- * @param vp The VulPipe to analyze.
- * @return The detected VulPipeType.
- */
-VulPipeType detectVulPipeType(const VulPipe &vp);
-
-typedef struct {
-    string req_instance;
-    string req_name;
-    string serv_instance;
-    string serv_name;
-
-    VulVisualization vis;
-} VulReqConnection;
-
-typedef struct {
-    string instance;
-    string pipeoutport;
-    string pipe;
-    unsigned int portindex;
-    
-    VulVisualization vis;
-} VulModulePipeConnection;
-
-typedef struct {
-    string instance;
-    string pipeinport;
-    string pipe;
-    unsigned int portindex;
-    
-    VulVisualization vis;
-} VulPipeModuleConnection;
-
-typedef struct {
-    string src_instance;
-    string dest_instance;
-
-    VulVisualization vis;
-} VulStalledConnection;
-
-typedef struct {
-    string former_instance;
-    string latter_instance;
-
-    VulVisualization vis;
-} VulUpdateSequence;
-
-typedef struct {
-    string name;
-    VulVisualization vis;
-} VulVisBlock;
-
-typedef struct {
-    string text;
-    VulVisualization vis;
-} VulVisText;
 
