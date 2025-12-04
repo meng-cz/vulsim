@@ -217,6 +217,19 @@ public:
     void externalConfigRename(const ConfigName &old_name, const ConfigName &new_name);
 
     /**
+     * @brief Check if a config item is referenced by any bundle in the bundle library.
+     * @param conf_name The config item name to check.
+     */
+    inline unique_ptr<unordered_set<BundleName>> externalConfigReferenced(const ConfigName &conf_name) const {
+        auto iter = conf_bundles.find(conf_name);
+        if (iter != conf_bundles.end() && !iter->second.empty()) {
+            return std::make_unique<unordered_set<BundleName>>(iter->second);
+        } else {
+            return nullptr;
+        }
+    }
+
+    /**
      * @brief Create a snapshot of the current bundle library state.
      * @return A snapshot ID to identify the snapshot.
      */

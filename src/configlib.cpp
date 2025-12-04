@@ -517,6 +517,18 @@ ErrorMsg VulConfigLib::removeConfigItem(const ConfigName &item_name) {
     if (rev_iter != reverse_references.end() && !rev_iter->second.empty()) {
         return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' is referenced by other config items"));
     }
+    auto bundlelib = VulBundleLib::getInstance();
+    auto referencing_bundles = bundlelib->externalConfigReferenced(item_name);
+    if (referencing_bundles) {
+        string bundle_list;
+        for (const auto &bundlename : *referencing_bundles) {
+            if (!bundle_list.empty()) {
+                bundle_list += ", ";
+            }
+            bundle_list += bundlename;
+        }
+        return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' is referenced by bundle definitions: ") + bundle_list);
+    }
 
     // remove references
     auto iter = references.find(item_name);
@@ -554,6 +566,7 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
     }
 
     auto &group_items = group_iter->second;
+    auto bundlelib = VulBundleLib::getInstance();
 
     // check external references to group items
     for (const auto &item_name : group_items) {
@@ -564,6 +577,17 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
                     return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' in group '") + group_name + string("' is referenced by other config item: ") + ref_by_item);
                 }
             }
+        }
+        auto referencing_bundles = bundlelib->externalConfigReferenced(item_name);
+        if (referencing_bundles) {
+            string bundle_list;
+            for (const auto &bundlename : *referencing_bundles) {
+                if (!bundle_list.empty()) {
+                    bundle_list += ", ";
+                }
+                bundle_list += bundlename;
+            }
+            return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' in group '") + group_name + string("' is referenced by bundle definitions: ") + bundle_list);
         }
     }
 
