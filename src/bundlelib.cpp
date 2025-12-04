@@ -660,6 +660,9 @@ bool VulBundleLib::_isBundleSameDefinition(const VulBundleItem &a, const VulBund
         a.enum_members.size() != b.enum_members.size()) {
         return false;
     }
+    if (a.is_alias != b.is_alias) {
+        return false;
+    }
     for (size_t i = 0; i < a.basic_members.size(); ++i) {
         if (a.basic_members[i].name != b.basic_members[i].name ||
             a.basic_members[i].type != b.basic_members[i].type) {

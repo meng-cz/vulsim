@@ -24,6 +24,7 @@
 
 #include "errormsg.hpp"
 #include "configlib.h"
+#include "type.h"
 
 #include <vector>
 #include <string>
@@ -48,32 +49,38 @@ typedef struct {
     BMemberName         name;
     BMemberType         type;
     vector<BundleConst> dims;
+    Comment             comment;
 } VulBundleArrayMember;
 
 typedef struct {
     BMemberName         name;
     BundleConst         length;
     vector<BundleConst> dims;
+    Comment             comment;
 } VulBundleUIntArrayMember;
 
 typedef struct {
     BMemberName         name;
     BMemberType         type;
+    Comment             comment;
 } VulBundleBasicMember;
 
 typedef struct {
     BMemberName         name;
     BundleConst         length;
+    Comment             comment;
 } VulBundleUIntMember;
 
 typedef struct {
     BMemberName         name;
     BundleConst         value;
+    Comment             comment;
 } VulBundleEnumMember;
 
 class VulBundleItem {
 public:
     BundleName                      name;
+    Comment                         comment;
     vector<VulBundleBasicMember>    basic_members;
     vector<VulBundleUIntMember>     uint_members;
     vector<VulBundleArrayMember>    array_members;

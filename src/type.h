@@ -44,6 +44,7 @@ static_assert(sizeof(int16_t) == 2, "int16_t size error");
 static_assert(sizeof(int32_t) == 4, "int32_t size error");
 static_assert(sizeof(int64_t) == 8, "int64_t size error");
 
+typedef string Comment;
 
 /**
  * @brief Check if the given name is a valid identifier.
