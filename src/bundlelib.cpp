@@ -599,8 +599,6 @@ void VulBundleLib::externalConfigRename(const ConfigName &old_name, const Config
                 }
                 member.length = identifierReplace(member.length, old_name, new_name);
             }
-            // update enum length
-            entry.item.enum_length = identifierReplace(entry.item.enum_length, old_name, new_name);
             // update enum members
             for (auto &member : entry.item.enum_members) {
                 member.value = identifierReplace(member.value, old_name, new_name);
@@ -659,8 +657,7 @@ bool VulBundleLib::_isBundleSameDefinition(const VulBundleItem &a, const VulBund
         a.uint_members.size() != b.uint_members.size() ||
         a.array_members.size() != b.array_members.size() ||
         a.uint_array_members.size() != b.uint_array_members.size() ||
-        a.enum_members.size() != b.enum_members.size() ||
-        a.enum_length != b.enum_length) {
+        a.enum_members.size() != b.enum_members.size()) {
         return false;
     }
     for (size_t i = 0; i < a.basic_members.size(); ++i) {
@@ -730,16 +727,8 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
             !bundle_item.uint_array_members.empty()) {
             return EStr(EItemBundTypeMixed, string("Bundle '") + bundle_item.name + string("' has invalid definition: enum members cannot coexist with other member types"));
         }
-        if (bundle_item.enum_length.empty()) {
-            return EStr(EItemBundEnumInvalid, string("Bundle '") + bundle_item.name + string("' has invalid definition: enum length must be specified when enum members are present"));
-        }
-        ConfigRealValue length;
-        err = configlib->calculateConfigExpression(bundle_item.enum_length, length, out_confs);
         if (!err.empty()) {
             return err;
-        }
-        if (length <= 0) {
-            return EStr(EItemBundEnumInvalid, string("Bundle '") + bundle_item.name + string("' has invalid enum length: must be positive"));
         }
         unordered_set<BundleName> enum_names;
         unordered_set<ConfigRealValue> enum_values;
@@ -747,17 +736,19 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
             if (!isValidIdentifier(enum_member.name)) {
                 return EStr(EItemBundMemNameInvalid, string("Invalid enum member name '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("'"));
             }
-            err = configlib->calculateConfigExpression(enum_member.value, rvalue, out_confs);
-            if (!err.empty()) {
-                return err;
+            if (!enum_member.value.empty()) {
+                err = configlib->calculateConfigExpression(enum_member.value, rvalue, out_confs);
+                if (!err.empty()) {
+                    return err;
+                }
+                if (rvalue < 0) {
+                    return EStr(EItemBundEnumInvalid, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid value: out of range"));
+                }
+                if (enum_values.find(rvalue) != enum_values.end()) {
+                    return EStr(EItemBundEnumValueDup, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has duplicate value"));
+                }
+                enum_values.insert(rvalue);
             }
-            if (rvalue < 0 || rvalue >= length) {
-                return EStr(EItemBundEnumInvalid, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid value: out of range"));
-            }
-            if (enum_values.find(rvalue) != enum_values.end()) {
-                return EStr(EItemBundEnumValueDup, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has duplicate value"));
-            }
-            enum_values.insert(rvalue);
             if (enum_names.find(enum_member.name) != enum_names.end()) {
                 return EStr(EItemBundEnumNameDup, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has duplicate name"));
             }

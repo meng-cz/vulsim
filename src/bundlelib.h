@@ -78,7 +78,6 @@ typedef struct {
     vector<VulBundleArrayMember>    array_members;
     vector<VulBundleUIntArrayMember> uint_array_members;
     vector<VulBundleEnumMember>     enum_members;   // if not empty, other members must be empty
-    BundleConst                     enum_length;    // valid if enum_members is not empty
 } VulBundleItem;
 
 class VulBundleLib {
