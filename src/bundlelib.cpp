@@ -757,6 +757,17 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
         return "";
     }
 
+    // check alias
+    if (bundle_item.is_alias) {
+        size_t total_members = bundle_item.basic_members.size() +
+                               bundle_item.uint_members.size() +
+                               bundle_item.array_members.size() +
+                               bundle_item.uint_array_members.size();
+        if (total_members != 1) {
+            return EStr(EItemBundAliasInvalid, string("Alias bundle '") + bundle_item.name + string("' must have exactly one member"));
+        }
+    }
+
     // check basic members
     for (const auto &basic_member : bundle_item.basic_members) {
         if (!isValidIdentifier(basic_member.name)) {

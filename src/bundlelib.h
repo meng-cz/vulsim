@@ -71,14 +71,16 @@ typedef struct {
     BundleConst         value;
 } VulBundleEnumMember;
 
-typedef struct {
+class VulBundleItem {
+public:
     BundleName                      name;
     vector<VulBundleBasicMember>    basic_members;
     vector<VulBundleUIntMember>     uint_members;
     vector<VulBundleArrayMember>    array_members;
     vector<VulBundleUIntArrayMember> uint_array_members;
     vector<VulBundleEnumMember>     enum_members;   // if not empty, other members must be empty
-} VulBundleItem;
+    bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
+};
 
 class VulBundleLib {
 
