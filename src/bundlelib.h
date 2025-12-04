@@ -219,13 +219,21 @@ public:
 
     /**
      * @brief Create a snapshot of the current bundle library state.
+     * @return A snapshot ID to identify the snapshot.
      */
-    void snapshot();
+    uint64_t snapshot();
 
     /**
      * @brief Rollback to the last snapshot of the bundle library state.
+     * @param snapshot_id The snapshot ID to rollback to.
      */
-    void rollback();
+    void rollback(uint64_t snapshot_id);
+
+    /**
+     * @brief Commit the last snapshot of the bundle library state.
+     * @param snapshot_id The snapshot ID to commit.
+     */
+    void commit(uint64_t snapshot_id);
 
 protected:
 
@@ -245,9 +253,12 @@ protected:
     unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles; // config -> set of bundle names using it
 
 
-    unordered_map<BundleName, BundleEntry> snapshot_bundles;
-    unordered_map<BundleTag, unordered_set<BundleName>> snapshot_tag_bundles;
-    unordered_map<ConfigName, unordered_set<BundleName>> snapshot_conf_bundles;
+    typedef struct {
+        unordered_map<BundleName, BundleEntry> bundles;
+        unordered_map<BundleTag, unordered_set<BundleName>> tag_bundles;
+        unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles;
+    } SnapshotEntry;
+    unordered_map<uint64_t, SnapshotEntry> snapshots;
 
     /**
      * @brief Check if two bundle definitions are the same.

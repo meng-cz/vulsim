@@ -343,22 +343,16 @@ ErrorMsg VulConfigLib::insertConfigGroup(const GroupName &group_name, const unor
     }
 
     // save context before insertion
-    auto saved_config_items = config_items;
-    auto saved_groups = groups;
-    auto saved_references = references;
-    auto saved_reverse_references = reverse_references;
-
+    uint64_t snapshot_id = snapshot();
     for (const auto &item_name : *topo_sorted_items) {
         ErrorMsg res = insertConfigItem(group_name, item_name, items.at(item_name));
         if (!res.empty()) {
             // rollback
-            config_items = saved_config_items;
-            groups = saved_groups;
-            references = saved_references;
-            reverse_references = saved_reverse_references;
+            rollback(snapshot_id);
             return res;
         }
     }
+    commit(snapshot_id);
 
     return "";
 }
@@ -631,4 +625,50 @@ ErrorMsg VulConfigLib::calculateConfigExpression(
         return EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
     }
     return "";
+}
+
+/**
+ * @brief Create a snapshot of the current config library state.
+ * @return A snapshot ID to identify the snapshot.
+ */
+uint64_t VulConfigLib::snapshot() {
+    static uint64_t next_snapshot_id = 1;
+    uint64_t snapshot_id = next_snapshot_id++;
+    snapshots[snapshot_id] = SnapshotEntry{
+        config_items,
+        references,
+        reverse_references,
+        groups
+    };
+    return snapshot_id;
+}
+
+/**
+ * @brief Rollback to the specified snapshot of the config library state.
+ * @param snapshot_id The snapshot ID to rollback to.
+ */
+void VulConfigLib::rollback(uint64_t snapshot_id) {
+    auto iter = snapshots.find(snapshot_id);
+    if (iter != snapshots.end()) {
+        config_items = iter->second.config_items;
+        references = iter->second.references;
+        reverse_references = iter->second.reverse_references;
+        groups = iter->second.groups;
+    }
+    commit(snapshot_id);
+}
+
+/**
+ * @brief Commit the specified snapshot of the config library state.
+ * @param snapshot_id The snapshot ID to commit.
+ */
+void VulConfigLib::commit(uint64_t snapshot_id) {
+    // erase snapshots after and including the committed one
+    for (auto it = snapshots.begin(); it != snapshots.end(); ) {
+        if (it->first >= snapshot_id) {
+            it = snapshots.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }

@@ -237,17 +237,18 @@ ErrorMsg VulBundleLib::insertBundles(const vector<VulBundleItem> &bundle_items, 
     }
     // insert bundles in topological order
     // save context before insertion
-    snapshot();
+    uint64_t snapshot_id = snapshot();
 
     for (const auto &bundle_name : *topo_sorted_names) {
         const auto &bundle_item = *inserting_items_map[bundle_name];
         err = insertBundle(bundle_item, tags);
         if (!err.empty()) {
             // restore context
-            rollback();
+            rollback(snapshot_id);
             return err;
         }
     }
+    commit(snapshot_id);
     return "";
 }
 
@@ -542,14 +543,15 @@ ErrorMsg VulBundleLib::removeTag(const BundleTag &tag) {
         return EStr(EItemBundRefLooped, string("BUNDLE LIB BROKEN !!!: Bundle reference loop detected involving bundles: ") + looped_str);
     }
 
-    snapshot();
+    uint64_t snapshot_id = snapshot();
     for (const auto &bundle_name : *topo_sorted_names) {
         ErrorMsg err = removeBundle(bundle_name, tag);
         if (!err.empty()) {
-            rollback();
+            rollback(snapshot_id);
             return err;
         }
     }
+    rollback(snapshot_id);
     for (const auto &bundle_name : to_untag_bundles) {
         auto iter = bundles.find(bundle_name);;
         if (iter != bundles.end()) [[likely]] {
@@ -611,23 +613,45 @@ void VulBundleLib::externalConfigRename(const ConfigName &old_name, const Config
 
 /**
  * @brief Create a snapshot of the current bundle library state.
+ * @return A snapshot ID to identify the snapshot.
  */
-void VulBundleLib::snapshot() {
-    snapshot_bundles = bundles;
-    snapshot_tag_bundles = tag_bundles;
-    snapshot_conf_bundles = conf_bundles;
+uint64_t VulBundleLib::snapshot() {
+    static uint64_t snapshot_id_counter = 1;
+    uint64_t snapshot_id = snapshot_id_counter++;
+    snapshots[snapshot_id] = SnapshotEntry{
+        bundles,
+        tag_bundles,
+        conf_bundles
+    };
+    return snapshot_id;
 }
 
 /**
  * @brief Rollback to the last snapshot of the bundle library state.
+ * @param snapshot_id The snapshot ID to rollback to.
  */
-void VulBundleLib::rollback() {
-    bundles.swap(snapshot_bundles);
-    tag_bundles.swap(snapshot_tag_bundles);
-    conf_bundles.swap(snapshot_conf_bundles);
+void VulBundleLib::rollback(uint64_t snapshot_id) {
+    auto iter = snapshots.find(snapshot_id);
+    if (iter != snapshots.end()) {
+        bundles = iter->second.bundles;
+        tag_bundles = iter->second.tag_bundles;
+        conf_bundles = iter->second.conf_bundles;
+    }
+    commit(snapshot_id);
 }
-
-
+/**
+ * @brief Commit the last snapshot of the bundle library state.
+ * @param snapshot_id The snapshot ID to commit.
+ */
+void VulBundleLib::commit(uint64_t snapshot_id) {
+    for (auto iter = snapshots.begin(); iter != snapshots.end(); ) {
+        if (iter->first >= snapshot_id) {
+            iter = snapshots.erase(iter);
+        } else {
+            ++iter;
+        }
+    }
+}
 
 bool VulBundleLib::_isBundleSameDefinition(const VulBundleItem &a, const VulBundleItem &b) const {
     // compare bundle definitions

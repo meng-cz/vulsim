@@ -203,6 +203,24 @@ public:
         unordered_set<ConfigName> &seen_configs
     ) const;
 
+    /**
+     * @brief Create a snapshot of the current config library state.
+     * @return A snapshot ID to identify the snapshot.
+     */
+    uint64_t snapshot();
+
+    /**
+     * @brief Rollback to the specified snapshot of the config library state.
+     * @param snapshot_id The snapshot ID to rollback to.
+     */
+    void rollback(uint64_t snapshot_id);
+
+    /**
+     * @brief Commit the specified snapshot of the config library state.
+     * @param snapshot_id The snapshot ID to commit.
+     */
+    void commit(uint64_t snapshot_id);
+
 protected:
 
     VulConfigLib() = default;
@@ -218,6 +236,14 @@ protected:
 
     unordered_map<GroupName, unordered_set<ConfigName>> groups; // group name -> set of config item names
     
+    struct SnapshotEntry {
+        unordered_map<ConfigName, ConfigItem> config_items;
+        unordered_map<ConfigName, unordered_set<ConfigName>> references;
+        unordered_map<ConfigName, unordered_set<ConfigName>> reverse_references;
+        unordered_map<GroupName, unordered_set<ConfigName>> groups;
+    };
+    unordered_map<uint64_t, SnapshotEntry> snapshots;
+
     unique_ptr<vector<ConfigName>> _parseConfigReferences(
         const ConfigValue &value,
         uint32_t &out_error_pos,
