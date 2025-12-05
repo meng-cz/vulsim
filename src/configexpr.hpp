@@ -591,4 +591,19 @@ inline unique_ptr<vector<ConfigName>> parseReferencedIdentifier(const string &va
     return out;
 }
 
+inline bool tokenEq(const string &expr1, const string &expr2) {
+    uint32_t errpos;
+    string err;
+    auto tokens1 = tokenizeConfigValueExpression(expr1, errpos, err);
+    if (!tokens1) return false;
+    auto tokens2 = tokenizeConfigValueExpression(expr2, errpos, err);
+    if (!tokens2) return false;
+    if (tokens1->size() != tokens2->size()) return false;
+    for (size_t i = 0; i < tokens1->size(); ++i) {
+        if (tokens1->at(i).type != tokens2->at(i).type) return false;
+        if (tokens1->at(i).text != tokens2->at(i).text) return false;
+    }
+    return true;
+}
+
 } // namespace config_parser

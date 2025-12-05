@@ -25,19 +25,16 @@
 
 #include "type.h"
 #include "configlib.h"
+#include "configexpr.hpp"
 #include "pipetype.hpp"
 
 using std::pair;
 
 typedef string ModuleName;
 
-typedef string RequestName;
-typedef string ServiceName;
-typedef string PipeInputName;
-typedef string PipeOutputName;
-
+typedef string ReqServName;
+typedef string PipePortName;
 typedef string ArgName;
-typedef string RetName;
 
 typedef struct {
     ArgName     name;
@@ -46,50 +43,60 @@ typedef struct {
 } VulArg;
 
 typedef struct {
-    RetName     name;
-    DataType    type;
-    Comment     comment;
-} VulRet;
-
-typedef struct {
-    RequestName     name;
-    Comment         comment;
+    ReqServName    name;
+    Comment        comment;
     vector<VulArg>  args;
-    vector<VulRet>  rets;
+    vector<VulArg>  rets;
     ConfigValue     array_size; // empty if not an array request
     bool            has_handshake;
-} VulRequest;
+} VulReqServ;
+
+/**
+ * @brief Whether two VulReqServ have the same signature (args, rets, array_size, has_handshake).
+ * @param a The first VulReqServ.
+ * @param b The second VulReqServ.
+ * @return true if they have the same signature, false otherwise.
+ */
+inline bool operator==(const VulReqServ &a, const VulReqServ &b) {
+    if (a.has_handshake != b.has_handshake) return false;
+    if (!a.array_size.empty() || !b.array_size.empty()) {
+        return config_parser::tokenEq(a.array_size, b.array_size);
+    }
+    if (a.args.size() != b.args.size()) return false;
+    for (size_t i = 0; i < a.args.size(); ++i) {
+        if (a.args[i].type != b.args[i].type) return false;
+    }
+    if (a.rets.size() != b.rets.size()) return false;
+    for (size_t i = 0; i < a.rets.size(); ++i) {
+        if (a.rets[i].type != b.rets[i].type) return false;
+    }
+    return true;
+}
 
 typedef struct {
-    ServiceName     name;
-    Comment         comment;
-    vector<VulArg>  args;
-    vector<VulRet>  rets;
-    ConfigValue     array_size; // empty if not an array service
-    bool            has_handshake;
-} VulService;
-
-typedef struct {
-    PipeInputName   name;
+    PipePortName    name;
     DataType        type;
     Comment         comment;
-} VulPipeInput;
+} VulPipePort;
 
-typedef struct {
-    PipeOutputName  name;
-    DataType        type;
-    Comment         comment;
-} VulPipeOutput;
-
+/**
+ * @brief Whether two VulPipePort have the same type.
+ * @param a The first VulPipePort.
+ * @param b The second VulPipePort.
+ * @return true if they have the same type, false otherwise.
+ */
+inline bool operator==(const VulPipePort &a, const VulPipePort &b) {
+    return (a.type == b.type);
+}
 
 class VulModuleBase {
 public:
     ModuleName                  name;
     Comment                     comment;
-    unordered_map<RequestName, VulRequest>          requests;
-    unordered_map<ServiceName, VulService>          services;
-    unordered_map<PipeInputName, VulPipeInput>      pipe_inputs;
-    unordered_map<PipeOutputName, VulPipeOutput>    pipe_outputs;
+    unordered_map<ReqServName, VulReqServ>      requests;
+    unordered_map<ReqServName, VulReqServ>      services;
+    unordered_map<PipePortName, VulPipePort>    pipe_inputs;
+    unordered_map<PipePortName, VulPipePort>    pipe_outputs;
     bool                        _is_external = false; // whether the module is imported from external definition
 };
 
@@ -98,24 +105,24 @@ public:
  * @param pipe The VulPipe definition.
  * @return The VulModuleBase definition that matches the pipe.
  */
-VulModuleBase getModuleDefinitionForPipe(const VulPipe &pipe) {
+inline VulModuleBase getModuleDefinitionForPipe(const VulPipe &pipe) {
     VulModuleBase ret;
     ret.name = pipe.name + "_module";
     ret.comment = "Auto-generated module for pipe " + pipe.name;
     // add pipe input
-    ret.pipe_inputs["in"] = VulPipeInput{
+    ret.pipe_inputs["in"] = VulPipePort{
         .name = "in",
         .type = pipe.type,
         .comment = "Input port for pipe " + pipe.name
     };
     // add pipe output
-    ret.pipe_outputs["out"] = VulPipeOutput{
+    ret.pipe_outputs["out"] = VulPipePort{
         .name = "out",
         .type = pipe.type,
         .comment = "Output port for pipe " + pipe.name
     };
     // add clear service
-    ret.services["clear"] = VulService{
+    ret.services["clear"] = VulReqServ{
         .name = "clear",
         .comment = "Clear the pipe " + pipe.name,
         .args = {},
@@ -137,9 +144,9 @@ typedef struct {
 
 typedef struct {
     InstanceName    req_instance;
-    RequestName     req_name;       // should be ServiceName when req_instance is TopInterface
+    ReqServName     req_name;       // should be ServiceName when req_instance is TopInterface
     InstanceName    serv_instance;
-    ServiceName     serv_name;      // should be RequestName when serv_instance is TopInterface
+    ReqServName     serv_name;      // should be RequestName when serv_instance is TopInterface
 } VulReqServConnection;
 
 typedef struct {
@@ -186,8 +193,8 @@ public:
     vector<CCodeLine>   user_applytick_codelines;       // user applytick function body codelines
     vector<CCodeLine>   user_header_filed_codelines;    // user header field codelines (private section)
 
-    unordered_map<ServiceName, vector<CCodeLine>>   serv_codelines; // un-connected service function body codelines
-    unordered_map<pair<InstanceName, RequestName>, vector<CCodeLine>> req_codelines; // un-connected child request function body codelines
+    unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines; // un-connected service function body codelines
+    unordered_map<pair<InstanceName, ReqServName>, vector<CCodeLine>> req_codelines; // un-connected child request function body codelines
 
     unordered_map<StorageName, VulStorage>  storages;
     unordered_map<StorageName, VulStorage>  storagenexts;
