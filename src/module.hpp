@@ -89,15 +89,31 @@ inline bool operator==(const VulPipePort &a, const VulPipePort &b) {
     return (a.type == b.type);
 }
 
+typedef string LocalConfigValue; // This value expression will NOT be updated automatically when config library is changed.
+
+typedef struct {
+    ConfigName          name;
+    LocalConfigValue    value;
+    Comment             comment;
+} VulLocalConfigItem;
+
 class VulModuleBase {
 public:
     ModuleName                  name;
     Comment                     comment;
+    unordered_map<ConfigName, VulLocalConfigItem> local_configs; // configs private to instance
     unordered_map<ReqServName, VulReqServ>      requests;
     unordered_map<ReqServName, VulReqServ>      services;
     unordered_map<PipePortName, VulPipePort>    pipe_inputs;
     unordered_map<PipePortName, VulPipePort>    pipe_outputs;
     bool                        _is_external = false; // whether the module is imported from external definition
+};
+
+typedef string EModuleDir;
+
+class VulExternalModule : public VulModuleBase {
+public:
+    EModuleDir      directory;
 };
 
 /**
@@ -140,6 +156,7 @@ typedef struct {
     InstanceName        name;
     ModuleName          module_name;
     Comment             comment;
+    unordered_map<ConfigName, LocalConfigValue> local_config_overrides; // local config overrides for this instance
 } VulInstance;
 
 typedef struct {
@@ -237,7 +254,7 @@ public:
         if (pipe_outputs.find(name) != pipe_outputs.end()) {
             return true;
         }
-        if (name == TopInterface) {
+        if (local_configs.find(name) != local_configs.end()) {
             return true;
         }
         return false;

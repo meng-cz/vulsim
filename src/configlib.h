@@ -48,6 +48,7 @@ typedef struct {
     ConfigName      name;
     ConfigValue     value;
     Comment         comment;
+    bool            is_external; // whether this config item is imported from external definition
 } VulConfigItem;
 
 class VulConfigLib {
