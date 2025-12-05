@@ -45,6 +45,7 @@ static_assert(sizeof(int32_t) == 4, "int32_t size error");
 static_assert(sizeof(int64_t) == 8, "int64_t size error");
 
 typedef string Comment;
+typedef string DataType;
 
 /**
  * @brief Check if the given name is a valid identifier.
@@ -71,6 +72,6 @@ string identifierReplace(const string &s, const string &old_name, const string &
  * @param type The type string to check.
  * @return true if the type is a valid basic type, false otherwise.
  */
-bool isBasicVulType(const string &s);
+bool isBasicVulType(const DataType &s);
 
 
