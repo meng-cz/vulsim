@@ -790,7 +790,16 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
             if (!checkNameConflict(basic_member.type)) {
                 return EStr(EItemBundRefNotFound, string("Basic member '") + basic_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid type: ") + basic_member.type);
             }
+            if (!basic_member.value.empty()) {
+                return EStr(EItemBundInitWithValue, string("Basic member '") + basic_member.name + string("' in bundle '") + bundle_item.name + string("' of bundle type cannot have a default value"));
+            }
             out_references.insert(basic_member.type);
+        }
+        if (!basic_member.value.empty()) {
+            err = configlib->calculateConfigExpression(basic_member.value, rvalue, out_confs);
+            if (!err.empty()) {
+                return err;
+            }
         }
     }
 
@@ -807,6 +816,12 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
         if (length <= 0) {
             return EStr(EItemBundMemLengthInvalid, string("UInt member '") + uint_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid length: must be positive"));
         }
+        if (!uint_member.value.empty()) {
+            err = configlib->calculateConfigExpression(uint_member.value, rvalue, out_confs);
+            if (!err.empty()) {
+                return err;
+            }
+        }
     }
 
     // check array members
@@ -819,7 +834,16 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
             if (!checkNameConflict(array_member.type)) {
                 return EStr(EItemBundRefNotFound, string("Array member '") + array_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid type: ") + array_member.type);
             }
+            if (!array_member.value.empty()) {
+                return EStr(EItemBundInitWithValue, string("Array member '") + array_member.name + string("' in bundle '") + bundle_item.name + string("' of bundle type cannot have a default value"));
+            }
             out_references.insert(array_member.type);
+        }
+        if (!array_member.value.empty()) {
+            err = configlib->calculateConfigExpression(array_member.value, rvalue, out_confs);
+            if (!err.empty()) {
+                return err;
+            }
         }
         for (const auto &dim_expr : array_member.dims) {
             ConfigRealValue dim;
@@ -845,6 +869,12 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
         }
         if (length <= 0) {
             return EStr(EItemBundMemLengthInvalid, string("UInt array member '") + uint_array_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid length: must be positive: ") + uint_array_member.length);
+        }
+        if (!uint_array_member.value.empty()) {
+            err = configlib->calculateConfigExpression(uint_array_member.value, rvalue, out_confs);
+            if (!err.empty()) {
+                return err;
+            }
         }
         for (const auto &dim_expr : uint_array_member.dims) {
             ConfigRealValue dim;

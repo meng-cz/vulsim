@@ -88,5 +88,6 @@ constexpr uint32_t EItemBundMemLengthInvalid = 31017;
 constexpr uint32_t EItemBundRenameTagged = 31018;
 constexpr uint32_t EItemBundUpdateTagged = 31019;
 constexpr uint32_t EItemBundAliasInvalid = 31020;
+constexpr uint32_t EItemBundInitWithValue = 31021;
 
 

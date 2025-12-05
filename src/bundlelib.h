@@ -40,7 +40,6 @@ using std::unordered_map;
 using std::unordered_set;
 
 typedef string BundleName;
-typedef string BundleConst;
 typedef string BMemberName;
 typedef string BMemberType;
 typedef string BundleTag;
@@ -48,32 +47,36 @@ typedef string BundleTag;
 typedef struct {
     BMemberName         name;
     BMemberType         type;
-    vector<BundleConst> dims;
+    ConfigValue         value; // only for basic types, default zero-initialized
+    vector<ConfigValue> dims;
     Comment             comment;
 } VulBundleArrayMember;
 
 typedef struct {
     BMemberName         name;
-    BundleConst         length;
-    vector<BundleConst> dims;
+    ConfigValue         length;
+    ConfigValue         value; // only for basic types, default zero-initialized
+    vector<ConfigValue> dims;
     Comment             comment;
 } VulBundleUIntArrayMember;
 
 typedef struct {
     BMemberName         name;
     BMemberType         type;
+    ConfigValue         value; // only for basic types, default zero-initialized
     Comment             comment;
 } VulBundleBasicMember;
 
 typedef struct {
     BMemberName         name;
-    BundleConst         length;
+    ConfigValue         length;
+    ConfigValue         value; // only for basic types, default zero-initialized
     Comment             comment;
 } VulBundleUIntMember;
 
 typedef struct {
     BMemberName         name;
-    BundleConst         value;
+    ConfigValue         value;
     Comment             comment;
 } VulBundleEnumMember;
 
