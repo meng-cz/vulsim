@@ -98,7 +98,7 @@ ErrorMsg VulBundleLib::getBundleDefinition(const BundleName &bundle_name, VulBun
  * @param out_sorted_bundles Output vector to hold the VulBundleItem definitions in topological order.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulBundleLib::getAllBundlesTopoSort(vector<VulBundleItem> &out_sorted_bundles) const {
+ErrorMsg VulBundleLib::getAllBundlesTopoSort(vector<BundleName> &out_sorted_bundles) const {
     unordered_set<BundleName> all_bundles;
     for (const auto &entry : bundles) {
         all_bundles.insert(entry.first);
@@ -119,10 +119,7 @@ ErrorMsg VulBundleLib::getAllBundlesTopoSort(vector<VulBundleItem> &out_sorted_b
         }
         return EStr(EItemBundRefLooped, string("Bundle reference loop detected involving bundles: ") + looped_str);
     }
-    out_sorted_bundles.clear();
-    for (const auto &bname : *topo_sorted_names) {
-        out_sorted_bundles.push_back(bundles.at(bname).item);
-    }
+    out_sorted_bundles.swap(*topo_sorted_names);
     return "";
 }
 

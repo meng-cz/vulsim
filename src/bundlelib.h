@@ -136,10 +136,10 @@ public:
 
     /**
      * @brief Get all bundle definitions in topological order based on their references.
-     * @param out_sorted_bundles Output vector to hold the VulBundleItem definitions in topological order.
+     * @param out_sorted_bundles Output vector to hold the BundleName in topological order.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg getAllBundlesTopoSort(vector<VulBundleItem> &out_sorted_bundles) const;
+    ErrorMsg getAllBundlesTopoSort(vector<BundleName> &out_sorted_bundles) const;
 
 protected:
     /**
