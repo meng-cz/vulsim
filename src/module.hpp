@@ -195,21 +195,26 @@ typedef struct {
     vector<ConfigValue> dims;      // empty if not an array
 } VulStorage;
 
+typedef struct {
+    InstanceName        name;
+    Comment             comment;
+    vector<CCodeLine>   codelines;     // user tick function body codelines
+} VulTickCodeBlock;
+
 class VulModule : public VulModuleBase {
 public:
 
     const InstanceName TopInterface = string("__top__");
     const InstanceName TopStallInput = string("__top_stall_input__");
     const InstanceName TopStallOutput = string("__top_stall_output__");
-    const InstanceName TopUpdateNode = string("__top_update_node__");
 
     bool is_hpp_generated = true; // TODO: always true for now
     bool is_inline_generated = true;
 
-    vector<CCodeLine>   user_tick_codelines;            // user tick function body codelines
-    vector<CCodeLine>   user_applytick_codelines;       // user applytick function body codelines
+    // vector<CCodeLine>   user_applytick_codelines;       // user applytick function body codelines
     vector<CCodeLine>   user_header_filed_codelines;    // user header field codelines (private section)
 
+    unordered_map<InstanceName, VulTickCodeBlock>   user_tick_codeblocks;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines; // un-connected service function body codelines
     unordered_map<pair<InstanceName, ReqServName>, vector<CCodeLine>> req_codelines; // un-connected child request function body codelines
 
@@ -220,8 +225,8 @@ public:
     unordered_map<InstanceName, VulInstance>    instances;
     unordered_map<InstanceName, VulPipe>        pipe_instances;
 
-    unordered_map<InstanceName, VulReqServConnection>       req_connections;
-    unordered_map<InstanceName, VulModulePipeConnection>    mod_pipe_connections;
+    unordered_map<InstanceName, vector<VulReqServConnection>>       req_connections;
+    unordered_map<InstanceName, vector<VulModulePipeConnection>>    mod_pipe_connections;
 
     vector<VulStallConnection>        stalled_connections;
     vector<VulSequenceConnection>     update_constraints;
@@ -255,6 +260,9 @@ public:
             return true;
         }
         if (local_configs.find(name) != local_configs.end()) {
+            return true;
+        }
+        if (user_tick_codeblocks.find(name) != user_tick_codeblocks.end()) {
             return true;
         }
         return false;

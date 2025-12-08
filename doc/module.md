@@ -51,9 +51,8 @@
 
 ### 代码片段
 
-- `user_tick_codelines`：用户为模块 `tick` 函数编写的 C 代码行。
-- `user_applytick_codelines`：用户为 `applyTick` 函数提供的代码行。
-- `user_header_filed_codelines`：用户在头文件中声明的字段代码行（通常放在私有部分）。
+- `user_tick_codeblocks`：用户为模块 `tick` 函数编写的 C 代码行。
+- `user_header_filed_codelines`：用户在头文件中声明的字段代码行（各种帮助函数）。
 - `serv_codelines` / `req_codelines`：未连接服务或请求对应的函数体代码行（以 `ServiceName` 或 `(InstanceName, RequestName)` 为键）。
 
 这些代码片段被代码生成器原样嵌入到生成的 `.hpp` / `.cpp`（或内联实现）中。请确保所写代码与生成环境（包含头文件、命名空间）兼容。
@@ -103,15 +102,13 @@
 
 模块定义了两个特殊的实例名常量：`TopStallInput` 和 `TopStallOutput`，分别表示模块的顶层阻塞输入和输出端口。
 
-阻塞传递连接表为所有子实例+两个特殊实例构成的有向无环图，其中`TopStallInput`仅有出边，`TopStallOutput`仅有入边。每条边表示阻塞传递关系。当一个子实例调用其内部的`stall`函数时，阻塞信号会沿着有向边传递到后续所有的子实例并调用它们的`stall`函数，当传递到`TopStallOutput`时会调用本模块自身的`stall`函数并在父模块中继续传递。
+阻塞传递连接表为所有子实例+两个特殊实例构成的有向无环图，其中`TopStallInput`仅有出边，`TopStallOutput`仅有入边。每条边表示阻塞传递关系。当一个子实例调用其内部的`stall`函数时，阻塞信号会沿着有向边传递到后续所有的子实例并调用它们的`stall`函数。
 
-如果`TopStallInput`没有被间接连接到`TopStallOutput`，其默认会被直接连接到`TopStallOutput`。
+当本模块的`stall`函数被父模块中的其他模块调用时，模块内的阻塞信号从`TopStallInput`开始传递。默认存在一个从`TopStallInput`到`TopStallOutput`的路径。当阻塞信号到达`TopStallOutput`时会继续传递到父模块中。
 
-本实例内部的用户代码可以通过`is_stalled`函数查询当前模块是否处于阻塞状态。即当前周期是否有阻塞信号传递到`TopStallOutput`。
+模块内的阻塞连接不能存在从 `TopStallInput` 到 `TopStallOutput` 的路径。允许部分子模块响应 `TopStallInput` 的阻塞信号，另一部分子模块会将阻塞信号传递到 `TopStallOutput`。
 
-阻塞传递连接隐含了更新顺序约束，确保在一个周期内，所有阻塞信号的传递和查询都能正确反映当前周期的状态。
-
-`TopStallInput`的连接不会被反映到更新次序约束中，传递到`TopStallInput`的阻塞信号也不会触发本模块的`stall`函数调用。
+阻塞连接隐含了子模块之间的更新顺序约束：如果子模块A的阻塞信号传递到子模块B，则A的`tick`函数必须在B的`tick`函数之前调用。但这一约束并不会对本模块的`tick`函数生效。
 
 ### 更新顺序约束
 
@@ -129,8 +126,8 @@
 模块类定义中仅包含局部配置项的初始值，实例化时可以对不同的实例进行不同的局部配置项覆盖，定义在 `VulInstance` 的 `local_config_overrides` 字段中。
 
 局部配置项仅能在模块内部访问：
-1. 本模块的用户代码中可直接通过 `_LOCAL_配置项名称` 访问。
-2. 在子模块实例的局部配置项覆盖中通过 `_LOCAL_配置项名称` 访问。
+1. 本模块的用户代码中可直接通过 `配置项名称` 访问。
+2. 在子模块实例的局部配置项覆盖中通过 `配置项名称` 访问。
 
 局部配置项的赋值表达式中允许引用全局配置库中的配置项，但不会随着全局配置项的变化而自动更新。仅在最终生成代码的时候这些值会被解析。
 
@@ -141,3 +138,332 @@
 | 作用范围 | 模块内部及子模块局部变量赋值时 | 全局可见 |
 | C++元素 | const 成员变量 | constexpr编译时常量 |
 | RTL（SV）元素 | module parameter | package parameter |
+
+
+## 行为代码编写
+
+模块类中有三类代码需要用户通过C语言语法编写，并最终嵌入生成的后端代码中：
+
+1. tickblocks: 一个模块可以有很多个tick代码块，每个代码块本质上是一个子实例，可以被自定义的子实例更新顺序约束。用户需要在 `user_tick_codeblocks` 字段中为每个代码块编写C代码行，这些代码行会被按照顺序嵌入到生成的模块类的 `tick` 函数中。
+
+2. 本模块定义的服务: 每一个未连接的服务都需要用户在 `serv_codelines` 字段中为其编写C代码行，这些代码行会被嵌入到生成的模块类的对应服务函数中。
+
+3. 子模块定义的请求: 每一个未连接的请求都需要用户在 `req_codelines` 字段中为其编写C代码行，这些代码行会被嵌入到生成的模块类的对应请求的wrapper函数中。
+
+在这些代码中，可以访问到的模块内资源包括：
+1. 所有全局Config，直接以配置项名字访问。
+2. 本模块的所有局部Config，直接以配置项名字访问。
+3. 本模块定义的所有request和service函数，直接以函数名字访问。
+4. 本模块定义的所有pipe input端口，通过端口名加后缀 `_can_pop()` / `_pop()` / `_top()` 访问。
+5. 本模块定义的所有pipe output端口，通过端口名加后缀 `_can_push()` / `_push()` 访问。
+6. 本模块定义的所有storage和storagetmp变量，直接以变量名字访问。
+7. 本模块定义的所有storagenext，通过变量名加后缀 `_get()` / `_setnext()` 访问。
+8. 所有子模块实例的service函数，通过 `实例名_服务名()` 访问。
+9. 所有管道子实例的端口，通过实例名加后缀 `_can_pop()` / `_pop()` / `_top()` / `_can_push()` / `_push()` 访问。
+10. 本模块的 `is_stalled()` 函数和 `stall()` 函数。
+11. 本模块的 `user_header_field` 域内自定义的helper function和成员变量。
+
+
+
+# VulModule 代码生成细节
+
+## 模块类外形定义
+
+```cpp
+class /*ModuleName*/ {
+public:
+    typedef struct {
+        // for local configs
+        int64_t /*config_name*/;
+        // for requests
+        /*HandshakeType*/ (* /*request_name*/)(void*, /*ArgumentSig*/);
+        // for pipe inputs
+        PipePopPort</*DataType*/> * /*pipe_input_name*/;
+        // for pipe outputs
+        PipePushPort</*DataType*/> * /*pipe_output_name*/;
+        string __instance_name;
+        void *__parent_module;
+        void *(__stall)(void*);
+    } ConstructorParams;
+
+    /*ModuleName*/(const ConstructorParams &params);
+
+    void tick();
+    void applyTick();
+    void stall();
+
+    // for services
+    /*HandsakeType*/ /*service_name*/(/*ArgumentSig*/);
+};
+```
+
+## hpp，全inline模式
+
+```cpp
+// <Header Field>
+
+// <Comment Field>
+class /*ModuleName*/ {
+public:
+
+typedef struct {
+    // <Constructor Params Field>
+    string __instance_name;
+    void *__parent_module;
+    void *(__stall)(void*);
+} ConstructorParams;
+
+/*ModuleName*/(const ConstructorParams &params) : __params(params) /*constructor_list*/ { __init(); }
+
+FORCE_INLINE void tick() {
+    // <Tick Field>
+}
+
+FORCE_INLINE void applyTick() {
+    __is_stalled = false;
+    // <ApplyTick Field>
+}
+
+FORCE_INLINE void stall() {
+    // <Stall Field>
+    // if connected to child module stall input
+    __instptr_/*ConnInstanceName*/->stall();
+    __stall_propagate_out();
+}
+
+// <Service Field>
+
+protected:
+
+ConstructorParams __params;
+
+void __init() {
+    // <Init Field>
+}
+
+bool __is_stalled = false;
+FORCE_INLINE bool is_stalled() const { return __is_stalled; }
+FORCE_INLINE void __stall_propagate_out() {
+    __is_stalled = true;
+    __params.__stall(__params.__parent_module);
+}
+
+// <Member Field>
+
+private:
+
+// <User Header Field>
+};
+```
+
+### local_configs
+
+`<Constructor Params Field>` : 
+```cpp
+int64_t /*config_name*/;
+```
+
+`<Member Field>` :
+```cpp
+const int64_t &/*config_name*/;
+```
+
+`<constructor_list>` :
+```cpp
+, /*config_name*/(__params./*config_name*/)
+```
+
+### requests
+
+`<Constructor Params Field>` : 
+```cpp
+/*HandshakeType*/ (* /*request_name*/)(void*, /*ArgumentSig*/);
+```
+`<Member Field>` :
+```cpp
+// Comment
+FORCE_INLINE /*HandshakeType*/ /*request_name*/(/*ArgumentSig*/) {
+    return __params./*request_name*/(__params.__parent_module, /*ArgumentList*/);
+}
+```
+
+### services
+
+`<Service Field>` :
+```cpp
+// Comment
+FORCE_INLINE /*ReturnSig*/ /*service_name*/(/*ArgumentSig*/) {
+    // if connected to child module service
+    return __instptr_/*ConnInstanceName*/->/*ConnServiceName*/(/*ArgumentList*/);
+    // if implemented by user code
+    // <Service CodeLines Field>
+}
+```
+
+### pipe_inputs
+
+`<Constructor Params Field>` : 
+```cpp
+    PipePopPort</*DataType*/> * /*pipe_input_name*/;
+```
+
+`<Member Field>` :
+```cpp
+// Comment
+FORCE_INLINE bool /*pipe_input_name*/_can_pop() {
+    return __params./*pipe_input_name*/->can_pop();
+}
+// Comment
+FORCE_INLINE void /*pipe_input_name*/_pop(/*DataType*/ * data) {
+    __params./*pipe_input_name*/->pop(data);
+}
+// Comment
+FORCE_INLINE void /*pipe_input_name*/_top(/*DataType*/ * data) {
+    __params./*pipe_input_name*/->top(data);
+}
+```
+
+### pipe_outputs
+
+`<Constructor Params Field>` : 
+```cpp
+    PipePushPort</*DataType*/> * /*pipe_output_name*/;
+```
+
+`<Member Field>` :
+```cpp
+// Comment
+FORCE_INLINE bool /*pipe_output_name*/_can_push() {
+    return __params./*pipe_output_name*/->can_push();
+}
+// Comment
+FORCE_INLINE void /*pipe_output_name*/_push(const /*DataType*/ & data) {
+    __params./*pipe_output_name*/->push(data);
+}
+```
+
+### user_header_filed_codelines
+
+`<User Header Field>` :
+```cpp
+// <User Header Field CodeLines Field>
+```
+
+### user_tick_codeblocks (in order)
+
+`<Member Field>` :
+```cpp
+// Comment
+FORCE_INLINE void __tick_block_/*InstanceName*/() {
+    // <Tick Block CodeLines Field>
+}
+```
+
+`<Tick Field>` :
+```cpp
+    __tick_block_/*InstanceName*/();
+```
+
+### req_codelines
+
+`<Member Field>` :
+```cpp
+FORCE_INLINE /*HandshakeType*/ __childreq_/*InstanceName*/_/*RequestName*/(/*ArgumentSig*/) {
+    // <Request CodeLines Field>
+}
+```
+
+### storages / storagenexts / storagetmp
+
+`<Member Field>` :
+```cpp
+// Comment
+/*Type*/ /*storage_name*/{/*InitialValue*/};
+```
+
+`<Sys ApplyTick Field>` :
+```cpp
+    /*storage_name*/.apply_tick();
+```
+
+### pipe_instances
+
+`Member Field` :
+```cpp
+std::unique_ptr</*PipeTypeStr*/> __pipeinstptr_/*PipeInstanceName*/;
+FORCE_INLINE bool /*PipeInstanceName*/_can_pop() {
+    return __pipeinstptr_/*PipeInstanceName*/->get_pop_port()->can_pop();
+}
+FORCE_INLINE void /*PipeInstanceName*/_pop(/*DataType*/ * data) {
+    __pipeinstptr_/*PipeInstanceName*/->get_pop_port()->pop(data);
+}
+FORCE_INLINE void /*PipeInstanceName*/_top(/*DataType*/ * data) {
+    __pipeinstptr_/*PipeInstanceName*/->get_pop_port()->top(data);
+}
+FORCE_INLINE bool /*PipeInstanceName*/_can_push() {
+    return __pipeinstptr_/*PipeInstanceName*/->get_push_port()->can_push();
+}
+FORCE_INLINE void /*PipeInstanceName*/_push(const /*DataType*/ & data) {
+    __pipeinstptr_/*PipeInstanceName*/->get_push_port()->push(data);
+}
+```
+
+`<Init Field>` :
+```cpp
+    {
+        __pipeinstptr_/*PipeInstanceName*/ = std::make_unique</*PipeTypeStr*/>(/*PipeParams*/);
+    }
+```
+
+### instances
+
+`<Member Field>` :
+```cpp
+std::unique_ptr</*ChildModuleName*/> __instptr_/*InstanceName*/;
+// for each child services
+FORCE_INLINE /*ReturnSig*/ /*InstanceName*/_/*ServiceName*/(/*ArgumentSig*/) {
+    return __instptr_/*InstanceName*/->/*ServiceName*/(/*ArgumentList*/);
+}
+// for each child requests
+static /*HandshakeType*/ __childreq_/*InstanceName*/_/*RequestName*/_wrapper(void * __parent_module, /*ArgumentSig*/) {
+    // if connected to module request
+    return static_cast</*ModuleName*/*>(__parent_module)->/*ConnRequestName*/(/*ArgumentList*/);
+    // if connected to child module service
+    return static_cast</*ModuleName*/*>(__parent_module)->__instptr_/*ConnInstanceName*/->/*ConnServiceName*/(/*ArgumentList*/);
+    // if implemented by user code
+    return static_cast</*ModuleName*/*>(__parent_module)->__childreq_/*InstanceName*/_/*RequestName*/(/*ArgumentList*/);
+}
+static void __childstall_/*InstanceName*/_wrapper(void * __parent_module) {
+    // if connected to other instance
+    static_cast</*ModuleName*/*>(__parent_module)->__instptr_/*ConnInstanceName*/->stall();
+    // if connected to module stall output
+    static_cast</*ModuleName*/*>(__parent_module)->__stall_propagate_out();
+}
+```
+
+`<Init Field>` :
+```cpp
+    {
+        /*ChildModuleName*/::ConstructorParams cparams;
+        cparams.__instance_name = "/*InstanceName*/";
+        cparams.__parent_module = this;
+        // for requests
+        cparams./*RequestName*/ = &/*ModuleName*/::__childreq_/*InstanceName*/_/*RequestName*/_wrapper;
+        // for pipe inputs connected to module pipe inputs
+        cparams./*PipeInputName*/ = __params./*MappedPipeInputName*/;
+        // for pipe inputs connected to pipe instances
+        cparams./*PipeInputName*/ = __pipeinstptr_/*PipeInstanceName*/->get_pop_port();
+        // for pipe outputs connected to module pipe outputs
+        cparams./*PipeOutputName*/ = __params./*MappedPipeOutputName*/;
+        // for pipe outputs connected to pipe instances
+        cparams./*PipeOutputName*/ = __pipeinstptr_/*PipeInstanceName*/->get_push_port();
+        // for local config overrides
+        cparams./*config_name*/ = /*config_value*/;
+        __instptr_/*InstanceName*/ = std::make_unique</*ChildModuleName*/>(cparams);
+    }
+```
+
+
+
+
+

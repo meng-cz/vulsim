@@ -27,6 +27,7 @@
 
 #include "bundlelib.h"
 #include "configlib.h"
+#include "module.hpp"
 
 namespace simgen {
 
@@ -46,6 +47,14 @@ ErrorMsg genConfigHeaderCode(const VulConfigLib &config_lib, vector<string> &out
  */
 ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out_lines);
 
+
+/**
+ * @brief Generate module.hpp C++ header code for a module definition.
+ * @param module The VulModule instance containing the module definition.
+ * @param out_lines Output vector of strings to hold the generated header code lines. With \\n in each line.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines);
 
 
 } // namespace simgen
