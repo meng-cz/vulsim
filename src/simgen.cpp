@@ -26,6 +26,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <cctype>
 
 namespace simgen {
 
@@ -48,6 +49,71 @@ vector<string> genHeaderPrelude() {
     out.push_back("\n");
     out.push_back("#pragma once\n");
     out.push_back("\n");
+    return out;
+}
+
+string replaceLog2CeilChar(const ConfigValue &v) {
+    // replace @ with log2ceil function call
+    if (v.find('@') == string::npos) {
+        return v; // no '@' found, return original
+    }
+    string out;
+    size_t n = v.size();
+    size_t i = 0;
+    while (i < n) {
+        if (v[i] != '@') {
+            out.push_back(v[i]);
+            ++i;
+            continue;
+        }
+
+        // found '@'
+        size_t k = i + 1;
+        // skip spaces immediately after '@'
+        while (k < n && std::isspace(static_cast<unsigned char>(v[k]))) ++k;
+
+        // if nothing follows, replace with an empty-call
+        if (k >= n) {
+            out += "log2ceil()";
+            i = n;
+            break;
+        }
+
+        // if next is '(', reuse it as function call bracket
+        if (v[k] == '(') {
+            out += "log2ceil"; // keep the original '(' in next iterations
+            i = k; // continue processing from the '('
+            continue;
+        }
+
+        // identifier: [A-Za-z_][A-Za-z0-9_]*
+        if (std::isalpha(static_cast<unsigned char>(v[k])) || v[k] == '_') {
+            size_t t = k + 1;
+            while (t < n && (std::isalnum(static_cast<unsigned char>(v[t])) || v[t] == '_')) ++t;
+            out += "log2ceil(" + v.substr(k, t - k) + ")";
+            i = t;
+            continue;
+        }
+
+        // number literal: decimal or hex (0x...)
+        if (std::isdigit(static_cast<unsigned char>(v[k]))) {
+            size_t t = k;
+            if (t + 1 < n && v[t] == '0' && (v[t+1] == 'x' || v[t+1] == 'X')) {
+                t += 2;
+                while (t < n && std::isxdigit(static_cast<unsigned char>(v[t]))) ++t;
+            } else {
+                while (t < n && std::isdigit(static_cast<unsigned char>(v[t]))) ++t;
+            }
+            out += "log2ceil(" + v.substr(k, t - k) + ")";
+            i = t;
+            continue;
+        }
+
+        // fallback: just insert function name and continue after spaces
+        out += "log2ceil";
+        i = k;
+    }
+
     return out;
 }
 
@@ -102,7 +168,7 @@ ErrorMsg genConfigHeaderCode(const VulConfigLib &config_lib, vector<string> &out
         line += "constexpr int64_t ";
         line += item.name;
         line += " = ";
-        line += item.value;
+        line += replaceLog2CeilChar(item.value);
         line += ";\n";
         out_lines.push_back(line);
         out_lines.push_back("\n");
@@ -173,22 +239,22 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
             if (!item.basic_members.empty()) {
                 alias_target = item.basic_members[0].type;
             } else if (!item.uint_members.empty()) {
-                alias_target = "UInt<" + item.uint_members[0].length + ">";
+                alias_target = "UInt<" + replaceLog2CeilChar(item.uint_members[0].length) + ">";
             } else if (!item.array_members.empty()) {
                 for (const auto &dim : item.array_members[0].dims) {
                     alias_target += "std::array<";
                 }
                 alias_target += item.array_members[0].type;
                 for (uint32_t i = item.array_members[0].dims.size(); i > 0; i--) {
-                    alias_target += ", " + item.array_members[0].dims[i-1] + ">";
+                    alias_target += ", " + replaceLog2CeilChar(item.array_members[0].dims[i-1]) + ">";
                 }
             } else if (!item.uint_array_members.empty()) {
                 for (const auto &dim : item.uint_array_members[0].dims) {
                     alias_target += "std::array<";
                 }
-                alias_target += "UInt<" + item.uint_members[0].length + ">";
+                alias_target += "UInt<" + replaceLog2CeilChar(item.uint_array_members[0].length) + ">";
                 for (uint32_t i = item.uint_array_members[0].dims.size(); i > 0; i--) {
-                    alias_target += ", " + item.uint_array_members[0].dims[i-1] + ">";
+                    alias_target += ", " + replaceLog2CeilChar(item.uint_array_members[0].dims[i-1]) + ">";
                 }
             }
             if (alias_target.empty()) {
@@ -202,7 +268,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
             for (const auto &em : item.enum_members) {
                 string member_str = "    " + em.name;
                 if (!em.value.empty()) {
-                    member_str += " = " + em.value;
+                    member_str += " = " + replaceLog2CeilChar(em.value);
                 }
                 member_str += ",";
                 if (!em.comment.empty()) {
@@ -218,7 +284,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
             for (const auto &bm : item.basic_members) {
                 string member_str = "    " + bm.type + " " + bm.name;
                 if (!bm.value.empty() && isBasicVulType(bm.type)) {
-                    member_str += " = " + bm.value;
+                    member_str += " = " + replaceLog2CeilChar(bm.value);
                 }
                 member_str += ";";
                 if (!bm.comment.empty()) {
@@ -227,9 +293,9 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
                 out_lines.push_back(member_str + "\n");
             }
             for (const auto &um : item.uint_members) {
-                string member_str = "    UInt<" + um.length + "> " + um.name;
+                string member_str = "    UInt<" + replaceLog2CeilChar(um.length) + "> " + um.name;
                 if (!um.value.empty()) {
-                    member_str += " = " + um.value;
+                    member_str += " = " + replaceLog2CeilChar(um.value);
                 }
                 member_str += ";";
                 if (!um.comment.empty()) {
@@ -244,7 +310,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
                 }
                 type_str += am.type;
                 for (uint32_t i = am.dims.size(); i > 0; i--) {
-                    type_str += ", " + am.dims[i-1] + ">";
+                    type_str += ", " + replaceLog2CeilChar(am.dims[i-1]) + ">";
                 }
                 string member_str = "    " + type_str + " " + am.name + "{};";
                 if (!am.comment.empty()) {
@@ -257,9 +323,9 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
                 for (const auto &dim : uam.dims) {
                     type_str += "std::array<";
                 }
-                type_str += "UInt<" + uam.length + ">";
+                type_str += "UInt<" + replaceLog2CeilChar(uam.length) + ">";
                 for (uint32_t i = uam.dims.size(); i > 0; i--) {
-                    type_str += ", " + uam.dims[i-1] + ">";
+                    type_str += ", " + replaceLog2CeilChar(uam.dims[i-1]) + ">";
                 }
                 string member_str = "    " + type_str + " " + uam.name + "{};";
                 if (!uam.comment.empty()) {
