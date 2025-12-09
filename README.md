@@ -24,6 +24,10 @@ v1.0开发中：
 5. 研究基于HLS的从Vul模型到可综合RTL的生成（预计2025/04）
 6. 构建VulDesigner v1.1，添加对波形调试、性能统计、快照保存和恢复的支持（预计2025/04）
 
+前期工作：
+1. [nullrvsim](https://github.com/meng-cz/nullrvsim): 验证VUL模型生成的模拟器框架的正确性和并行效率
+2. [FASE](https://github.com/meng-cz/fase-rv64)：对RTL实现的处理器实现系统调用模拟（SE模式），为VUL模型上的SE模式做准备
+
 ## 文档
 
 v1.0版本的Vul模型Module文档：[module.md](./doc/module.md) 
