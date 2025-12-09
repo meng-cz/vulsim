@@ -90,4 +90,8 @@ constexpr uint32_t EItemBundUpdateTagged = 31019;
 constexpr uint32_t EItemBundAliasInvalid = 31020;
 constexpr uint32_t EItemBundInitWithValue = 31021;
 
+constexpr uint32_t ErrModule = 32000;
+constexpr uint32_t EItemModConfInvalidValue = 32001;
+constexpr uint32_t EItemModConfRefNotFound = 32002;
+
 

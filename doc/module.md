@@ -447,6 +447,7 @@ static void __childstall_/*InstanceName*/_wrapper(void * __parent_module) {
         /*ChildModuleName*/::ConstructorParams cparams;
         cparams.__instance_name = "/*InstanceName*/";
         cparams.__parent_module = this;
+        cparams.__stall = &/*ModuleName*/::__childstall_/*InstanceName*/_wrapper;
         // for requests
         cparams./*RequestName*/ = &/*ModuleName*/::__childreq_/*InstanceName*/_/*RequestName*/_wrapper;
         // for pipe inputs connected to module pipe inputs

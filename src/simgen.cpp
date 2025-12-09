@@ -22,6 +22,7 @@
 
 #include "simgen.h"
 #include "toposort.hpp"
+#include "pipetype.hpp"
 
 #include <chrono>
 #include <iomanip>
@@ -33,7 +34,26 @@ namespace simgen {
 
 const string CodeTab = "    ";
 
-vector<string> _genUnpackMultiline(const string &s) {
+const string Log2CeilFunctionName = "log2ceil";
+const string TickFunctionName = "on_current_tick";
+const string ApplyTickFunctionName = "apply_next_tick";
+
+const string UIntClassName = "UInt";
+const string StorageNextClassName = "StorageNext";
+const string StorageNextArrayClassName = "StorageNextArray";
+
+string _genPipeClassName(const VulPipe &pipe) {
+    PipeImplType type = determinePipeImplType(pipe);
+    switch (type) {
+        case PipeImplType::SimpleNoHandshakeNoBuffer: return "Pipe";
+        case PipeImplType::SimpleValidNoBuffer: return "PipeV";
+        case PipeImplType::SimpleHandshakeNoBuffer: return "PipeH";
+        case PipeImplType::SimpleHandshakeBuffer: return "PipeHB";
+    }
+    return "PipeMHB";
+}
+
+vector<string> _genUnpackMultilineNoNext(const string &s) {
     vector<string> out_lines;
     size_t pos = 0;
     size_t n = s.size();
@@ -94,14 +114,14 @@ string replaceLog2CeilChar(const ConfigValue &v) {
 
         // if nothing follows, replace with an empty-call
         if (k >= n) {
-            out += "log2ceil()";
+            out += Log2CeilFunctionName + "()";
             i = n;
             break;
         }
 
         // if next is '(', reuse it as function call bracket
         if (v[k] == '(') {
-            out += "log2ceil"; // keep the original '(' in next iterations
+            out += Log2CeilFunctionName; // keep the original '(' in next iterations
             i = k; // continue processing from the '('
             continue;
         }
@@ -110,7 +130,7 @@ string replaceLog2CeilChar(const ConfigValue &v) {
         if (std::isalpha(static_cast<unsigned char>(v[k])) || v[k] == '_') {
             size_t t = k + 1;
             while (t < n && (std::isalnum(static_cast<unsigned char>(v[t])) || v[t] == '_')) ++t;
-            out += "log2ceil(" + v.substr(k, t - k) + ")";
+            out += Log2CeilFunctionName + "(" + v.substr(k, t - k) + ")";
             i = t;
             continue;
         }
@@ -124,13 +144,13 @@ string replaceLog2CeilChar(const ConfigValue &v) {
             } else {
                 while (t < n && std::isdigit(static_cast<unsigned char>(v[t]))) ++t;
             }
-            out += "log2ceil(" + v.substr(k, t - k) + ")";
+            out += Log2CeilFunctionName + "(" + v.substr(k, t - k) + ")";
             i = t;
             continue;
         }
 
         // fallback: just insert function name and continue after spaces
-        out += "log2ceil";
+        out += Log2CeilFunctionName;
         i = k;
     }
 
@@ -170,7 +190,7 @@ ErrorMsg genConfigHeaderCode(const VulConfigLib &config_lib, vector<string> &out
             return err;
         }
         // generate comment per line
-        for (const string &line : _genUnpackMultiline(item.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(item.comment)) {
             out_lines.push_back("// " + line + "\n");
         }
         // generate code line
@@ -228,7 +248,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
         }
 
         // generate comment per line
-        for (const string &line : _genUnpackMultiline(item.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(item.comment)) {
             out_lines.push_back("// " + line + "\n");
         }
         out_lines.push_back("\n");
@@ -237,7 +257,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
             string type_str;
             string base_type = member.type;
             if (!member.uint_length.empty()) {
-                base_type = "UInt<" + replaceLog2CeilChar(member.uint_length) + ">";
+                base_type = UIntClassName + "<" + replaceLog2CeilChar(member.uint_length) + ">";
             }
             if (!member.dims.empty()) {
                 for (const auto &dim : member.dims) {
@@ -388,12 +408,12 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     // generate local configs
     for (const auto &cfg_entry : module.local_configs) {
         const VulLocalConfigItem &cfg = cfg_entry.second;
-        constructor_param_field.push_back(CodeTab + "int64_t " + cfg.name + ";");
+        constructor_param_field.push_back(CodeTab + "int64_t " + cfg.name + ";\n");
         string line = CodeTab + "const int64_t & " + cfg.name + ";";
         if (!cfg.comment.empty()) {
             line += " // " + cfg.comment;
         }
-        member_field.push_back(line);
+        member_field.push_back(line + "\n");
         constructor_list += ", " + cfg.name + "(__params." + cfg.name + ")";
     }
     if (!module.local_configs.empty()) {
@@ -410,8 +430,8 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         if (!argtypes.empty()) {
             argtypes = ", " + argtypes;
         }
-        constructor_param_field.push_back(CodeTab + rettype + " (*" + req_entry.first + ")(void *" + argtypes + ");");
-        for (const string &line : _genUnpackMultiline(req.comment)) {
+        constructor_param_field.push_back(CodeTab + rettype + " (*" + req_entry.first + ")(void *" + argtypes + ");\n");
+        for (const string &line : _genUnpackMultilineNoNext(req.comment)) {
             member_field.push_back("// " + line + "\n");
         }
         member_field.push_back("FORCE_INLINE " + rettype + " " + req_entry.first + "(" + arglists + ") {\n");
@@ -427,7 +447,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         string rettype = _genReqServFuncReturnType(serv);
         string argnames = _genReqServFuncArgsNames(serv);
         string arglists = _genReqServFuncArgsList(serv);
-        for (const string &line : _genUnpackMultiline(serv.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(serv.comment)) {
             service_field.push_back("// " + line + "\n");
         }
         service_field.push_back("FORCE_INLINE " + rettype + " " + serv_entry.first + "(" + arglists + ") {\n");
@@ -457,20 +477,20 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     // generate pipe inputs
     for (const auto &pipe_entry : module.pipe_inputs) {
         const VulPipePort &pipe = pipe_entry.second;
-        constructor_param_field.push_back(CodeTab + "PipePopPort<" + pipe.type + "> * " + pipe_entry.first + ";");
-        for (const string &line : _genUnpackMultiline(pipe.comment)) {
+        constructor_param_field.push_back(CodeTab + "PipePopPort<" + pipe.type + "> * " + pipe_entry.first + ";\n");
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
             member_field.push_back("// " + line + "\n");
         }
         member_field.push_back("FORCE_INLINE bool " + pipe_entry.first + "_can_pop() {\n");
         member_field.push_back(CodeTab + "return __params." + pipe_entry.first + "->can_pop();\n");
         member_field.push_back("}\n");
-        for (const string &line : _genUnpackMultiline(pipe.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
             member_field.push_back("// " + line + "\n");
         }
         member_field.push_back("FORCE_INLINE void " + pipe_entry.first + "_pop(" + pipe.type + " * data) {\n");
         member_field.push_back(CodeTab + "__params." + pipe_entry.first + "->pop(data);\n");
         member_field.push_back("}\n");
-        for (const string &line : _genUnpackMultiline(pipe.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
             member_field.push_back("// " + line + "\n");
         }
         member_field.push_back("FORCE_INLINE void " + pipe_entry.first + "_top(" + pipe.type + " * data) {\n");
@@ -482,13 +502,13 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     for (const auto &pipe_entry : module.pipe_outputs) {
         const VulPipePort &pipe = pipe_entry.second;
         constructor_param_field.push_back(CodeTab + "PipePushPort<" + pipe.type + "> * " + pipe_entry.first + ";");
-        for (const string &line : _genUnpackMultiline(pipe.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
             member_field.push_back("// " + line + "\n");
         }
         member_field.push_back("FORCE_INLINE bool " + pipe_entry.first + "_can_push() {\n");
         member_field.push_back(CodeTab + "return __params." + pipe_entry.first + "->can_push();\n");
         member_field.push_back("}\n");
-        for (const string &line : _genUnpackMultiline(pipe.comment)) {
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
             member_field.push_back("// " + line + "\n");
         }
         member_field.push_back("FORCE_INLINE void " + pipe_entry.first + "_push(const " + pipe.type + " & data) {\n");
@@ -547,7 +567,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         auto user_tick_iter = module.user_tick_codeblocks.find(inst_name);
         if (user_tick_iter != module.user_tick_codeblocks.end()) {
             const VulTickCodeBlock &codeblock = user_tick_iter->second;
-            for (const string &line : _genUnpackMultiline(codeblock.comment)) {
+            for (const string &line : _genUnpackMultilineNoNext(codeblock.comment)) {
                 member_field.push_back("// " + line + "\n");
             }
             member_field.push_back("FORCE_INLINE void __tick_codeblock_" + inst_name + "() {\n");
@@ -556,22 +576,294 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
             }
             member_field.push_back("}\n");
             member_field.push_back("\n");
-            tick_field.push_back(CodeTab + "__tick_codeblock_" + inst_name + "();");
+            tick_field.push_back(CodeTab + "__tick_codeblock_" + inst_name + "();\n");
         } else {
             // tick function call for child module instance
             auto inst_iter = module.instances.find(inst_name);
             if (inst_iter != module.instances.end()) {
-                tick_field.push_back(CodeTab + "__instptr_" + inst_name + "->tick();");
+                tick_field.push_back(CodeTab + "__instptr_" + inst_name + "->" + TickFunctionName + "();\n");
             }
         }
     }
     // generate child req codelines implementations
+    for (const auto &reqcl_entry : module.req_codelines) {
+        const InstanceName &inst_name = reqcl_entry.first;
+        for (const auto &req_entry : reqcl_entry.second) {
+            const ReqServName &req_name = req_entry.first;
+            auto modulelib = VulModuleBase::getModuleLibInstance();
+            auto &childmod_ptr = modulelib->at(module.instances.at(inst_name).module_name);
+            auto &childreq = childmod_ptr->requests.at(req_name);
+            string rettype = _genReqServFuncReturnType(childreq);
+            string arglists = _genReqServFuncArgsList(childreq);
+            member_field.push_back("FORCE_INLINE " + rettype + " __childreq_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
+            for (const auto &line : req_entry.second) {
+                member_field.push_back(line);
+            }
+            member_field.push_back("}\n");
+            member_field.push_back("\n");
+        }
+    }
 
-    // TODO: finish after module lib support
+    auto _genStoTypeNormal = [&](const VulStorage &sto) -> string {
+        string type_str;
+        string base_type = sto.type;
+        if (!sto.uint_length.empty()) {
+            base_type = UIntClassName + "<" + replaceLog2CeilChar(sto.uint_length) + ">";
+        }
+        if (!sto.dims.empty()) {
+            for (const auto &dim : sto.dims) {
+                type_str += "std::array<";
+            }
+            type_str += base_type;
+            for (uint32_t i = sto.dims.size(); i > 0; i--) {
+                type_str += ", " + replaceLog2CeilChar(sto.dims[i-1]) + ">";
+            }
+        } else {
+            type_str = base_type;
+        }
+        return type_str;
+    };
+    auto _genStoTypeNext = [&](const VulStorage &sto) -> string {
+        string type_str;
+        string base_type = sto.type;
+        if (!sto.uint_length.empty()) {
+            base_type = UIntClassName + "<" + replaceLog2CeilChar(sto.uint_length) + ">";
+        }
+        if (!sto.dims.empty()) {
+            type_str += StorageNextArrayClassName + "<" + base_type;
+            for (const auto &dim : sto.dims) {
+                type_str += "," + replaceLog2CeilChar(dim);
+            }
+            type_str += ">";
+        } else {
+            type_str = StorageNextClassName + "<" + base_type + ">";
+        }
+        return type_str;
+    };
+    // generate storage members
+    for (const auto &sto_entry : module.storages) {
+        const VulStorage &sto = sto_entry.second;
+        for (const string &line : _genUnpackMultilineNoNext(sto.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        string line = _genStoTypeNormal(sto) + " " + sto_entry.first;
+        if (!sto.value.empty()) {
+            line += " = " + replaceLog2CeilChar(sto.value);
+        }
+        line += ";\n";
+        member_field.push_back(line);
+        member_field.push_back("\n");
+    }
+    // generate next-state storage members
+    for (const auto &sto_entry : module.storagenexts) {
+        const VulStorage &sto = sto_entry.second;
+        for (const string &line : _genUnpackMultilineNoNext(sto.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        string line = _genStoTypeNext(sto) + " " + sto_entry.first + ";\n";
+        member_field.push_back(line);
+        member_field.push_back("\n");
+        apply_tick_field.push_back(CodeTab + sto_entry.first + "." + ApplyTickFunctionName + "();\n");
+    }
+    // generate tmp storage members
+    for (const auto &sto_entry : module.storagetmp) {
+        const VulStorage &sto = sto_entry.second;
+        for (const string &line : _genUnpackMultilineNoNext(sto.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        string statement = sto_entry.first + " = " + replaceLog2CeilChar(sto.value) + ";";
+        member_field.push_back(_genStoTypeNormal(sto) + " " + statement);
+        member_field.push_back("\n");
+        apply_tick_field.push_back(CodeTab + statement);
+    }
 
+    // generate pipe instance
+    for (const auto &pipe_entry : module.pipe_instances) {
+        const VulPipe &pipe = pipe_entry.second;
+        string pipe_class_raw = _genPipeClassName(pipe);
+        string pipe_class = pipe_class_raw + "<" +
+            pipe.type + ", " +
+            std::to_string(pipe.input_size) + ", " +
+            std::to_string(pipe.output_size) + ", " +
+            std::to_string(pipe.buffer_size) + ", " +
+            std::to_string(pipe.latency) + ">";
+        string pipe_instptr_name = "__pipeinstptr_" + pipe_entry.first;
+        member_field.push_back("std::unique_ptr<" + pipe_class + "> " + pipe_instptr_name + ";\n");
 
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        member_field.push_back("FORCE_INLINE bool " + pipe_entry.first + "_can_pop() {\n");
+        member_field.push_back(CodeTab + "return " + pipe_instptr_name + "->get_pop_port()->can_pop();\n");
+        member_field.push_back("}\n");
+        
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        member_field.push_back("FORCE_INLINE void " + pipe_entry.first + "_pop(" + pipe.type + " * data) {\n");
+        member_field.push_back(CodeTab + "return " + pipe_instptr_name + "->get_pop_port()->pop(data);\n");
+        member_field.push_back("}\n");
 
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        member_field.push_back("FORCE_INLINE void " + pipe_entry.first + "_top(" + pipe.type + " * data) {\n");
+        member_field.push_back(CodeTab + "return " + pipe_instptr_name + "->get_pop_port()->top(data);\n");
+        member_field.push_back("}\n");
 
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        member_field.push_back("FORCE_INLINE bool " + pipe_entry.first + "_can_push() {\n");
+        member_field.push_back(CodeTab + "return " + pipe_instptr_name + "->get_push_port()->can_push();\n");
+        member_field.push_back("}\n");
+        
+        for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {
+            member_field.push_back("// " + line + "\n");
+        }
+        member_field.push_back("FORCE_INLINE void " + pipe_entry.first + "_push(const " + pipe.type + " & data) {\n");
+        member_field.push_back(CodeTab + "return " + pipe_instptr_name + "->get_push_port()->push(data);\n");
+        member_field.push_back("}\n");
+
+        init_field.push_back(CodeTab + pipe_instptr_name + " = std::make_unique<" + pipe_class + ">();\n");
+    }
+
+    // generate stall field
+    for (const auto &conn : module.stalled_connections) {
+        if (conn.from_instance != VulModule::TopStallInput) {
+            continue;
+        }
+        stall_field.push_back(CodeTab + "__instptr_" + conn.to_instance + "->stall();\n");
+    }
+
+    // generate instances
+    for (const auto &inst_entry : module.instances) {
+        const InstanceName &inst_name = inst_entry.first;
+        const VulInstance &inst = inst_entry.second;
+        const ModuleName &child_mod = inst.module_name;
+        auto modulelib = VulModuleBase::getModuleLibInstance();
+        auto &childmod_ptr = modulelib->at(child_mod);
+        string child_instptr_name = "__instptr_" + inst_entry.first;
+
+        member_field.push_back("std::unique_ptr<" + child_mod + "> " + child_instptr_name + ";\n");
+
+        for (const auto &serv_entry : childmod_ptr->services) {
+            const VulReqServ &serv = serv_entry.second;
+            string rettype = _genReqServFuncReturnType(serv);
+            string arglists = _genReqServFuncArgsList(serv);
+            string argname = _genReqServFuncArgsNames(serv);
+            for (const string &line : _genUnpackMultilineNoNext(serv.comment)) {
+                member_field.push_back("// " + line + "\n");
+            }
+            member_field.push_back("FORCE_INLINE " + rettype + " " + inst_entry.first + "_" + serv_entry.first + "(" + arglists + ") {\n");
+            string return_prefix = (rettype == "void" ? "" : "return ");
+            member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + serv_entry.first + "(" + argname + ");\n");
+            member_field.push_back("}\n");
+        }
+
+        string parent_ptr_cast = "static_cast<" + child_mod + "*>(__parent_module)";
+        for (const auto &req_entry : childmod_ptr->requests) {
+            const VulReqServ &req = req_entry.second;
+            string rettype = _genReqServFuncReturnType(req);
+            string arglist = _genReqServFuncArgsList(req);
+            string argname = _genReqServFuncArgsNames(req);
+
+            string wrapper_arglist = "void * __parent_module";
+            if (!arglist.empty()) {
+                wrapper_arglist += ", " + arglist;
+            }
+            member_field.push_back("static " + rettype + " __childreq_" + inst_entry.first + "_" + req_entry.first + "_wrapper(" + wrapper_arglist + ") {\n");
+            string return_prefix = (rettype == "void" ? "" : "return ");
+            // connection to module request
+            // connection to child module service
+            auto iter = module.req_connections.find(inst_name);
+            if (iter != module.req_connections.end()) [[likely]] {
+                for (const auto &conn : iter->second) {
+                    if (conn.req_name == req_entry.first) {
+                        if (conn.serv_instance == VulModule::TopInterface) {
+                            member_field.push_back(CodeTab + return_prefix + parent_ptr_cast + "->" + conn.serv_name + "(" + argname + ");\n");
+                        } else {
+                            member_field.push_back(CodeTab + return_prefix + parent_ptr_cast + "->" + conn.serv_instance + "_" + conn.serv_name + "(" + argname + ");\n");
+                        }
+                    }
+                }
+            }
+            // implement by user-defined code
+            auto user_req_iter = module.req_codelines.find(inst_name);
+            if (user_req_iter != module.req_codelines.end()) {
+                auto req_codeblock_iter = user_req_iter->second.find(req_entry.first);
+                if (req_codeblock_iter != user_req_iter->second.end()) {
+                    member_field.push_back(CodeTab + return_prefix + parent_ptr_cast + "->__childreq_" + inst_name + "_" + req_entry.first + "(" + argname + ");\n");
+                }
+            }
+        }
+
+        member_field.push_back("static void __childstall_" + inst_name + "_wrapper(void * __parent_module) {\n");
+        for (const auto & stall_conn : module.stalled_connections) {
+            if (stall_conn.from_instance != inst_name) {
+                continue;
+            }
+            if (stall_conn.to_instance == VulModule::TopStallOutput) {
+                member_field.push_back(CodeTab + parent_ptr_cast + "->__stall_propagate_out();\n");
+            } else {
+                member_field.push_back(CodeTab + parent_ptr_cast + "->__instptr_" + stall_conn.to_instance + "->stall();\n");
+            }
+        }
+        member_field.push_back("}\n");
+
+        member_field.push_back("\n");
+
+        // constructor init
+        init_field.push_back(CodeTab + "{\n");
+        const string indent = CodeTab + CodeTab;
+
+        init_field.push_back(indent + child_mod + "::ConstructorParams cparams;\n");
+        init_field.push_back(indent + "cparams.__parent_module = this;\n");
+        init_field.push_back(indent + "cparams.__instance_name = \"" + inst_name + "\";\n");
+        init_field.push_back(indent + "cparams.__stall = &__childstall_" + inst_name + "_wrapper;\n");
+
+        for (const auto &req_entry : childmod_ptr->requests) {
+            string wrapper_name = "__childreq_" + inst_name + "_" + req_entry.first + "_wrapper";
+            init_field.push_back(indent + "cparams." + req_entry.first + " = &" + wrapper_name + ";\n");
+        }
+        for (const auto &pipein_entry : childmod_ptr->pipe_inputs) {
+            for (const auto &conn : module.mod_pipe_connections.at(inst_name)) {
+                if (conn.instance_pipe_port != pipein_entry.first) {
+                    continue;
+                }
+                if (conn.pipe_instance == VulModule::TopInterface) {
+                    init_field.push_back(indent + "cparams." + pipein_entry.first + " = __params." + conn.top_pipe_port + ";\n");
+                } else {
+                    init_field.push_back(indent + "cparams." + pipein_entry.first + " = __pipeinstptr_" + conn.pipe_instance + "->get_pop_port();\n");
+                }
+            }
+        }
+        for (const auto &pipeout_entry : childmod_ptr->pipe_outputs) {
+            for (const auto &conn : module.mod_pipe_connections.at(inst_name)) {
+                if (conn.instance_pipe_port != pipeout_entry.first) {
+                    continue;
+                }
+                if (conn.pipe_instance == VulModule::TopInterface) {
+                    init_field.push_back(indent + "cparams." + pipeout_entry.first + " = __params." + conn.top_pipe_port + ";\n");
+                } else {
+                    init_field.push_back(indent + "cparams." + pipeout_entry.first + " = __pipeinstptr_" + conn.pipe_instance + "->get_push_port();\n");
+                }
+            }
+        }
+        for (const auto &lc_entry : childmod_ptr->local_configs) {
+            const VulLocalConfigItem &lc = lc_entry.second;
+            auto iter = inst.local_config_overrides.find(lc.name);
+            if (iter != inst.local_config_overrides.end()) {
+                init_field.push_back(indent + "cparams." + lc.name + " = " + replaceLog2CeilChar(iter->second) + ";\n");
+            } else {
+                init_field.push_back(indent + "cparams." + lc.name + " = " + replaceLog2CeilChar(lc.value) + ";\n");
+            }
+        }
+        init_field.push_back(indent + child_instptr_name + " = std::make_unique<" + child_mod + ">(cparams);\n");
+        init_field.push_back(CodeTab + "}\n");
+    }
+
+    // preparation done, start generating code lines
 
     out_lines = genHeaderPrelude();
     out_lines.push_back("#include \"common.h\"\n");
@@ -591,8 +883,99 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     }
     out_lines.push_back("\n");
     
+    // begin class definition
+    for (const string &line : _genUnpackMultilineNoNext(module.comment)) {
+        out_lines.push_back("// " + line + "\n");
+    }
+    out_lines.push_back("class " + module.name + " {\n");
+    out_lines.push_back("public:\n");
+    out_lines.push_back("\n");
 
-    // TODO
+    // ConstructorParams struct
+    out_lines.push_back("typedef struct __ConstructorParams__ {\n");
+    out_lines.push_back(CodeTab + "void * __parent_module;\n");
+    out_lines.push_back(CodeTab + "std::string __instance_name;\n");
+    out_lines.push_back(CodeTab + "void (*__stall)(void *);\n");
+    for (const auto &line : constructor_param_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("} ConstructorParams;\n");
+    out_lines.push_back("\n");
+
+    // Constructor
+    out_lines.push_back("explicit " + module.name + "(const ConstructorParams & __params) : \n");
+    out_lines.push_back(CodeTab + CodeTab + "__params(__params)" + constructor_list + " {\n");
+    out_lines.push_back(CodeTab + "__init();\n");
+    out_lines.push_back("}\n");
+
+    // Tick function
+    out_lines.push_back("FORCE_INLINE void " + TickFunctionName + "() {\n");
+    for (const auto &line : tick_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    // ApplyTick function
+    out_lines.push_back("FORCE_INLINE void " + ApplyTickFunctionName + "() {\n");
+    out_lines.push_back(CodeTab + "__is_stalled = false;\n");
+    for (const auto &line : apply_tick_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    // Stall function
+    out_lines.push_back("FORCE_INLINE void stall() {\n");
+    for (const auto &line : stall_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back(CodeTab + "__stall_propagate_out();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    // Service functions
+    for (const auto &line : service_field) {
+        out_lines.push_back(line);
+    }
+
+    // Protected members (Auto-generated members)
+    out_lines.push_back("protected:\n");
+    out_lines.push_back("\n");
+
+    // Parameter instance
+    out_lines.push_back("ConstructorParams __params;\n");
+    out_lines.push_back("\n");
+
+    // Init function
+    out_lines.push_back("FORCE_INLINE void __init() {\n");
+    for (const auto &line : init_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    // Stall members
+    out_lines.push_back("bool __is_stalled = false;\n");
+    out_lines.push_back("FORCE_INLINE bool is_stalled() const { return __is_stalled; }\n");
+    out_lines.push_back("FORCE_INLINE void __stall_propagate_out() {\n");
+    out_lines.push_back(CodeTab + "__is_stalled = true;\n");
+    out_lines.push_back(CodeTab + "__params.__stall(__params.__parent_module);\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    // Member fields
+    for (const auto &line : member_field) {
+        out_lines.push_back(line);
+    }
+
+    // Private members (User-defined members)
+    out_lines.push_back("private:\n");
+    out_lines.push_back("\n");
+
+    for (const auto &line : module.user_header_field_codelines) {
+        out_lines.push_back(line);
+    }
 
     // Finish class definition
     out_lines.push_back("};\n");

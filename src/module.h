@@ -27,6 +27,7 @@
 #include "configlib.h"
 #include "configexpr.hpp"
 #include "pipetype.hpp"
+#include "bundlelib.h"
 
 using std::pair;
 
@@ -99,6 +100,12 @@ typedef struct {
 
 class VulModuleBase {
 public:
+    /**
+     * @brief Get the singleton instance of the module library.
+     * @return A shared_ptr to the module library instance.
+     */
+    static shared_ptr<unordered_map<ModuleName, shared_ptr<VulModuleBase>>> getModuleLibInstance();
+
     ModuleName                  name;
     Comment                     comment;
     unordered_map<ConfigName, VulLocalConfigItem> local_configs; // configs private to instance
@@ -107,6 +114,16 @@ public:
     unordered_map<PipePortName, VulPipePort>    pipe_inputs;
     unordered_map<PipePortName, VulPipePort>    pipe_outputs;
     bool                        _is_external = false; // whether the module is imported from external definition
+
+    unordered_set<ConfigName> _dyn_referenced_configs;
+    unordered_set<BundleName> _dyn_referenced_bundles;
+    unordered_set<ModuleName> _dyn_referenced_modules;
+
+    /**
+     * @brief Update the dynamic references (_dyn_referenced_configs, _dyn_referenced_bundles, _dyn_referenced_modules) based on current module definition.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    virtual ErrorMsg updateDynamicReferences();
 };
 
 typedef string EModuleDir;
@@ -170,8 +187,7 @@ typedef struct {
     InstanceName    instance;
     PipeName        instance_pipe_port;
     InstanceName    pipe_instance;
-    PipeName        _top_pipe_port;         // valid when pipe_instance is TopInterface
-    bool            is_direction_mod_out;   // true: module -> pipe, false: pipe -> module
+    PipeName        top_pipe_port;         // valid when pipe_instance is TopInterface
 } VulModulePipeConnection;
 
 typedef struct {
@@ -187,13 +203,7 @@ typedef struct {
 typedef string CCodeLine;
 
 typedef string StorageName;
-typedef struct {
-    StorageName         name;
-    DataType            type;
-    ConfigValue         value;  // valid only for basic types, zero-initialized when empty
-    Comment             comment;
-    vector<ConfigValue> dims;      // empty if not an array
-} VulStorage;
+typedef VulBundleMember VulStorage;
 
 typedef struct {
     InstanceName        name;
@@ -204,19 +214,19 @@ typedef struct {
 class VulModule : public VulModuleBase {
 public:
 
-    const InstanceName TopInterface = string("__top__");
-    const InstanceName TopStallInput = string("__top_stall_input__");
-    const InstanceName TopStallOutput = string("__top_stall_output__");
+    inline static const InstanceName TopInterface = string("__top__");
+    inline static const InstanceName TopStallInput = string("__top_stall_input__");
+    inline static const InstanceName TopStallOutput = string("__top_stall_output__");
 
     bool is_hpp_generated = true; // TODO: always true for now
     bool is_inline_generated = true;
 
     // vector<CCodeLine>   user_applytick_codelines;       // user applytick function body codelines
-    vector<CCodeLine>   user_header_filed_codelines;    // user header field codelines (private section)
+    vector<CCodeLine>   user_header_field_codelines;    // user header field codelines (private section)
 
     unordered_map<InstanceName, VulTickCodeBlock>   user_tick_codeblocks;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines; // un-connected service function body codelines
-    unordered_map<pair<InstanceName, ReqServName>, vector<CCodeLine>> req_codelines; // un-connected child request function body codelines
+    unordered_map<InstanceName, unordered_map<ReqServName, vector<CCodeLine>>> req_codelines; // un-connected child request function body codelines
 
     unordered_map<StorageName, VulStorage>  storages;
     unordered_map<StorageName, VulStorage>  storagenexts;
@@ -231,41 +241,21 @@ public:
     vector<VulStallConnection>        stalled_connections;
     vector<VulSequenceConnection>     update_constraints;
 
-    inline bool localCheckNameConflict(const string &name) {
-        if (instances.find(name) != instances.end()) {
-            return true;
-        }
-        if (pipe_instances.find(name) != pipe_instances.end()) {
-            return true;
-        }
-        if (storages.find(name) != storages.end()) {
-            return true;
-        }
-        if (storagenexts.find(name) != storagenexts.end()) {
-            return true;
-        }
-        if (storagetmp.find(name) != storagetmp.end()) {
-            return true;
-        }
-        if (requests.find(name) != requests.end()) {
-            return true;
-        }
-        if (services.find(name) != services.end()) {
-            return true;
-        }
-        if (pipe_inputs.find(name) != pipe_inputs.end()) {
-            return true;
-        }
-        if (pipe_outputs.find(name) != pipe_outputs.end()) {
-            return true;
-        }
-        if (local_configs.find(name) != local_configs.end()) {
-            return true;
-        }
-        if (user_tick_codeblocks.find(name) != user_tick_codeblocks.end()) {
-            return true;
-        }
-        return false;
-    }
+    /**
+     * @brief Check if the given name conflicts with existing names in local scope.
+     * @param name The name to check.
+     */
+    bool localCheckNameConflict(const string &name);
+
+    /**
+     * @brief Update the dynamic references (_dyn_referenced_configs, _dyn_referenced_bundles, _dyn_referenced_modules) based on current module definition.
+     * Consumes the module definition is validated.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    virtual ErrorMsg updateDynamicReferences() override;
+
+
+    
+
 };
 
