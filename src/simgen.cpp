@@ -861,6 +861,9 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         }
         init_field.push_back(indent + child_instptr_name + " = std::make_unique<" + child_mod + ">(cparams);\n");
         init_field.push_back(CodeTab + "}\n");
+
+        // tick function has been generated above in tick_update_seq
+        apply_tick_field.push_back(CodeTab + child_instptr_name + "->" + ApplyTickFunctionName + "();\n");
     }
 
     // preparation done, start generating code lines
