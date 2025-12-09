@@ -46,48 +46,26 @@ typedef string BundleTag;
 
 typedef struct {
     BMemberName         name;
-    BMemberType         type;
-    ConfigValue         value; // only for basic types, default zero-initialized
-    vector<ConfigValue> dims;
-    Comment             comment;
-} VulBundleArrayMember;
-
-typedef struct {
-    BMemberName         name;
-    ConfigValue         length;
-    ConfigValue         value; // only for basic types, default zero-initialized
-    vector<ConfigValue> dims;
-    Comment             comment;
-} VulBundleUIntArrayMember;
-
-typedef struct {
-    BMemberName         name;
-    BMemberType         type;
-    ConfigValue         value; // only for basic types, default zero-initialized
-    Comment             comment;
-} VulBundleBasicMember;
-
-typedef struct {
-    BMemberName         name;
-    ConfigValue         length;
-    ConfigValue         value; // only for basic types, default zero-initialized
-    Comment             comment;
-} VulBundleUIntMember;
-
-typedef struct {
-    BMemberName         name;
     ConfigValue         value;
     Comment             comment;
 } VulBundleEnumMember;
+
+typedef struct {
+    BMemberName         name;
+    ConfigValue         value; // only for basic types and uint types, default zero-initialized
+    Comment             comment;
+
+    BMemberType         type;
+    ConfigValue         uint_length; // only for uint types
+
+    vector<ConfigValue> dims;
+} VulBundleMember;
 
 class VulBundleItem {
 public:
     BundleName                      name;
     Comment                         comment;
-    vector<VulBundleBasicMember>    basic_members;
-    vector<VulBundleUIntMember>     uint_members;
-    vector<VulBundleArrayMember>    array_members;
-    vector<VulBundleUIntArrayMember> uint_array_members;
+    vector<VulBundleMember>         members;
     vector<VulBundleEnumMember>     enum_members;   // if not empty, other members must be empty
     bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
 };

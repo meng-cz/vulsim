@@ -27,7 +27,7 @@
 
 #include "bundlelib.h"
 #include "configlib.h"
-#include "module.hpp"
+#include "module.h"
 
 namespace simgen {
 

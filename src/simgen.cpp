@@ -233,34 +233,33 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
         }
         out_lines.push_back("\n");
 
+        auto genMemberTypeStr = [&](const VulBundleMember &member) -> string {
+            string type_str;
+            string base_type = member.type;
+            if (!member.uint_length.empty()) {
+                base_type = "UInt<" + replaceLog2CeilChar(member.uint_length) + ">";
+            }
+            if (!member.dims.empty()) {
+                for (const auto &dim : member.dims) {
+                    type_str += "std::array<";
+                }
+                type_str += base_type;
+                for (uint32_t i = member.dims.size(); i > 0; i--) {
+                    type_str += ", " + replaceLog2CeilChar(member.dims[i-1]) + ">";
+                }
+            } else {
+                type_str = base_type;
+            }
+            return type_str;
+        };
+
         // generate code line
         // for alias bundle, generate a typedef
         if (item.is_alias) {
-            string alias_target = "";
-            if (!item.basic_members.empty()) {
-                alias_target = item.basic_members[0].type;
-            } else if (!item.uint_members.empty()) {
-                alias_target = "UInt<" + replaceLog2CeilChar(item.uint_members[0].length) + ">";
-            } else if (!item.array_members.empty()) {
-                for (const auto &dim : item.array_members[0].dims) {
-                    alias_target += "std::array<";
-                }
-                alias_target += item.array_members[0].type;
-                for (uint32_t i = item.array_members[0].dims.size(); i > 0; i--) {
-                    alias_target += ", " + replaceLog2CeilChar(item.array_members[0].dims[i-1]) + ">";
-                }
-            } else if (!item.uint_array_members.empty()) {
-                for (const auto &dim : item.uint_array_members[0].dims) {
-                    alias_target += "std::array<";
-                }
-                alias_target += "UInt<" + replaceLog2CeilChar(item.uint_array_members[0].length) + ">";
-                for (uint32_t i = item.uint_array_members[0].dims.size(); i > 0; i--) {
-                    alias_target += ", " + replaceLog2CeilChar(item.uint_array_members[0].dims[i-1]) + ">";
-                }
-            }
-            if (alias_target.empty()) {
+            if (item.members.empty()) {
                 return EStr(EItemBundAliasInvalid, "Alias bundle '" + bundle_name + "' has no valid member for alias target");
             }
+            string alias_target = genMemberTypeStr(item.members[0]);
             out_lines.push_back("typedef " + alias_target + " " + bundle_name + ";\n");
         }
         // for enum bundle, generate enum class
@@ -282,55 +281,15 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
         // otherwise, generate typedef struct
         else {
             out_lines.push_back("typedef struct __" + bundle_name + "__ {\n");
-            for (const auto &bm : item.basic_members) {
-                string member_str = "    " + bm.type + " " + bm.name;
-                if (!bm.value.empty() && isBasicVulType(bm.type)) {
-                    member_str += " = " + replaceLog2CeilChar(bm.value);
+            for (const auto &member : item.members) {
+                string type_str = genMemberTypeStr(member);
+                string member_str = "    " + type_str + " " + member.name;
+                if (!member.value.empty() && (isBasicVulType(member.type) || !member.uint_length.empty())) {
+                    member_str += " = " + replaceLog2CeilChar(member.value);
                 }
                 member_str += ";";
-                if (!bm.comment.empty()) {
-                    member_str += " // " + bm.comment;
-                }
-                out_lines.push_back(member_str + "\n");
-            }
-            for (const auto &um : item.uint_members) {
-                string member_str = "    UInt<" + replaceLog2CeilChar(um.length) + "> " + um.name;
-                if (!um.value.empty()) {
-                    member_str += " = " + replaceLog2CeilChar(um.value);
-                }
-                member_str += ";";
-                if (!um.comment.empty()) {
-                    member_str += " // " + um.comment;
-                }
-                out_lines.push_back(member_str + "\n");
-            }
-            for (const auto &am : item.array_members) {
-                string type_str = "";
-                for (const auto &dim : am.dims) {
-                    type_str += "std::array<";
-                }
-                type_str += am.type;
-                for (uint32_t i = am.dims.size(); i > 0; i--) {
-                    type_str += ", " + replaceLog2CeilChar(am.dims[i-1]) + ">";
-                }
-                string member_str = "    " + type_str + " " + am.name + "{};";
-                if (!am.comment.empty()) {
-                    member_str += " // " + am.comment;
-                }
-                out_lines.push_back(member_str + "\n");
-            }
-            for (const auto &uam : item.uint_array_members) {
-                string type_str = "";
-                for (const auto &dim : uam.dims) {
-                    type_str += "std::array<";
-                }
-                type_str += "UInt<" + replaceLog2CeilChar(uam.length) + ">";
-                for (uint32_t i = uam.dims.size(); i > 0; i--) {
-                    type_str += ", " + replaceLog2CeilChar(uam.dims[i-1]) + ">";
-                }
-                string member_str = "    " + type_str + " " + uam.name + "{};";
-                if (!uam.comment.empty()) {
-                    member_str += " // " + uam.comment;
+                if (!member.comment.empty()) {
+                    member_str += " // " + member.comment;
                 }
                 out_lines.push_back(member_str + "\n");
             }
@@ -607,7 +566,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         }
     }
     // generate child req codelines implementations
-    
+
     // TODO: finish after module lib support
 
 

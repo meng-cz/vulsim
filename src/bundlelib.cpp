@@ -353,12 +353,7 @@ ErrorMsg VulBundleLib::renameBundle(const BundleName &old_name, const BundleName
             ref_entry.references.erase(old_name);
             ref_entry.references.insert(new_name);
             // update bundle definition
-            for (auto &member : ref_entry.item.basic_members) {
-                if (member.type == old_name) {
-                    member.type = new_name;
-                }
-            }
-            for (auto &member : ref_entry.item.array_members) {
+            for (auto &member : ref_entry.item.members) {
                 if (member.type == old_name) {
                     member.type = new_name;
                 }
@@ -588,22 +583,12 @@ void VulBundleLib::externalConfigRename(const ConfigName &old_name, const Config
             // update confs set
             entry.confs.erase(old_name);
             entry.confs.insert(new_name);
-            // update uint members
-            for (auto &member : entry.item.uint_members) {
-                member.length = identifierReplace(member.length, old_name, new_name);
-            }
-            // update array members
-            for (auto &member : entry.item.uint_array_members) {
+            // update bundle definition
+            for (auto &member : entry.item.members) {
+                member.uint_length = identifierReplace(member.uint_length, old_name, new_name);
                 for (auto &dim : member.dims) {
                     dim = identifierReplace(dim, old_name, new_name);
                 }
-            }
-            // update uint array members
-            for (auto &member : entry.item.uint_array_members) {
-                for (auto &dim : member.dims) {
-                    dim = identifierReplace(dim, old_name, new_name);
-                }
-                member.length = identifierReplace(member.length, old_name, new_name);
             }
             // update enum members
             for (auto &member : entry.item.enum_members) {
@@ -659,39 +644,20 @@ void VulBundleLib::commit(uint64_t snapshot_id) {
 
 bool VulBundleLib::_isBundleSameDefinition(const VulBundleItem &a, const VulBundleItem &b) const {
     // compare bundle definitions
-    if (a.basic_members.size() != b.basic_members.size() ||
-        a.uint_members.size() != b.uint_members.size() ||
-        a.array_members.size() != b.array_members.size() ||
-        a.uint_array_members.size() != b.uint_array_members.size() ||
+    if (a.members.size() != b.members.size() ||
         a.enum_members.size() != b.enum_members.size()) {
         return false;
     }
     if (a.is_alias != b.is_alias) {
         return false;
     }
-    for (size_t i = 0; i < a.basic_members.size(); ++i) {
-        if (a.basic_members[i].name != b.basic_members[i].name ||
-            a.basic_members[i].type != b.basic_members[i].type) {
-            return false;
-        }
-    }
-    for (size_t i = 0; i < a.uint_members.size(); ++i) {
-        if (a.uint_members[i].name != b.uint_members[i].name ||
-            a.uint_members[i].length != b.uint_members[i].length) {
-            return false;
-        }
-    }
-    for (size_t i = 0; i < a.array_members.size(); ++i) {
-        if (a.array_members[i].name != b.array_members[i].name ||
-            a.array_members[i].type != b.array_members[i].type ||
-            a.array_members[i].dims != b.array_members[i].dims) {
-            return false;
-        }
-    }
-    for (size_t i = 0; i < a.uint_array_members.size(); ++i) {
-        if (a.uint_array_members[i].name != b.uint_array_members[i].name ||
-            a.uint_array_members[i].length != b.uint_array_members[i].length ||
-            a.uint_array_members[i].dims != b.uint_array_members[i].dims) {
+    for (size_t i = 0; i < a.members.size(); ++i) {
+        if (a.members[i].name != b.members[i].name ||
+            a.members[i].type != b.members[i].type ||
+            a.members[i].value != b.members[i].value ||
+            a.members[i].uint_length != b.members[i].uint_length ||
+            a.members[i].dims != b.members[i].dims
+        ) {
             return false;
         }
     }
@@ -730,10 +696,7 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
 
     // check enum
     if (!bundle_item.enum_members.empty()) {
-        if (!bundle_item.basic_members.empty() ||
-            !bundle_item.uint_members.empty() ||
-            !bundle_item.array_members.empty() ||
-            !bundle_item.uint_array_members.empty()) {
+        if (!bundle_item.members.empty()) {
             return EStr(EItemBundTypeMixed, string("Bundle '") + bundle_item.name + string("' has invalid definition: enum members cannot coexist with other member types"));
         }
         if (!err.empty()) {
@@ -768,122 +731,64 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
 
     // check alias
     if (bundle_item.is_alias) {
-        size_t total_members = bundle_item.basic_members.size() +
-                               bundle_item.uint_members.size() +
-                               bundle_item.array_members.size() +
-                               bundle_item.uint_array_members.size();
-        if (total_members != 1) {
+        if (bundle_item.members.size() != 1) {
             return EStr(EItemBundAliasInvalid, string("Alias bundle '") + bundle_item.name + string("' must have exactly one member"));
         }
     }
 
-    // check basic members
-    for (const auto &basic_member : bundle_item.basic_members) {
-        if (!isValidIdentifier(basic_member.name)) {
-            return EStr(EItemBundMemNameInvalid, string("Invalid basic member name '") + basic_member.name + string("' in bundle '") + bundle_item.name + string("'"));
+    // check members
+    for (const auto &member : bundle_item.members) {
+        if (!isValidIdentifier(member.name)) {
+            return EStr(EItemBundMemNameInvalid, string("Invalid member name '") + member.name + string("' in bundle '") + bundle_item.name + string("'"));
         }
-        if (!isBasicVulType(basic_member.type)) {
-            // check if it's a bundle type
-            if (!checkNameConflict(basic_member.type)) {
-                return EStr(EItemBundRefNotFound, string("Basic member '") + basic_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid type: ") + basic_member.type);
+        // check type
+        if (!member.uint_length.empty()) {
+            // this is a uint member
+            if (!member.type.empty() && member.type != "__uint__") {
+                return EStr(EItemBundTypeMixed, string("Member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has type/length mismatch: length specified for non-uint type"));
             }
-            if (!basic_member.value.empty()) {
-                return EStr(EItemBundInitWithValue, string("Basic member '") + basic_member.name + string("' in bundle '") + bundle_item.name + string("' of bundle type cannot have a default value"));
-            }
-            out_references.insert(basic_member.type);
-        }
-        if (!basic_member.value.empty()) {
-            err = configlib->calculateConfigExpression(basic_member.value, rvalue, out_confs);
+            ConfigRealValue length;
+            err = configlib->calculateConfigExpression(member.uint_length, length, out_confs);
             if (!err.empty()) {
-                return err;
+                return err + string(" in uint member '") + member.name + string("' in bundle '") + bundle_item.name + string("'");
             }
+            if (length <= 0) {
+                return EStr(EItemBundMemLengthInvalid, string("UInt member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has invalid length: must be positive"));
+            }
+        } else if (!member.type.empty()) {
+            if (!isBasicVulType(member.type)) {
+                // check if it's a bundle type
+                if (!checkNameConflict(member.type)) {
+                    return EStr(EItemBundRefNotFound, string("Member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has invalid type: ") + member.type);
+                }
+                if (!member.value.empty()) {
+                    return EStr(EItemBundInitWithValue, string("Member '") + member.name + string("' in bundle '") + bundle_item.name + string("' of bundle type cannot have a default value"));
+                }
+                out_references.insert(member.type);
+            }
+        } else {
+            return EStr(EItemBundTypeMixed, string("Member '") + member.name + string("' in bundle '") + bundle_item.name + string("' is missing type or length"));
         }
-    }
-
-    // check uint members
-    for (const auto &uint_member : bundle_item.uint_members) {
-        if (!isValidIdentifier(uint_member.name)) {
-            return EStr(EItemBundMemNameInvalid, string("Invalid uint member name '") + uint_member.name + string("' in bundle '") + bundle_item.name + string("'"));
-        }
-        ConfigRealValue length;
-        err = configlib->calculateConfigExpression(uint_member.length, length, out_confs);
-        if (!err.empty()) {
-            return err;
-        }
-        if (length <= 0) {
-            return EStr(EItemBundMemLengthInvalid, string("UInt member '") + uint_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid length: must be positive"));
-        }
-        if (!uint_member.value.empty()) {
-            err = configlib->calculateConfigExpression(uint_member.value, rvalue, out_confs);
+        // check default value
+        if (!member.value.empty()) {
+            err = configlib->calculateConfigExpression(member.value, rvalue, out_confs);
             if (!err.empty()) {
-                return err;
+                return err + string(" in member '") + member.name + string("' in bundle '") + bundle_item.name + string("'");
             }
         }
-    }
-
-    // check array members
-    for (const auto &array_member : bundle_item.array_members) {
-        if (!isValidIdentifier(array_member.name)) {
-            return EStr(EItemBundMemNameInvalid, string("Invalid array member name '") + array_member.name + string("' in bundle '") + bundle_item.name + string("'"));
-        }
-        if (!isBasicVulType(array_member.type)) {
-            // check if it's a bundle type
-            if (!checkNameConflict(array_member.type)) {
-                return EStr(EItemBundRefNotFound, string("Array member '") + array_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid type: ") + array_member.type);
-            }
-            if (!array_member.value.empty()) {
-                return EStr(EItemBundInitWithValue, string("Array member '") + array_member.name + string("' in bundle '") + bundle_item.name + string("' of bundle type cannot have a default value"));
-            }
-            out_references.insert(array_member.type);
-        }
-        if (!array_member.value.empty()) {
-            err = configlib->calculateConfigExpression(array_member.value, rvalue, out_confs);
-            if (!err.empty()) {
-                return err;
-            }
-        }
-        for (const auto &dim_expr : array_member.dims) {
+        // check array dimensions
+        for (const auto &dim_expr : member.dims) {
             ConfigRealValue dim;
             err = configlib->calculateConfigExpression(dim_expr, dim, out_confs);
             if (!err.empty()) {
-                return err;
+                return err + string(" in array member '") + member.name + string("' in bundle '") + bundle_item.name + string("'");
             }
             if (dim <= 0) {
-                return EStr(EItemBundMemLengthInvalid, string("Array member '") + array_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid dimension: must be positive: ") + dim_expr);
+                return EStr(EItemBundMemLengthInvalid, string("Array member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has invalid dimension: must be positive: ") + dim_expr);
             }
         }
     }
 
-    // check uint array members
-    for (const auto &uint_array_member : bundle_item.uint_array_members) {
-        if (!isValidIdentifier(uint_array_member.name)) {
-            return EStr(EItemBundMemNameInvalid, string("Invalid uint array member name '") + uint_array_member.name + string("' in bundle '") + bundle_item.name + string("'"));
-        }
-        ConfigRealValue length;
-        err = configlib->calculateConfigExpression(uint_array_member.length, length, out_confs);
-        if (!err.empty()) {
-            return err;
-        }
-        if (length <= 0) {
-            return EStr(EItemBundMemLengthInvalid, string("UInt array member '") + uint_array_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid length: must be positive: ") + uint_array_member.length);
-        }
-        if (!uint_array_member.value.empty()) {
-            err = configlib->calculateConfigExpression(uint_array_member.value, rvalue, out_confs);
-            if (!err.empty()) {
-                return err;
-            }
-        }
-        for (const auto &dim_expr : uint_array_member.dims) {
-            ConfigRealValue dim;
-            err = configlib->calculateConfigExpression(dim_expr, dim, out_confs);
-            if (!err.empty()) {
-                return err;
-            }
-            if (dim <= 0) {
-                return EStr(EItemBundMemLengthInvalid, string("UInt array member '") + uint_array_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid dimension: must be positive: ") + dim_expr);
-            }
-        }
-    }
     return "";
 }
 
@@ -901,19 +806,10 @@ void VulBundleLib::_extractBundleReferences(
 
     out_references.clear();
 
-    // check basic members
-    for (const auto &basic_member : bundle_item.basic_members) {
-        if (!isBasicVulType(basic_member.type)) {
+    for (const auto &member : bundle_item.members) {
+        if (!member.type.empty() && !isBasicVulType(member.type)) {
             // assume it's a bundle type
-            out_references.insert(basic_member.type);
-        }
-    }
-
-    // check array members
-    for (const auto &array_member : bundle_item.array_members) {
-        if (!isBasicVulType(array_member.type)) {
-            // assume it's a bundle type
-            out_references.insert(array_member.type);
+            out_references.insert(member.type);
         }
     }
 }
