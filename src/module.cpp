@@ -41,18 +41,44 @@ ErrorMsg VulModuleBase::updateDynamicReferences() {
     _dyn_referenced_configs.clear();
     _dyn_referenced_bundles.clear();
     _dyn_referenced_modules.clear();
+    vector<std::pair<ConfigValue, ErrorMsg>> to_process;
     for (const auto &lc_entry : local_configs) {
         const VulLocalConfigItem &lc = lc_entry.second;
+        to_process.push_back({lc.value, string("Invalid local config value expression for '") + lc.name + "': "});
+    }
+    for (const auto &lb_entry : local_bundles) {
+        const VulBundleItem &lb = lb_entry.second;
+        for (const auto &member : lb.members) {
+            for (const auto &dim_expr : member.dims) {
+                to_process.push_back({dim_expr, string("Invalid dimension expression for local bundle '") + lb.name + "', member '" + member.name + "': "});
+            }
+            if (!member.uint_length.empty()) {
+                to_process.push_back({member.uint_length, string("Invalid uint length expression for local bundle '") + lb.name + "', member '" + member.name + "': "});
+            }
+            if (!member.value.empty()) {
+                to_process.push_back({member.value, string("Invalid default value expression for local bundle '") + lb.name + "', member '" + member.name + "': "});
+            }
+        }
+        for (const auto &enum_member : lb.enum_members) {
+            if (!enum_member.value.empty()) {
+                to_process.push_back({enum_member.value, string("Invalid enum value expression for local bundle '") + lb.name + "', enum member '" + enum_member.name + "': "});
+            }
+        }
+    }
+    for (const auto &entry : to_process) {
+        const ConfigValue &expr = entry.first;
+        const ErrorMsg &prefix_err = entry.second;
         string err;
         uint32_t errpos = 0;
-        auto conf_refs = config_parser::parseReferencedIdentifier(lc.value, errpos, err);
+        auto conf_refs = config_parser::parseReferencedIdentifier(expr, errpos, err);
         if (!err.empty()) {
-            return EStr(EItemModConfInvalidValue, string("Invalid local config value expression for '") + lc.name + "': " + err);
+            return prefix_err + err;
         }
         for (const auto &cn : *conf_refs) {
             _dyn_referenced_configs.insert(cn);
         }
     }
+    
     auto parseReqServReferences = [&](const VulReqServ &rs) -> ErrorMsg {
         for (const auto &arg : rs.args) {
             if (!isBasicVulType(arg.type)) {
