@@ -4,9 +4,27 @@
 
 ## 命名与约定
 
-- **模块名**：由 `ModuleName` 表示（字符串），在工程中应当以有意义的名称命名。自动生成的模块（例如由 `getModuleDefinitionForPipe` 生成）会以管线名加后缀 `_module` 命名。
-- **注释**：每个模块有 `comment` 字段用于人类可读说明。
-- **特殊实例**：模块中使用常量 `TopInterface`（值为 `"__top__"`）表示顶层接口（TopInterface）。
+- **模块名**：由 `ModuleName` 表示（字符串），在工程中应当以有意义的名称命名。
+- **注释**：每个模块有 `comment` 字段用于说明。
+
+命名冲突检查分为全局命名空间检查和本地命名空间。除了每个命名空间内不能存在冲突之外，每一个本地命名空间内的名称也不能与全局命名空间冲突：
+
+### 全局命名空间：
+
+包含整个项目实例中的：
+1. 所有配置项名称（`ConfigName`）。
+2. 所有线组名称（`BundleName`）。
+3. 所有模块名称（`ModuleName`）。
+
+### 本地命名空间：
+
+包含本模块内部的：
+1. 所有局部配置项名称（`ConfigName`）。
+2. 所有局部线组名称（`BundleName`）。
+3. 所有请求/服务名称（`ReqServName`）。
+4. 所有管线输入/输出名称（`PipeInputName` / `PipeOutputName`）。
+5. 所有存储名称（`StorageName`）。
+6. 所有实例名称（`InstanceName`）。
 
 ## 模块外部端口
 
@@ -135,10 +153,17 @@
 | ---- | ---------- | ---------- |
 | 定义位置 | 模块类定义中 | 全局配置库 |
 | 赋值位置 | 模块实例化中 | 全局配置库 |
-| 作用范围 | 模块内部及子模块局部变量赋值时 | 全局可见 |
-| C++元素 | const 成员变量 | constexpr编译时常量 |
+| 作用范围 | 模块内部 | 全局可见 |
+| C++元素 | 模板类参数 | constexpr编译时常量 |
 | RTL（SV）元素 | module parameter | package parameter |
 
+## 局部线组
+
+模块类支持局部线组（Local Bundle）的定义与使用。局部线组是模块内部使用的线组类型，不会暴露给外部模块（仅直接包含此模块实例的父模块可以引用，以允许在request或service中使用局部线组）。局部线组通过 `local_bundles` 字段进行定义。
+
+局部线组中可以使用局部配置项作为常量表达式的一部分，用于数组或位宽定义。
+
+局部线组名必须在模块局部唯一，且不能与全局命名空间冲突。
 
 ## 行为代码编写
 
@@ -150,9 +175,9 @@
 
 3. 子模块定义的请求: 每一个未连接的请求都需要用户在 `req_codelines` 字段中为其编写C代码行，这些代码行会被嵌入到生成的模块类的对应请求的wrapper函数中。
 
-在这些代码中，可以访问到的模块内资源包括：
-1. 所有全局Config，直接以配置项名字访问。
-2. 本模块的所有局部Config，直接以配置项名字访问。
+在这些代码中，可以访问到的资源包括：
+1. 所有全局Config和全局Bundle，直接以名字访问。
+2. 本模块的所有局部Config和局部Bundle，直接以名字访问。
 3. 本模块定义的所有request和service函数，直接以函数名字访问。
 4. 本模块定义的所有pipe input端口，通过端口名加后缀 `_can_pop()` / `_pop()` / `_top()` 访问。
 5. 本模块定义的所有pipe output端口，通过端口名加后缀 `_can_push()` / `_push()` 访问。
@@ -160,8 +185,9 @@
 7. 本模块定义的所有storagenext，通过变量名加后缀 `_get()` / `_setnext()` 访问。
 8. 所有子模块实例的service函数，通过 `实例名_服务名()` 访问。
 9. 所有管道子实例的端口，通过实例名加后缀 `_can_pop()` / `_pop()` / `_top()` / `_can_push()` / `_push()` 访问。
-10. 本模块的 `is_stalled()` 函数和 `stall()` 函数。
-11. 本模块的 `user_header_field` 域内自定义的helper function和成员变量。
+10. 所有子模块实例内部定义的局部Bundle类型，通过 `实例名_局部Bundle名` 访问。
+11. 本模块的 `is_stalled()` 函数和 `stall()` 函数。
+12. 本模块的 `user_header_field` 域内自定义的helper function和成员变量。
 
 
 
@@ -170,6 +196,7 @@
 ## 模块类外形定义
 
 ```cpp
+template<int64 /*local_config_name*/ = /*DefaultValue*/, ...>
 class /*ModuleName*/ {
 public:
     typedef struct {
@@ -203,6 +230,7 @@ public:
 // <Header Field>
 
 // <Comment Field>
+template<int64 /*local_config_name*/, ...>
 class /*ModuleName*/ {
 public:
 
@@ -213,7 +241,9 @@ typedef struct {
     void *(__stall)(void*);
 } ConstructorParams;
 
-/*ModuleName*/(const ConstructorParams &params) : __params(params) /*constructor_list*/ { __init(); }
+// <Local Bundle Field>
+
+/*ModuleName*/(const ConstructorParams &params) : __params(params) { __init(); }
 
 FORCE_INLINE void tick() {
     // <Tick Field>
@@ -258,20 +288,7 @@ private:
 
 ### local_configs
 
-`<Constructor Params Field>` : 
-```cpp
-int64_t /*config_name*/;
-```
-
-`<Member Field>` :
-```cpp
-const int64_t &/*config_name*/;
-```
-
-`<constructor_list>` :
-```cpp
-, /*config_name*/(__params./*config_name*/)
-```
+无需额外处理，作为模板参数可直接访问
 
 ### requests
 
@@ -419,7 +436,7 @@ FORCE_INLINE void /*PipeInstanceName*/_push(const /*DataType*/ & data) {
 
 `<Member Field>` :
 ```cpp
-std::unique_ptr</*ChildModuleName*/> __instptr_/*InstanceName*/;
+std::unique_ptr</*ChildModuleName*/</*ChildLocalConfigs*/>> __instptr_/*InstanceName*/;
 // for each child services
 FORCE_INLINE /*ReturnSig*/ /*InstanceName*/_/*ServiceName*/(/*ArgumentSig*/) {
     return __instptr_/*InstanceName*/->/*ServiceName*/(/*ArgumentList*/);
@@ -439,12 +456,14 @@ static void __childstall_/*InstanceName*/_wrapper(void * __parent_module) {
     // if connected to module stall output
     static_cast</*ModuleName*/*>(__parent_module)->__stall_propagate_out();
 }
+// for local bundles in child module
+using /*InstanceName*/_/*LocalBundleName*/ = /*ChildModuleName*/</*ChildLocalConfigs*/>::/*LocalBundleName*/;
 ```
 
 `<Init Field>` :
 ```cpp
     {
-        /*ChildModuleName*/::ConstructorParams cparams;
+        /*ChildModuleName*/</*ChildLocalConfigs*/>::ConstructorParams cparams;
         cparams.__instance_name = "/*InstanceName*/";
         cparams.__parent_module = this;
         cparams.__stall = &/*ModuleName*/::__childstall_/*InstanceName*/_wrapper;
@@ -458,9 +477,7 @@ static void __childstall_/*InstanceName*/_wrapper(void * __parent_module) {
         cparams./*PipeOutputName*/ = __params./*MappedPipeOutputName*/;
         // for pipe outputs connected to pipe instances
         cparams./*PipeOutputName*/ = __pipeinstptr_/*PipeInstanceName*/->get_push_port();
-        // for local config overrides
-        cparams./*config_name*/ = /*config_value*/;
-        __instptr_/*InstanceName*/ = std::make_unique</*ChildModuleName*/>(cparams);
+        __instptr_/*InstanceName*/ = std::make_unique</*ChildModuleName*/</*ChildLocalConfigs*/>>(cparams);
     }
 ```
 

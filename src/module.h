@@ -29,7 +29,10 @@
 #include "pipetype.hpp"
 #include "bundlelib.h"
 
+#include <map>
+
 using std::pair;
+using std::map;
 
 typedef string ModuleName;
 
@@ -108,12 +111,14 @@ public:
 
     ModuleName                  name;
     Comment                     comment;
-    unordered_map<ConfigName, VulLocalConfigItem> local_configs; // configs private to instance
+    map<ConfigName, VulLocalConfigItem>         local_configs; // configs private to instance, must be ordered by name
+    unordered_map<BundleName, VulBundleItem>    local_bundles; // bundles private to this module
     unordered_map<ReqServName, VulReqServ>      requests;
     unordered_map<ReqServName, VulReqServ>      services;
     unordered_map<PipePortName, VulPipePort>    pipe_inputs;
     unordered_map<PipePortName, VulPipePort>    pipe_outputs;
     bool                        _is_external = false; // whether the module is imported from external definition
+
 
     unordered_set<ConfigName> _dyn_referenced_configs;
     unordered_set<BundleName> _dyn_referenced_bundles;

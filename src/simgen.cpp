@@ -207,6 +207,77 @@ ErrorMsg genConfigHeaderCode(const VulConfigLib &config_lib, vector<string> &out
     return string();
 }
 
+void _genBundleContent(const VulBundleItem &item, vector<string> &out_lines) {
+    const BundleName &bundle_name = item.name;
+    // generate comment per line
+    for (const string &line : _genUnpackMultilineNoNext(item.comment)) {
+        out_lines.push_back("// " + line + "\n");
+    }
+    out_lines.push_back("\n");
+
+    auto genMemberTypeStr = [&](const VulBundleMember &member) -> string {
+        string type_str;
+        string base_type = member.type;
+        if (!member.uint_length.empty()) {
+            base_type = UIntClassName + "<" + replaceLog2CeilChar(member.uint_length) + ">";
+        }
+        if (!member.dims.empty()) {
+            for (const auto &dim : member.dims) {
+                type_str += "std::array<";
+            }
+            type_str += base_type;
+            for (uint32_t i = member.dims.size(); i > 0; i--) {
+                type_str += ", " + replaceLog2CeilChar(member.dims[i-1]) + ">";
+            }
+        } else {
+            type_str = base_type;
+        }
+        return type_str;
+    };
+
+    // generate code line
+    // for alias bundle, generate a typedef
+    if (item.is_alias) {
+        if (!item.members.empty()) {
+            string alias_target = genMemberTypeStr(item.members[0]);
+            out_lines.push_back("typedef " + alias_target + " " + bundle_name + ";\n");
+        }
+    }
+    // for enum bundle, generate enum class
+    else if (!item.enum_members.empty()) {
+        out_lines.push_back("enum class " + bundle_name + " {\n");
+        for (const auto &em : item.enum_members) {
+            string member_str = "    " + em.name;
+            if (!em.value.empty()) {
+                member_str += " = " + replaceLog2CeilChar(em.value);
+            }
+            member_str += ",";
+            if (!em.comment.empty()) {
+                member_str += " // " + em.comment;
+            }
+            out_lines.push_back(member_str + "\n");
+        }
+        out_lines.push_back("};\n");
+    }
+    // otherwise, generate typedef struct
+    else {
+        out_lines.push_back("typedef struct __" + bundle_name + "__ {\n");
+        for (const auto &member : item.members) {
+            string type_str = genMemberTypeStr(member);
+            string member_str = "    " + type_str + " " + member.name;
+            if (!member.value.empty() && (isBasicVulType(member.type) || !member.uint_length.empty())) {
+                member_str += " = " + replaceLog2CeilChar(member.value);
+            }
+            member_str += ";";
+            if (!member.comment.empty()) {
+                member_str += " // " + member.comment;
+            }
+            out_lines.push_back(member_str + "\n");
+        }
+        out_lines.push_back("} " + bundle_name + ";\n");
+    }
+
+}
 
 /**
  * @brief Generate bundle.h C++ header code for bundle definitions.
@@ -247,74 +318,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
             }
         }
 
-        // generate comment per line
-        for (const string &line : _genUnpackMultilineNoNext(item.comment)) {
-            out_lines.push_back("// " + line + "\n");
-        }
-        out_lines.push_back("\n");
-
-        auto genMemberTypeStr = [&](const VulBundleMember &member) -> string {
-            string type_str;
-            string base_type = member.type;
-            if (!member.uint_length.empty()) {
-                base_type = UIntClassName + "<" + replaceLog2CeilChar(member.uint_length) + ">";
-            }
-            if (!member.dims.empty()) {
-                for (const auto &dim : member.dims) {
-                    type_str += "std::array<";
-                }
-                type_str += base_type;
-                for (uint32_t i = member.dims.size(); i > 0; i--) {
-                    type_str += ", " + replaceLog2CeilChar(member.dims[i-1]) + ">";
-                }
-            } else {
-                type_str = base_type;
-            }
-            return type_str;
-        };
-
-        // generate code line
-        // for alias bundle, generate a typedef
-        if (item.is_alias) {
-            if (item.members.empty()) {
-                return EStr(EItemBundAliasInvalid, "Alias bundle '" + bundle_name + "' has no valid member for alias target");
-            }
-            string alias_target = genMemberTypeStr(item.members[0]);
-            out_lines.push_back("typedef " + alias_target + " " + bundle_name + ";\n");
-        }
-        // for enum bundle, generate enum class
-        else if (!item.enum_members.empty()) {
-            out_lines.push_back("enum class " + bundle_name + " {\n");
-            for (const auto &em : item.enum_members) {
-                string member_str = "    " + em.name;
-                if (!em.value.empty()) {
-                    member_str += " = " + replaceLog2CeilChar(em.value);
-                }
-                member_str += ",";
-                if (!em.comment.empty()) {
-                    member_str += " // " + em.comment;
-                }
-                out_lines.push_back(member_str + "\n");
-            }
-            out_lines.push_back("};\n");
-        }
-        // otherwise, generate typedef struct
-        else {
-            out_lines.push_back("typedef struct __" + bundle_name + "__ {\n");
-            for (const auto &member : item.members) {
-                string type_str = genMemberTypeStr(member);
-                string member_str = "    " + type_str + " " + member.name;
-                if (!member.value.empty() && (isBasicVulType(member.type) || !member.uint_length.empty())) {
-                    member_str += " = " + replaceLog2CeilChar(member.value);
-                }
-                member_str += ";";
-                if (!member.comment.empty()) {
-                    member_str += " // " + member.comment;
-                }
-                out_lines.push_back(member_str + "\n");
-            }
-            out_lines.push_back("} " + bundle_name + ";\n");
-        }
+        _genBundleContent(item, out_lines);
 
         if (is_not_default_tag) {
             out_lines.push_back("#endif // " + def_gaurd + "\n");
@@ -403,21 +407,15 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     vector<string> service_field;
     vector<string> init_field;
     vector<string> member_field;
+    vector<string> local_bundle_field;
     string constructor_list;
 
-    // generate local configs
-    for (const auto &cfg_entry : module.local_configs) {
-        const VulLocalConfigItem &cfg = cfg_entry.second;
-        constructor_param_field.push_back(CodeTab + "int64_t " + cfg.name + ";\n");
-        string line = CodeTab + "const int64_t & " + cfg.name + ";";
-        if (!cfg.comment.empty()) {
-            line += " // " + cfg.comment;
-        }
-        member_field.push_back(line + "\n");
-        constructor_list += ", " + cfg.name + "(__params." + cfg.name + ")";
-    }
-    if (!module.local_configs.empty()) {
-        member_field.push_back("\n");
+    const ModuleName &mod_name = module.name;
+
+    // generate local bundles
+    for (const auto &bundle_entry : module.local_bundles) {
+        _genBundleContent(bundle_entry.second, local_bundle_field);
+        local_bundle_field.push_back("\n");
     }
 
     // generate request declarations
@@ -744,8 +742,26 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         auto modulelib = VulModuleBase::getModuleLibInstance();
         auto &childmod_ptr = modulelib->at(child_mod);
         string child_instptr_name = "__instptr_" + inst_entry.first;
+        string child_class_name = child_mod;
+        if (!childmod_ptr->local_configs.empty()) {
+            child_class_name += "<";
+            bool first_cfg = true;
+            for (const auto &cfg_entry : childmod_ptr->local_configs) {
+                if (!first_cfg) {
+                    child_class_name += ", ";
+                }
+                first_cfg = false;
+                auto iter = inst.local_config_overrides.find(cfg_entry.first);
+                if (iter == inst.local_config_overrides.end()) {
+                    child_class_name += replaceLog2CeilChar(cfg_entry.second.value);
+                } else {
+                    child_class_name += replaceLog2CeilChar(iter->second);
+                }
+            }
+            child_class_name += ">";
+        }
 
-        member_field.push_back("std::unique_ptr<" + child_mod + "> " + child_instptr_name + ";\n");
+        member_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instptr_name + ";\n");
 
         for (const auto &serv_entry : childmod_ptr->services) {
             const VulReqServ &serv = serv_entry.second;
@@ -761,7 +777,8 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
             member_field.push_back("}\n");
         }
 
-        string parent_ptr_cast = "static_cast<" + child_mod + "*>(__parent_module)";
+        string parent_ptr_cast = "static_cast<" + mod_name + "*>(__parent_module)";
+
         for (const auto &req_entry : childmod_ptr->requests) {
             const VulReqServ &req = req_entry.second;
             string rettype = _genReqServFuncReturnType(req);
@@ -810,6 +827,9 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
             }
         }
         member_field.push_back("}\n");
+        for (const auto &lcbund : childmod_ptr->local_bundles) {
+            member_field.push_back("using " + inst_name + "_" + lcbund.first + " = " + child_class_name + "::" + lcbund.first + ";\n");
+        }
 
         member_field.push_back("\n");
 
@@ -817,7 +837,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         init_field.push_back(CodeTab + "{\n");
         const string indent = CodeTab + CodeTab;
 
-        init_field.push_back(indent + child_mod + "::ConstructorParams cparams;\n");
+        init_field.push_back(indent + child_class_name + "::ConstructorParams cparams;\n");
         init_field.push_back(indent + "cparams.__parent_module = this;\n");
         init_field.push_back(indent + "cparams.__instance_name = \"" + inst_name + "\";\n");
         init_field.push_back(indent + "cparams.__stall = &__childstall_" + inst_name + "_wrapper;\n");
@@ -850,16 +870,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
                 }
             }
         }
-        for (const auto &lc_entry : childmod_ptr->local_configs) {
-            const VulLocalConfigItem &lc = lc_entry.second;
-            auto iter = inst.local_config_overrides.find(lc.name);
-            if (iter != inst.local_config_overrides.end()) {
-                init_field.push_back(indent + "cparams." + lc.name + " = " + replaceLog2CeilChar(iter->second) + ";\n");
-            } else {
-                init_field.push_back(indent + "cparams." + lc.name + " = " + replaceLog2CeilChar(lc.value) + ";\n");
-            }
-        }
-        init_field.push_back(indent + child_instptr_name + " = std::make_unique<" + child_mod + ">(cparams);\n");
+        init_field.push_back(indent + child_instptr_name + " = std::make_unique<" + child_class_name + ">(cparams);\n");
         init_field.push_back(CodeTab + "}\n");
 
         // tick function has been generated above in tick_update_seq
@@ -890,7 +901,20 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     for (const string &line : _genUnpackMultilineNoNext(module.comment)) {
         out_lines.push_back("// " + line + "\n");
     }
-    out_lines.push_back("class " + module.name + " {\n");
+    if (!module.local_configs.empty()) {
+        string template_line = "";
+        for (const auto &lc_entry : module.local_configs) {
+            const VulLocalConfigItem &lc = lc_entry.second;
+            if (!template_line.empty()) {
+                template_line += ", ";
+            }
+            template_line += "int64_t " + lc.name;
+        }
+        if (!template_line.empty()) {
+            out_lines.push_back("template <" + template_line + ">\n");
+        }
+    }
+    out_lines.push_back("class " + mod_name + " {\n");
     out_lines.push_back("public:\n");
     out_lines.push_back("\n");
 
@@ -905,8 +929,14 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
     out_lines.push_back("} ConstructorParams;\n");
     out_lines.push_back("\n");
 
+    // Local Bundles
+    for (const auto &line : local_bundle_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("\n");
+
     // Constructor
-    out_lines.push_back("explicit " + module.name + "(const ConstructorParams & __params) : \n");
+    out_lines.push_back("explicit " + mod_name + "(const ConstructorParams & __params) : \n");
     out_lines.push_back(CodeTab + CodeTab + "__params(__params)" + constructor_list + " {\n");
     out_lines.push_back(CodeTab + "__init();\n");
     out_lines.push_back("}\n");

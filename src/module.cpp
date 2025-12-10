@@ -103,39 +103,42 @@ ErrorMsg VulModuleBase::updateDynamicReferences() {
  */
 bool VulModule::localCheckNameConflict(const string &name) {
     if (instances.find(name) != instances.end()) {
-            return true;
-        }
-        if (pipe_instances.find(name) != pipe_instances.end()) {
-            return true;
-        }
-        if (storages.find(name) != storages.end()) {
-            return true;
-        }
-        if (storagenexts.find(name) != storagenexts.end()) {
-            return true;
-        }
-        if (storagetmp.find(name) != storagetmp.end()) {
-            return true;
-        }
-        if (requests.find(name) != requests.end()) {
-            return true;
-        }
-        if (services.find(name) != services.end()) {
-            return true;
-        }
-        if (pipe_inputs.find(name) != pipe_inputs.end()) {
-            return true;
-        }
-        if (pipe_outputs.find(name) != pipe_outputs.end()) {
-            return true;
-        }
-        if (local_configs.find(name) != local_configs.end()) {
-            return true;
-        }
-        if (user_tick_codeblocks.find(name) != user_tick_codeblocks.end()) {
-            return true;
-        }
-        return false;
+        return true;
+    }
+    if (pipe_instances.find(name) != pipe_instances.end()) {
+        return true;
+    }
+    if (storages.find(name) != storages.end()) {
+        return true;
+    }
+    if (storagenexts.find(name) != storagenexts.end()) {
+        return true;
+    }
+    if (storagetmp.find(name) != storagetmp.end()) {
+        return true;
+    }
+    if (requests.find(name) != requests.end()) {
+        return true;
+    }
+    if (services.find(name) != services.end()) {
+        return true;
+    }
+    if (pipe_inputs.find(name) != pipe_inputs.end()) {
+        return true;
+    }
+    if (pipe_outputs.find(name) != pipe_outputs.end()) {
+        return true;
+    }
+    if (local_configs.find(name) != local_configs.end()) {
+        return true;
+    }
+    if (local_bundles.find(name) != local_bundles.end()) {
+        return true;
+    }
+    if (user_tick_codeblocks.find(name) != user_tick_codeblocks.end()) {
+        return true;
+    }
+    return false;
 }
 
 /**
