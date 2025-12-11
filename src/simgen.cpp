@@ -691,7 +691,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
             std::to_string(pipe.output_size) + ", " +
             std::to_string(pipe.buffer_size) + ", " +
             std::to_string(pipe.latency) + ">";
-        string pipe_instptr_name = "__pipeinstptr_" + pipe_entry.first;
+        string pipe_instptr_name = "__instptr_" + pipe_entry.first;
         member_field.push_back("std::unique_ptr<" + pipe_class + "> " + pipe_instptr_name + ";\n");
 
         for (const string &line : _genUnpackMultilineNoNext(pipe.comment)) {

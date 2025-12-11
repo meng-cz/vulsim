@@ -407,28 +407,28 @@ FORCE_INLINE /*HandshakeType*/ __childreq_/*InstanceName*/_/*RequestName*/(/*Arg
 
 `Member Field` :
 ```cpp
-std::unique_ptr</*PipeTypeStr*/> __pipeinstptr_/*PipeInstanceName*/;
+std::unique_ptr</*PipeTypeStr*/> __instptr_/*PipeInstanceName*/;
 FORCE_INLINE bool /*PipeInstanceName*/_can_pop() {
-    return __pipeinstptr_/*PipeInstanceName*/->get_pop_port()->can_pop();
+    return __instptr_/*PipeInstanceName*/->get_pop_port()->can_pop();
 }
 FORCE_INLINE void /*PipeInstanceName*/_pop(/*DataType*/ * data) {
-    __pipeinstptr_/*PipeInstanceName*/->get_pop_port()->pop(data);
+    __instptr_/*PipeInstanceName*/->get_pop_port()->pop(data);
 }
 FORCE_INLINE void /*PipeInstanceName*/_top(/*DataType*/ * data) {
-    __pipeinstptr_/*PipeInstanceName*/->get_pop_port()->top(data);
+    __instptr_/*PipeInstanceName*/->get_pop_port()->top(data);
 }
 FORCE_INLINE bool /*PipeInstanceName*/_can_push() {
-    return __pipeinstptr_/*PipeInstanceName*/->get_push_port()->can_push();
+    return __instptr_/*PipeInstanceName*/->get_push_port()->can_push();
 }
 FORCE_INLINE void /*PipeInstanceName*/_push(const /*DataType*/ & data) {
-    __pipeinstptr_/*PipeInstanceName*/->get_push_port()->push(data);
+    __instptr_/*PipeInstanceName*/->get_push_port()->push(data);
 }
 ```
 
 `<Init Field>` :
 ```cpp
     {
-        __pipeinstptr_/*PipeInstanceName*/ = std::make_unique</*PipeTypeStr*/>(/*PipeParams*/);
+        __instptr_/*PipeInstanceName*/ = std::make_unique</*PipeTypeStr*/>(/*PipeParams*/);
     }
 ```
 
