@@ -91,7 +91,47 @@ constexpr uint32_t EItemBundAliasInvalid = 31020;
 constexpr uint32_t EItemBundInitWithValue = 31021;
 
 constexpr uint32_t ErrModule = 32000;
-constexpr uint32_t EItemModConfInvalidValue = 32001;
-constexpr uint32_t EItemModConfRefNotFound = 32002;
+constexpr uint32_t ErrModuleBrokenIndex = 32001;
 
+constexpr uint32_t EItemModLocalNameDup = 32100;
+constexpr uint32_t EItemModLocalNameInvalid = 32101;
+
+constexpr uint32_t EItemModConfInvalidValue = 32200;
+constexpr uint32_t EItemModConfRefNotFound = 32201;
+constexpr uint32_t EItemModBundInvalidType = 32202;
+constexpr uint32_t EItemModBundRefNotFound = 32203;
+constexpr uint32_t EItemModBundRefLooped = 32204;
+constexpr uint32_t EItemModBundInvalidEnum = 32205;
+constexpr uint32_t EItemModBundMemNameInvalid = 32206;
+constexpr uint32_t EItemModBundMemNameDup = 32207;
+constexpr uint32_t EItemModBundMemRefNotFound = 32208;
+constexpr uint32_t EItemModBundMemUnexpectedValue = 32209;
+
+constexpr uint32_t EItemModInstRefNotFound = 32300;
+constexpr uint32_t EItemModInstConfOverrideNotFound = 32301;
+
+constexpr uint32_t EItemModRConnInvalidInst = 32400;
+constexpr uint32_t EItemModRConnInvalidPort = 32401;
+constexpr uint32_t EItemModRConnMismatch = 32402;
+constexpr uint32_t EItemModRConnServMultiConn = 32403;
+constexpr uint32_t EItemModRConnServNotConnected = 32404;
+constexpr uint32_t EItemModRConnChildReqMultiConn = 32405;
+constexpr uint32_t EItemModRConnChildReqNotConnected = 32406;
+
+constexpr uint32_t EItemModPConnInvalidInst = 32500;
+constexpr uint32_t EItemModPConnInvalidPort = 32501;
+constexpr uint32_t EItemModPConnInvalidPipe = 32502;
+constexpr uint32_t EItemModPConnMismatch = 32503;
+constexpr uint32_t EItemModPConnAmbigPort = 32504;
+constexpr uint32_t EItemModPConnChildPortNotConnected = 32505;
+constexpr uint32_t EItemModPConnChildPortMultiConn = 32506;
+
+constexpr uint32_t EItemModSConnInvalidInst = 32600;
+constexpr uint32_t EItemModSConnInvalidTop = 32601;
+constexpr uint32_t EItemModSConnSelfLoop = 32602;
+constexpr uint32_t EItemModSConnLoop = 32603;
+constexpr uint32_t EItemModUConnInvalidInst = 32604;
+constexpr uint32_t EItemModUConnInvalidTop = 32605;
+constexpr uint32_t EItemModUConnSelfLoop = 32606;
+constexpr uint32_t EItemModUConnLoop = 32607;
 

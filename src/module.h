@@ -46,36 +46,42 @@ typedef struct {
     Comment     comment;
 } VulArg;
 
-typedef struct {
+class VulReqServ {
+public:
     ReqServName    name;
     Comment        comment;
     vector<VulArg>  args;
     vector<VulArg>  rets;
     ConfigValue     array_size; // empty if not an array request
     bool            has_handshake;
-} VulReqServ;
 
-/**
- * @brief Whether two VulReqServ have the same signature (args, rets, array_size, has_handshake).
- * @param a The first VulReqServ.
- * @param b The second VulReqServ.
- * @return true if they have the same signature, false otherwise.
- */
-inline bool operator==(const VulReqServ &a, const VulReqServ &b) {
-    if (a.has_handshake != b.has_handshake) return false;
-    if (!a.array_size.empty() || !b.array_size.empty()) {
-        return config_parser::tokenEq(a.array_size, b.array_size);
+    inline bool allowMultiConnect() const {
+        return (array_size.empty() && !has_handshake && rets.empty());
     }
-    if (a.args.size() != b.args.size()) return false;
-    for (size_t i = 0; i < a.args.size(); ++i) {
-        if (a.args[i].type != b.args[i].type) return false;
+
+    /**
+     * @brief Whether two VulReqServ have the same signature (args, rets, array_size, has_handshake).
+     * @param a The first VulReqServ.
+     * @param b The second VulReqServ.
+     * @return true if they have the same signature, false otherwise.
+     */
+    inline bool match(const VulReqServ &a) const {
+        if (a.has_handshake != has_handshake) return false;
+        if (!a.array_size.empty() || !array_size.empty()) {
+            return config_parser::tokenEq(a.array_size, array_size);
+        }
+        if (a.args.size() != args.size()) return false;
+        for (size_t i = 0; i < a.args.size(); ++i) {
+            if (a.args[i].type != args[i].type) return false;
+        }
+        if (a.rets.size() != rets.size()) return false;
+        for (size_t i = 0; i < a.rets.size(); ++i) {
+            if (a.rets[i].type != rets[i].type) return false;
+        }
+        return true;
     }
-    if (a.rets.size() != b.rets.size()) return false;
-    for (size_t i = 0; i < a.rets.size(); ++i) {
-        if (a.rets[i].type != b.rets[i].type) return false;
-    }
-    return true;
-}
+};
+
 
 typedef struct {
     PipePortName    name;
@@ -117,9 +123,7 @@ public:
     unordered_map<ReqServName, VulReqServ>      services;
     unordered_map<PipePortName, VulPipePort>    pipe_inputs;
     unordered_map<PipePortName, VulPipePort>    pipe_outputs;
-    bool                        _is_external = false; // whether the module is imported from external definition
-
-
+    
     unordered_set<ConfigName> _dyn_referenced_configs;
     unordered_set<BundleName> _dyn_referenced_bundles;
     unordered_set<ModuleName> _dyn_referenced_modules;
@@ -129,6 +133,8 @@ public:
      * @return An ErrorMsg indicating failure, empty if success.
      */
     virtual ErrorMsg updateDynamicReferences();
+
+    virtual bool isExternalModule() const { return true; } 
 };
 
 typedef string EModuleDir;
@@ -137,40 +143,6 @@ class VulExternalModule : public VulModuleBase {
 public:
     EModuleDir      directory;
 };
-
-/**
- * @brief Get the module definition that matches the given pipe characteristics.
- * @param pipe The VulPipe definition.
- * @return The VulModuleBase definition that matches the pipe.
- */
-inline VulModuleBase getModuleDefinitionForPipe(const VulPipe &pipe) {
-    VulModuleBase ret;
-    ret.name = pipe.name + "_module";
-    ret.comment = "Auto-generated module for pipe " + pipe.name;
-    // add pipe input
-    ret.pipe_inputs["in"] = VulPipePort{
-        .name = "in",
-        .type = pipe.type,
-        .comment = "Input port for pipe " + pipe.name
-    };
-    // add pipe output
-    ret.pipe_outputs["out"] = VulPipePort{
-        .name = "out",
-        .type = pipe.type,
-        .comment = "Output port for pipe " + pipe.name
-    };
-    // add clear service
-    ret.services["clear"] = VulReqServ{
-        .name = "clear",
-        .comment = "Clear the pipe " + pipe.name,
-        .args = {},
-        .rets = {},
-        .array_size = "",
-        .has_handshake = false
-    };
-    ret._is_external = true;
-    return ret;
-}
 
 typedef string InstanceName;
 
@@ -181,29 +153,55 @@ typedef struct {
     unordered_map<ConfigName, LocalConfigValue> local_config_overrides; // local config overrides for this instance
 } VulInstance;
 
-typedef struct {
+class VulReqServConnection {
+public:
     InstanceName    req_instance;
     ReqServName     req_name;       // should be ServiceName when req_instance is TopInterface
     InstanceName    serv_instance;
     ReqServName     serv_name;      // should be RequestName when serv_instance is TopInterface
-} VulReqServConnection;
 
-typedef struct {
+    inline string toString() const {
+        return "'" + req_instance + "'.'" + req_name + "' -> '" + serv_instance + "'.'" + serv_name + "'";
+    }
+};
+
+inline bool operator==(const VulReqServConnection &a, const VulReqServConnection &b) {
+    return std::tie(a.req_instance, a.req_name, a.serv_instance, a.serv_name) ==
+           std::tie(b.req_instance, b.req_name, b.serv_instance, b.serv_name);
+}
+
+class VulModulePipeConnection {
+public:
     InstanceName    instance;
     PipeName        instance_pipe_port;
     InstanceName    pipe_instance;
     PipeName        top_pipe_port;         // valid when pipe_instance is TopInterface
-} VulModulePipeConnection;
 
-typedef struct {
-    InstanceName    from_instance;
-    InstanceName    to_instance;
-} VulStallConnection;
+    inline string toString() const {
+        return "'" + instance + "'.'" + instance_pipe_port + "' <-> '" + pipe_instance + "'.'" + top_pipe_port + "'";
+    }
+};
 
-typedef struct {
+inline bool operator==(const VulModulePipeConnection &a, const VulModulePipeConnection &b) {
+    return std::tie(a.instance, a.instance_pipe_port, a.pipe_instance, a.top_pipe_port) ==
+           std::tie(b.instance, b.instance_pipe_port, b.pipe_instance, b.top_pipe_port);
+}
+
+class VulSequenceConnection {
+public:
     InstanceName    former_instance;
     InstanceName    latter_instance;
-} VulSequenceConnection;
+
+    inline string toString() const {
+        return "'" + former_instance + "' -> '" + latter_instance + "'";
+    }
+};
+
+inline bool operator==(const VulSequenceConnection &a, const VulSequenceConnection &b) {
+    return std::tie(a.former_instance, a.latter_instance) ==
+           std::tie(b.former_instance, b.latter_instance);
+}
+
 
 typedef string CCodeLine;
 
@@ -220,8 +218,6 @@ class VulModule : public VulModuleBase {
 public:
 
     inline static const InstanceName TopInterface = string("__top__");
-    inline static const InstanceName TopStallInput = string("__top_stall_input__");
-    inline static const InstanceName TopStallOutput = string("__top_stall_output__");
 
     bool is_hpp_generated = true; // TODO: always true for now
     bool is_inline_generated = true;
@@ -240,11 +236,29 @@ public:
     unordered_map<InstanceName, VulInstance>    instances;
     unordered_map<InstanceName, VulPipe>        pipe_instances;
 
-    unordered_map<InstanceName, vector<VulReqServConnection>>       req_connections;
-    unordered_map<InstanceName, vector<VulModulePipeConnection>>    mod_pipe_connections;
+    struct ReqServConnHash {
+        size_t operator()(const VulReqServConnection &conn) const {
+            return std::hash<string>()(conn.req_name) ^ std::hash<string>()(conn.serv_name) ^ std::hash<string>()(conn.req_instance) ^ std::hash<string>()(conn.serv_instance);
+        }
+    };
 
-    vector<VulStallConnection>        stalled_connections;
-    vector<VulSequenceConnection>     update_constraints;
+    struct PipeConnHash {
+        size_t operator()(const VulModulePipeConnection &conn) const {
+            return std::hash<string>()(conn.instance) ^ std::hash<string>()(conn.instance_pipe_port) ^ std::hash<string>()(conn.pipe_instance) ^ std::hash<string>()(conn.top_pipe_port);
+        }
+    };
+
+    unordered_map<InstanceName, unordered_set<VulReqServConnection, ReqServConnHash>>   req_connections;
+    unordered_map<InstanceName, unordered_set<VulModulePipeConnection, PipeConnHash>>   mod_pipe_connections;
+
+    struct SeqConnHash {
+        size_t operator()(const VulSequenceConnection &conn) const {
+            return std::hash<string>()(conn.former_instance) ^ std::hash<string>()(conn.latter_instance);
+        }
+    };
+
+    unordered_set<VulSequenceConnection, SeqConnHash>    stalled_connections;
+    unordered_set<VulSequenceConnection, SeqConnHash>    update_constraints;
 
     /**
      * @brief Check if the given name conflicts with existing names in local scope.
@@ -260,7 +274,71 @@ public:
     virtual ErrorMsg updateDynamicReferences() override;
 
 
-    
+    /**
+     * @brief Validate the module definition for internal consistency and correctness.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    ErrorMsg validateAll() const;
+
+    /**
+     * @brief Validate broken indexes in the module definition.
+     */
+    ErrorMsg _0_validateBrokenIndexes() const;
+
+    /**
+     * @brief Validate name conflicts within the module.
+     * 1. Check name valid within local scope.
+     * 2. Check name conflicts within local scope.
+     * 3. Check name conflicts from local name to global scope (config, bundle, module).
+     */
+    ErrorMsg _1_validateNameConflicts() const;
+
+    /**
+     * @brief Validate local config value and bundle definitions.
+     * 1. Check local config value expressions, referencing only global configs.
+     * 2. Check local bundle definitions and value expressions within, referencing global/local bundles/configs.
+     * 3. Check storages definitions, similar to bundle members.
+     * 4. Check local bundle referencing loop.
+     */
+    ErrorMsg _2_validateLocalConfigBundleDefinitions() const;
+
+    /**
+     * @brief Validate instance definitions.
+     * 1. Check instance module existence.
+     * 2. Check local config overrides valid for each instance.
+     */
+    ErrorMsg _3_validateInstanceDefinitions() const;
+
+    /**
+     * @brief Validate request-service connections.
+     * 1. For each req-serv connection, check existence and signature match.
+     * 2. For each service, it must be:
+     *     a. Connected to child service with matching signature
+     *     b. Implemented with service code lines
+     * 3. For each child request, it must be:
+     *     a. Connected to request with matching signature
+     *     b. Connected to child service with matching signature
+     *     c. Implemented with request code lines
+     */
+    ErrorMsg _4_validateReqServConnections() const;
+
+    /**
+     * @brief Validate pipe connections.
+     * 1. For each pipe connection, check existence and type match.
+     * 2. For each child pipe port, it must be:
+     *     a. Connected to top interface pipe port with matching type
+     *     b. Connected to pipe instance with matching type
+     */
+    ErrorMsg _5_validatePipeConnections() const;
+
+    /**
+     * @brief Validate stall and sequence connections.
+     * 1. For each stall & sequence connection, check existence.
+     * 2. Check no loop in stall & sequence connections.
+     * 3. Check no loop in stall connections with TopInterface.
+     */
+    ErrorMsg _6_validateStallSequenceConnections() const;
+
 
 };
 

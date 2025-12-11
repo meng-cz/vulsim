@@ -524,12 +524,14 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
 /**
  * @brief Calculate the integer value of a config expression string.
  * @param value The config expression string to calculate.
+ * @param overrides A map of config name to override config values.
  * @param out_real_value Output parameter to hold the calculated integer value.
  * @param seen_configs Set of config names seen during the calculation to detect cycles.
  * @return An ErrorMsg indicating failure, empty if success.
  */
 ErrorMsg VulConfigLib::calculateConfigExpression(
     const ConfigValue &value,
+    const unordered_map<ConfigName, ConfigRealValue> &overrides,
     ConfigRealValue &out_real_value,
     unordered_set<ConfigName> &seen_configs
 ) const {
@@ -543,6 +545,13 @@ ErrorMsg VulConfigLib::calculateConfigExpression(
     for (auto &tok : *tokens) {
         if (tok.type == config_parser::TokenType::Identifier) {
             // lookup value
+            auto over_iter = overrides.find(tok.text);
+            if (over_iter != overrides.end()) {
+                seen_configs.insert(tok.text);
+                tok.type = config_parser::TokenType::Number;
+                tok.value = over_iter->second;
+                continue;
+            }
             auto iter = config_items.find(tok.text);
             if (iter != config_items.end()) {
                 seen_configs.insert(tok.text);

@@ -186,6 +186,21 @@ public:
     /**
      * @brief Calculate the integer value of a config expression string.
      * @param value The config expression string to calculate.
+     * @param overrides A map of config name to override config values.
+     * @param out_real_value Output parameter to hold the calculated integer value.
+     * @param seen_coonfigs Set of config names seen during the calculation to detect cycles.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    ErrorMsg calculateConfigExpression(
+        const ConfigValue &value,
+        const unordered_map<ConfigName, ConfigRealValue> &overrides,
+        ConfigRealValue &out_real_value,
+        unordered_set<ConfigName> &seen_configs
+    ) const;
+
+    /**
+     * @brief Calculate the integer value of a config expression string.
+     * @param value The config expression string to calculate.
      * @param out_real_value Output parameter to hold the calculated integer value.
      * @param seen_coonfigs Set of config names seen during the calculation to detect cycles.
      * @return An ErrorMsg indicating failure, empty if success.
@@ -194,7 +209,10 @@ public:
         const ConfigValue &value,
         ConfigRealValue &out_real_value,
         unordered_set<ConfigName> &seen_configs
-    ) const;
+    ) const {
+        unordered_map<ConfigName, ConfigRealValue> dummy_overrides;
+        return calculateConfigExpression(value, dummy_overrides, out_real_value, seen_configs);
+    }
 
     /**
      * @brief Create a snapshot of the current config library state.

@@ -516,6 +516,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
 
     vector<InstanceName> tick_update_seq;
     {
+        unordered_set<InstanceName> all_user_tick_instances;
         unordered_set<InstanceName> all_tick_fields;
         unordered_map<InstanceName, unordered_set<InstanceName>> tick_field_deps;
         for (const auto &entry: module.instances) {
@@ -523,15 +524,20 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
             tick_field_deps[entry.first] = unordered_set<InstanceName>();
         }
         for (const auto &entry : module.user_tick_codeblocks) {
+            all_user_tick_instances.insert(entry.first);
             all_tick_fields.insert(entry.first);
             tick_field_deps[entry.first] = unordered_set<InstanceName>();
         }
 
         for (const auto &conn : module.stalled_connections) {
-            if (conn.from_instance == module.TopStallInput || conn.to_instance == module.TopStallOutput) {
+            if (conn.former_instance == module.TopInterface) {
                 continue;
             }
-            tick_field_deps[conn.from_instance].insert(conn.to_instance);
+            if (conn.latter_instance == module.TopInterface) {
+                tick_field_deps[conn.former_instance].insert(all_user_tick_instances.begin(), all_user_tick_instances.end());
+            } else {
+                tick_field_deps[conn.former_instance].insert(conn.latter_instance);
+            }
         }
         for (const auto &conn : module.update_constraints) {
             if (conn.former_instance == module.TopInterface) {
@@ -728,10 +734,10 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
 
     // generate stall field
     for (const auto &conn : module.stalled_connections) {
-        if (conn.from_instance != VulModule::TopStallInput) {
+        if (conn.former_instance != VulModule::TopInterface) {
             continue;
         }
-        stall_field.push_back(CodeTab + "__instptr_" + conn.to_instance + "->stall();\n");
+        stall_field.push_back(CodeTab + "__instptr_" + conn.latter_instance + "->stall();\n");
     }
 
     // generate instances
@@ -817,13 +823,13 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
 
         member_field.push_back("static void __childstall_" + inst_name + "_wrapper(void * __parent_module) {\n");
         for (const auto & stall_conn : module.stalled_connections) {
-            if (stall_conn.from_instance != inst_name) {
+            if (stall_conn.former_instance != inst_name) {
                 continue;
             }
-            if (stall_conn.to_instance == VulModule::TopStallOutput) {
+            if (stall_conn.latter_instance == VulModule::TopInterface) {
                 member_field.push_back(CodeTab + parent_ptr_cast + "->__stall_propagate_out();\n");
             } else {
-                member_field.push_back(CodeTab + parent_ptr_cast + "->__instptr_" + stall_conn.to_instance + "->stall();\n");
+                member_field.push_back(CodeTab + parent_ptr_cast + "->__instptr_" + stall_conn.latter_instance + "->stall();\n");
             }
         }
         member_field.push_back("}\n");
