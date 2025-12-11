@@ -118,15 +118,15 @@
 
 ### 阻塞传递连接
 
-模块定义了两个特殊的实例名常量：`TopStallInput` 和 `TopStallOutput`，分别表示模块的顶层阻塞输入和输出端口。
+模块定义了一个特殊的实例名常量：`TopInterface`，表示模块的顶层接口。
 
-阻塞传递连接表为所有子实例+两个特殊实例构成的有向无环图，其中`TopStallInput`仅有出边，`TopStallOutput`仅有入边。每条边表示阻塞传递关系。当一个子实例调用其内部的`stall`函数时，阻塞信号会沿着有向边传递到后续所有的子实例并调用它们的`stall`函数。
+阻塞传递连接表为所有子实例+特殊实例构成的有向无环图，每条边表示阻塞传递关系。当一个子实例调用其内部的`stall`函数时，阻塞信号会沿着有向边传递到后续所有的子实例并调用它们的`stall`函数。
 
-当本模块的`stall`函数被父模块中的其他模块调用时，模块内的阻塞信号从`TopStallInput`开始传递。默认存在一个从`TopStallInput`到`TopStallOutput`的路径。当阻塞信号到达`TopStallOutput`时会继续传递到父模块中。
+当本模块的`stall`函数被父模块中的其他模块调用时，模块内的阻塞信号从`TopInterface`开始向子模块传递。当子模块唤起一个阻塞信号时，该信号可以通过阻塞连接传递到其他模块或传递到`TopInterface`，从而传递到本模块的父模块。
 
-模块内的阻塞连接不能存在从 `TopStallInput` 到 `TopStallOutput` 的路径。允许部分子模块响应 `TopStallInput` 的阻塞信号，另一部分子模块会将阻塞信号传递到 `TopStallOutput`。
+模块内的阻塞连接不能存在从 `TopInterface` 到 `TopInterface` 的环路。允许部分子模块响应 `TopInterface` 的阻塞信号，另一部分子模块会将阻塞信号传递到 `TopInterface`。
 
-阻塞连接隐含了子模块之间的更新顺序约束：如果子模块A的阻塞信号传递到子模块B，则A的`tick`函数必须在B的`tick`函数之前调用。但这一约束并不会对本模块的`tick`函数生效。
+阻塞连接隐含了子模块之间的更新顺序约束：如果子模块A的阻塞信号传递到子模块B，则A的`tick`函数必须在B的`tick`函数之前调用。如果一个子模块的阻塞信号传递到`TopInterface`，则该子模块的`tick`函数必须在本模块的所有`tick_codeblocks`之前调用。
 
 ### 更新顺序约束
 
