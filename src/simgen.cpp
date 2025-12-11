@@ -845,7 +845,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
 
         init_field.push_back(indent + child_class_name + "::ConstructorParams cparams;\n");
         init_field.push_back(indent + "cparams.__parent_module = this;\n");
-        init_field.push_back(indent + "cparams.__instance_name = \"" + inst_name + "\";\n");
+        init_field.push_back(indent + "cparams.__instance_name = __params.__instance_name + \"::" + inst_name + "\";\n");
         init_field.push_back(indent + "cparams.__stall = &__childstall_" + inst_name + "_wrapper;\n");
 
         for (const auto &req_entry : childmod_ptr->requests) {
