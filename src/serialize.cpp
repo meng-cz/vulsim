@@ -583,6 +583,1162 @@ ErrorMsg writeBundleLibToXMLFile(const string &filepath, const vector<BundleItem
     return "";
 }
 
+static const tuple<uint32_t, uint32_t, uint32_t> MemberVersion = {1, 0, 0};
 
+/*
+ModuleVersion: 1.0
+
+```
+modulebase
+|-- version : 版本号
+|-- name : 模块名称
+|-- (comment) : 模块描述（可选）
+|-- [localconf]
+    |-- name : 本地配置项名称
+    |-- value : 本地配置项值（或表达式）
+    |-- (comment) : 本地配置项注释（可选）
+|-- [localbundle]
+    |-- name : Bundle 名称
+    |-- (comment) : Bundle 描述
+    |-- (isenum) : 是否为枚举类型（可选，默认为 false）
+    |-- (isalias) : 是否为别名类型（可选，默认为 false）
+    |-- [member]
+        |-- name : 成员名称
+        |-- (type) : 成员类型（可选，非枚举类型时为必须）
+        |-- (uintlen) : 成员类型位宽（可选，针对整数类型）
+        |-- (value) : 成员值（可选，枚举类型时为必须）
+        |-- (comment) : 成员描述（可选）
+        |-- [dims] : 成员数组维度（可选，重复时代表多维）
+|-- [request/service]
+    |-- name : 请求名称
+    |-- (comment) : 请求描述（可选）
+    |-- (array_size) : 请求数组大小（可选，非数组请求时为空）
+    |-- (handshake) : 是否包含握手（可选，默认为 false）
+    |-- [arg]
+        |-- name : 参数名称
+        |-- type : 参数类型
+        |-- (comment) : 参数描述（可选）
+    |-- [ret]
+        |-- name : 返回值名称
+        |-- type : 返回值类型
+        |-- (comment) : 返回值描述（可选）
+|-- [pipein/pipeout]
+    |-- name : 端口名称
+    |-- (comment) : 端口描述（可选）
+    |-- type : 管道端口数据类型
+```
+*/
+
+/**
+ * @brief Parse a base module from an XML file.
+ * @param filepath The path to the XML file.
+ * @param out_module Output parameter to hold the parsed VulModuleBase.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg parseModuleBaseFromXMLFile(const string &filepath, ModuleBaseRaw &out_module) {
+    pugi::xml_document doc;
+    pugi::xml_parse_result result = doc.load_file(filepath.c_str());
+    if (!result) {
+        return EStr(EItemXMLFileOpenFailed, string("Failed to load XML file '") + filepath + "': " + result.description());
+    }
+
+    pugi::xml_node root = doc.child("modulebase");
+    if (!root) {
+        return EStr(EItemXMLRootMissing, string("Missing root element 'modulebase' in XML file '") + filepath + "'");
+    }
+
+    // version
+    pugi::xml_node version_node = root.child("version");
+    if (!version_node) {
+        return EStr(EItemXMLRequestMissing, string("Missing 'version' element in XML file '") + filepath + "'");
+    }
+    {
+        string version_str = version_node.text().as_string();
+        uint32_t major = 0, minor = 0, patch = 0;
+        if (sscanf(version_str.c_str(), "%u.%u.%u", &major, &minor, &patch) < 2) {
+            return EStr(EItemXMLRequestMissing, string("Invalid 'version' format in XML file '") + filepath + "': " + version_str);
+        }
+        if (make_tuple(major, minor, patch) != MemberVersion) {
+            return EStr(EItemXMLVersionMismatch, string("Version mismatch in XML file '") + filepath + "': " + version_str);
+        }
+    }
+
+    // name (required)
+    pugi::xml_node name_node = root.child("name");
+    if (!name_node) {
+        return EStr(EItemXMLRequestMissing, string("Missing 'name' element in XML file '") + filepath + "'");
+    }
+    out_module.name = name_node.text().as_string();
+
+    // comment (optional)
+    if (pugi::xml_node comment_node = root.child("comment")) {
+        out_module.comment = comment_node.text().as_string();
+    } else {
+        out_module.comment = "";
+    }
+
+    // localconf entries
+    for (pugi::xml_node lc_node : root.children("localconf")) {
+        LocalConfigRaw lc;
+
+        pugi::xml_node lc_name = lc_node.child("name");
+        if (!lc_name) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a localconf in XML file '") + filepath + "'");
+        }
+        lc.name = lc_name.text().as_string();
+
+        pugi::xml_node lc_value = lc_node.child("value");
+        if (!lc_value) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'value' element in localconf '") + lc.name + "' in XML file '" + filepath + "'");
+        }
+        lc.value = lc_value.text().as_string();
+
+        if (pugi::xml_node lc_comment = lc_node.child("comment")) {
+            lc.comment = lc_comment.text().as_string();
+        } else {
+            lc.comment = "";
+        }
+
+        out_module.local_configs.push_back(std::move(lc));
+    }
+
+    // localbundle entries (structure similar to bundlelib)
+    for (pugi::xml_node lb_node : root.children("localbundle")) {
+        BundleItemRaw bundle;
+
+        pugi::xml_node bname = lb_node.child("name");
+        if (!bname) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a localbundle in XML file '") + filepath + "'");
+        }
+        bundle.name = bname.text().as_string();
+
+        if (pugi::xml_node bcomment = lb_node.child("comment")) {
+            bundle.comment = bcomment.text().as_string();
+        } else {
+            bundle.comment = "";
+        }
+
+        bundle.isenum = lb_node.child("isenum");
+        bundle.isalias = lb_node.child("isalias");
+
+        for (pugi::xml_node mem_node : lb_node.children("member")) {
+            BundleMemberRaw mem;
+
+            pugi::xml_node mname = mem_node.child("name");
+            if (!mname) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a member of localbundle '") + bundle.name + "' in XML file '" + filepath + "'");
+            }
+            mem.name = mname.text().as_string();
+
+            if (pugi::xml_node mtype = mem_node.child("type")) mem.type = mtype.text().as_string(); else mem.type = "";
+            if (pugi::xml_node muint = mem_node.child("uintlen")) mem.uintlen = muint.text().as_string(); else mem.uintlen = "";
+            if (pugi::xml_node mval = mem_node.child("value")) mem.value = mval.text().as_string(); else mem.value = "";
+            if (pugi::xml_node mcomment = mem_node.child("comment")) mem.comment = mcomment.text().as_string(); else mem.comment = "";
+
+            for (pugi::xml_node dim_node : mem_node.children("dim")) {
+                mem.dims.push_back(dim_node.text().as_string());
+            }
+
+            bundle.members.push_back(std::move(mem));
+        }
+
+        out_module.local_bundles.push_back(std::move(bundle));
+    }
+
+    auto parseReqServ = [&](const pugi::xml_node &node, bool isRequest) -> ErrorMsg {
+        ReqServRaw rs;
+
+        pugi::xml_node rs_name = node.child("name");
+        if (!rs_name) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a ") + (isRequest ? "request" : "service") + " in XML file '" + filepath + "'");
+        }
+        rs.name = rs_name.text().as_string();
+
+        if (pugi::xml_node rs_comment = node.child("comment")) rs.comment = rs_comment.text().as_string(); else rs.comment = "";
+        if (pugi::xml_node rs_array = node.child("array_size")) rs.arraysize = rs_array.text().as_string(); else rs.arraysize = "";
+        rs.handshake = node.child("handshake");
+
+        for (pugi::xml_node arg_node : node.children("arg")) {
+            ArgRaw a;
+            pugi::xml_node an = arg_node.child("name");
+            if (!an) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'name' element in an arg of ") + rs.name + " in XML file '" + filepath + "'");
+            }
+            a.name = an.text().as_string();
+            pugi::xml_node at = arg_node.child("type");
+            if (!at) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'type' element in an arg '") + a.name + "' of " + rs.name + " in XML file '" + filepath + "'");
+            }
+            a.type = at.text().as_string();
+            if (pugi::xml_node ac = arg_node.child("comment")) a.comment = ac.text().as_string(); else a.comment = "";
+            rs.args.push_back(std::move(a));
+        }
+
+        for (pugi::xml_node ret_node : node.children("ret")) {
+            ArgRaw r;
+            pugi::xml_node rn = ret_node.child("name");
+            if (!rn) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a ret of ") + rs.name + " in XML file '" + filepath + "'");
+            }
+            r.name = rn.text().as_string();
+            pugi::xml_node rt = ret_node.child("type");
+            if (!rt) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'type' element in a ret '") + r.name + "' of " + rs.name + " in XML file '" + filepath + "'");
+            }
+            r.type = rt.text().as_string();
+            if (pugi::xml_node rc = ret_node.child("comment")) r.comment = rc.text().as_string(); else r.comment = "";
+            rs.rets.push_back(std::move(r));
+        }
+
+        if (isRequest) out_module.requests.push_back(std::move(rs)); else out_module.services.push_back(std::move(rs));
+        return "";
+    };
+
+    // requests
+    for (pugi::xml_node req_node : root.children("request")) {
+        ErrorMsg e = parseReqServ(req_node, true);
+        if (!e.empty()) return e;
+    }
+
+    // services
+    for (pugi::xml_node serv_node : root.children("service")) {
+        ErrorMsg e = parseReqServ(serv_node, false);
+        if (!e.empty()) return e;
+    }
+
+    // pipein
+    for (pugi::xml_node pin_node : root.children("pipein")) {
+        PipePortRaw p;
+        pugi::xml_node pn = pin_node.child("name");
+        if (!pn) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a pipein in XML file '") + filepath + "'");
+        }
+        p.name = pn.text().as_string();
+        if (pugi::xml_node pc = pin_node.child("comment")) p.comment = pc.text().as_string(); else p.comment = "";
+        pugi::xml_node pt = pin_node.child("type");
+        if (!pt) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'type' element in pipein '") + p.name + "' in XML file '" + filepath + "'");
+        }
+        p.type = pt.text().as_string();
+        out_module.pipe_inputs.push_back(std::move(p));
+    }
+
+    // pipeout
+    for (pugi::xml_node pout_node : root.children("pipeout")) {
+        PipePortRaw p;
+        pugi::xml_node pn = pout_node.child("name");
+        if (!pn) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'name' element in a pipeout in XML file '") + filepath + "'");
+        }
+        p.name = pn.text().as_string();
+        if (pugi::xml_node pc = pout_node.child("comment")) p.comment = pc.text().as_string(); else p.comment = "";
+        pugi::xml_node pt = pout_node.child("type");
+        if (!pt) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'type' element in pipeout '") + p.name + "' in XML file '" + filepath + "'");
+        }
+        p.type = pt.text().as_string();
+        out_module.pipe_outputs.push_back(std::move(p));
+    }
+
+    return "";
+}
+
+/**
+ * @brief Write a base module to an XML file.
+ * @param filepath The path to the XML file.
+ * @param module The ModuleBaseRaw to write.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg writeModuleBaseToXMLFile(const string &filepath, const ModuleBaseRaw &module) {
+    pugi::xml_document doc;
+    pugi::xml_node root = doc.append_child("modulebase");
+
+    // version
+    pugi::xml_node version_node = root.append_child("version");
+    char version_buf[64];
+    snprintf(version_buf, sizeof(version_buf), "%u.%u.%u",
+             std::get<0>(MemberVersion),
+             std::get<1>(MemberVersion),
+             std::get<2>(MemberVersion));
+    version_node.append_child(pugi::node_pcdata).set_value(version_buf);
+
+    // name
+    pugi::xml_node name_node = root.append_child("name");
+    name_node.append_child(pugi::node_pcdata).set_value(module.name.c_str());
+
+    // comment (optional)
+    if (!module.comment.empty()) {
+        pugi::xml_node comment_node = root.append_child("comment");
+        comment_node.append_child(pugi::node_pcdata).set_value(module.comment.c_str());
+    }
+
+    // localconf entries
+    for (const auto &lc : module.local_configs) {
+        pugi::xml_node lc_node = root.append_child("localconf");
+
+        pugi::xml_node lc_name = lc_node.append_child("name");
+        lc_name.append_child(pugi::node_pcdata).set_value(lc.name.c_str());
+
+        pugi::xml_node lc_value = lc_node.append_child("value");
+        lc_value.append_child(pugi::node_pcdata).set_value(lc.value.c_str());
+
+        if (!lc.comment.empty()) {
+            pugi::xml_node lc_comment = lc_node.append_child("comment");
+            lc_comment.append_child(pugi::node_pcdata).set_value(lc.comment.c_str());
+        }
+    }
+
+    // localbundle entries
+    for (const auto &bundle : module.local_bundles) {
+        pugi::xml_node bundle_node = root.append_child("localbundle");
+
+        pugi::xml_node bname = bundle_node.append_child("name");
+        bname.append_child(pugi::node_pcdata).set_value(bundle.name.c_str());
+
+        if (!bundle.comment.empty()) {
+            pugi::xml_node bcomment = bundle_node.append_child("comment");
+            bcomment.append_child(pugi::node_pcdata).set_value(bundle.comment.c_str());
+        }
+
+        if (bundle.isenum) {
+            bundle_node.append_child("isenum");
+        }
+
+        if (bundle.isalias) {
+            bundle_node.append_child("isalias");
+        }
+
+        // member nodes
+        for (const auto &member : bundle.members) {
+            pugi::xml_node mem_node = bundle_node.append_child("member");
+
+            pugi::xml_node mname = mem_node.append_child("name");
+            mname.append_child(pugi::node_pcdata).set_value(member.name.c_str());
+
+            if (!member.type.empty()) {
+                pugi::xml_node mtype = mem_node.append_child("type");
+                mtype.append_child(pugi::node_pcdata).set_value(member.type.c_str());
+            }
+
+            if (!member.uintlen.empty()) {
+                pugi::xml_node muint = mem_node.append_child("uintlen");
+                muint.append_child(pugi::node_pcdata).set_value(member.uintlen.c_str());
+            }
+
+            if (!member.value.empty()) {
+                pugi::xml_node mval = mem_node.append_child("value");
+                mval.append_child(pugi::node_pcdata).set_value(member.value.c_str());
+            }
+
+            if (!member.comment.empty()) {
+                pugi::xml_node mcomment = mem_node.append_child("comment");
+                mcomment.append_child(pugi::node_pcdata).set_value(member.comment.c_str());
+            }
+
+            for (const auto &dim : member.dims) {
+                pugi::xml_node dim_node = mem_node.append_child("dim");
+                dim_node.append_child(pugi::node_pcdata).set_value(dim.c_str());
+            }
+        }
+    }
+
+    // request entries
+    for (const auto &req : module.requests) {
+        pugi::xml_node req_node = root.append_child("request");
+
+        pugi::xml_node rname = req_node.append_child("name");
+        rname.append_child(pugi::node_pcdata).set_value(req.name.c_str());
+
+        if (!req.comment.empty()) {
+            pugi::xml_node rcomment = req_node.append_child("comment");
+            rcomment.append_child(pugi::node_pcdata).set_value(req.comment.c_str());
+        }
+
+        if (!req.arraysize.empty()) {
+            pugi::xml_node rarray = req_node.append_child("array_size");
+            rarray.append_child(pugi::node_pcdata).set_value(req.arraysize.c_str());
+        }
+
+        if (req.handshake) {
+            req_node.append_child("handshake");
+        }
+
+        for (const auto &arg : req.args) {
+            pugi::xml_node arg_node = req_node.append_child("arg");
+
+            pugi::xml_node aname = arg_node.append_child("name");
+            aname.append_child(pugi::node_pcdata).set_value(arg.name.c_str());
+
+            pugi::xml_node atype = arg_node.append_child("type");
+            atype.append_child(pugi::node_pcdata).set_value(arg.type.c_str());
+
+            if (!arg.comment.empty()) {
+                pugi::xml_node acomment = arg_node.append_child("comment");
+                acomment.append_child(pugi::node_pcdata).set_value(arg.comment.c_str());
+            }
+        }
+
+        for (const auto &ret : req.rets) {
+            pugi::xml_node ret_node = req_node.append_child("ret");
+
+            pugi::xml_node rname = ret_node.append_child("name");
+            rname.append_child(pugi::node_pcdata).set_value(ret.name.c_str());
+
+            pugi::xml_node rtype = ret_node.append_child("type");
+            rtype.append_child(pugi::node_pcdata).set_value(ret.type.c_str());
+
+            if (!ret.comment.empty()) {
+                pugi::xml_node rcomment = ret_node.append_child("comment");
+                rcomment.append_child(pugi::node_pcdata).set_value(ret.comment.c_str());
+            }
+        }
+    }
+
+    // service entries
+    for (const auto &serv : module.services) {
+        pugi::xml_node serv_node = root.append_child("service");
+
+        pugi::xml_node sname = serv_node.append_child("name");
+        sname.append_child(pugi::node_pcdata).set_value(serv.name.c_str());
+
+        if (!serv.comment.empty()) {
+            pugi::xml_node scomment = serv_node.append_child("comment");
+            scomment.append_child(pugi::node_pcdata).set_value(serv.comment.c_str());
+        }
+
+        if (!serv.arraysize.empty()) {
+            pugi::xml_node sarray = serv_node.append_child("array_size");
+            sarray.append_child(pugi::node_pcdata).set_value(serv.arraysize.c_str());
+        }
+
+        if (serv.handshake) {
+            serv_node.append_child("handshake");
+        }
+
+        for (const auto &arg : serv.args) {
+            pugi::xml_node arg_node = serv_node.append_child("arg");
+
+            pugi::xml_node aname = arg_node.append_child("name");
+            aname.append_child(pugi::node_pcdata).set_value(arg.name.c_str());
+
+            pugi::xml_node atype = arg_node.append_child("type");
+            atype.append_child(pugi::node_pcdata).set_value(arg.type.c_str());
+
+            if (!arg.comment.empty()) {
+                pugi::xml_node acomment = arg_node.append_child("comment");
+                acomment.append_child(pugi::node_pcdata).set_value(arg.comment.c_str());
+            }
+        }
+
+        for (const auto &ret : serv.rets) {
+            pugi::xml_node ret_node = serv_node.append_child("ret");
+
+            pugi::xml_node rname = ret_node.append_child("name");
+            rname.append_child(pugi::node_pcdata).set_value(ret.name.c_str());
+
+            pugi::xml_node rtype = ret_node.append_child("type");
+            rtype.append_child(pugi::node_pcdata).set_value(ret.type.c_str());
+
+            if (!ret.comment.empty()) {
+                pugi::xml_node rcomment = ret_node.append_child("comment");
+                rcomment.append_child(pugi::node_pcdata).set_value(ret.comment.c_str());
+            }
+        }
+    }
+
+    // pipein entries
+    for (const auto &pin : module.pipe_inputs) {
+        pugi::xml_node pin_node = root.append_child("pipein");
+
+        pugi::xml_node pname = pin_node.append_child("name");
+        pname.append_child(pugi::node_pcdata).set_value(pin.name.c_str());
+
+        if (!pin.comment.empty()) {
+            pugi::xml_node pcomment = pin_node.append_child("comment");
+            pcomment.append_child(pugi::node_pcdata).set_value(pin.comment.c_str());
+        }
+
+        pugi::xml_node ptype = pin_node.append_child("type");
+        ptype.append_child(pugi::node_pcdata).set_value(pin.type.c_str());
+    }
+
+    // pipeout entries
+    for (const auto &pout : module.pipe_outputs) {
+        pugi::xml_node pout_node = root.append_child("pipeout");
+
+        pugi::xml_node pname = pout_node.append_child("name");
+        pname.append_child(pugi::node_pcdata).set_value(pout.name.c_str());
+
+        if (!pout.comment.empty()) {
+            pugi::xml_node pcomment = pout_node.append_child("comment");
+            pcomment.append_child(pugi::node_pcdata).set_value(pout.comment.c_str());
+        }
+
+        pugi::xml_node ptype = pout_node.append_child("type");
+        ptype.append_child(pugi::node_pcdata).set_value(pout.type.c_str());
+    }
+
+    // Save to file
+    bool saveSucceeded = doc.save_file(filepath.c_str(), PUGIXML_TEXT("\t"), pugi::format_default | pugi::format_no_declaration);
+    if (!saveSucceeded) {
+        return EStr(EItemXMLFileOpenFailed, string("Failed to save XML file '") + filepath + "'");
+    }
+
+    return "";
+}
+
+/*
+ModuleVersion: 1.0
+
+```
+module
+|-- version : 版本号
+|-- name : 模块名称
+|-- (comment) : 模块描述（可选）
+|-- [localconf]
+    |-- name : 本地配置项名称
+    |-- value : 本地配置项值（或表达式）
+    |-- (comment) : 本地配置项注释（可选）
+|-- [request/service]
+    |-- name : 请求名称
+    |-- (comment) : 请求描述（可选）
+    |-- (array_size) : 请求数组大小（可选，非数组请求时为空）
+    |-- (handshake) : 是否包含握手（可选，默认为 false）
+    |-- [arg]
+        |-- name : 参数名称
+        |-- type : 参数类型
+        |-- (comment) : 参数描述（可选）
+    |-- [ret]
+        |-- name : 返回值名称
+        |-- type : 返回值类型
+        |-- (comment) : 返回值描述（可选）
+|-- [pipein/pipeout]
+    |-- name : 端口名称
+    |-- (comment) : 端口描述（可选）
+    |-- type : 管道端口数据类型
+|-- [instance]
+    |-- name : 模块实例名称
+    |-- (comment) : 模块实例描述（可选）
+    |-- type : 模块实例类型
+    |-- [config]
+        |-- name : 配置项名称
+        |-- value : 配置项值（或表达式）
+|-- [pipe]
+    |-- name : 管道名称
+    |-- (comment) : 管道描述（可选）
+    |-- type : 管道数据类型
+    |-- (inputsize) : 管道输入缓冲区大小（可选，默认1）
+    |-- (outputsize) : 管道输出缓冲区大小（可选，默认1）
+    |-- (buffersize) : 管道总缓冲区大小（可选，默认0）
+    |-- (latency) : 管道延迟（可选，默认1）
+    |-- (handshake) : 是否启用握手（可选，默认false）
+    |-- (valid) : 是否启用数据有效标志（可选，默认false）
+|-- [reqconn/pipeconn]
+    |-- frominstance : 源实例名称
+    |-- fromport : 源端口名称
+    |-- toinstance : 目标实例名称
+    |-- toport : 目标端口名称
+|-- [stallconn/seqconn]
+    |-- frominstance : 源实例名称
+    |-- toinstance : 目标实例名称
+|-- (userheadercode)： 用户自定义头文件代码行Base64（可选）
+|-- [codeblock]
+    |-- instance : 模块实例名称
+    |-- blockname : 代码块名称（Req，Serv端口名称）
+    |-- code : 模块实例时钟周期处理代码行Base64（可选）
+```
+*/
+
+/**
+ * @brief Parse a full module from an XML file.
+ * @param filepath The path to the XML file.
+ * @param out_module Output parameter to hold the parsed ModuleRaw.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg parseModuleFromXMLFile(const string &filepath, ModuleRaw &out_module) {
+    pugi::xml_document doc;
+    pugi::xml_parse_result result = doc.load_file(filepath.c_str());
+    if (!result) {
+        return EStr(EItemXMLFileOpenFailed, string("Failed to load XML file '") + filepath + "': " + result.description());
+    }
+
+    pugi::xml_node root = doc.child("module");
+    if (!root) {
+        return EStr(EItemXMLRootMissing, string("Missing root element 'module' in XML file '") + filepath + "'");
+    }
+
+    // version
+    pugi::xml_node version_node = root.child("version");
+    if (!version_node) {
+        return EStr(EItemXMLRequestMissing, string("Missing 'version' element in XML file '") + filepath + "'");
+    }
+    {
+        string version_str = version_node.text().as_string();
+        uint32_t major = 0, minor = 0, patch = 0;
+        if (sscanf(version_str.c_str(), "%u.%u.%u", &major, &minor, &patch) < 2) {
+            return EStr(EItemXMLRequestMissing, string("Invalid 'version' format in XML file '") + filepath + "': " + version_str);
+        }
+        if (make_tuple(major, minor, patch) != MemberVersion) {
+            return EStr(EItemXMLVersionMismatch, string("Version mismatch in XML file '") + filepath + "': " + version_str);
+        }
+    }
+
+    // name (required)
+    pugi::xml_node name_node = root.child("name");
+    if (!name_node) {
+        return EStr(EItemXMLRequestMissing, string("Missing 'name' element in XML file '") + filepath + "'");
+    }
+    out_module.name = name_node.text().as_string();
+
+    // comment (optional)
+    if (pugi::xml_node comment_node = root.child("comment")) {
+        out_module.comment = comment_node.text().as_string();
+    } else {
+        out_module.comment = "";
+    }
+
+    // localconf entries
+    for (pugi::xml_node lc_node : root.children("localconf")) {
+        LocalConfigRaw lc;
+        pugi::xml_node lc_name = lc_node.child("name");
+        if (!lc_name) return EStr(EItemXMLRequestMissing, string("Missing 'name' in localconf in XML file '") + filepath + "'");
+        lc.name = lc_name.text().as_string();
+        pugi::xml_node lc_value = lc_node.child("value");
+        if (!lc_value) return EStr(EItemXMLRequestMissing, string("Missing 'value' in localconf '") + lc.name + "' in XML file '" + filepath + "'");
+        lc.value = lc_value.text().as_string();
+        if (pugi::xml_node lc_comment = lc_node.child("comment")) lc.comment = lc_comment.text().as_string(); else lc.comment = "";
+        out_module.local_configs.push_back(std::move(lc));
+    }
+
+    // localbundle entries
+    for (pugi::xml_node lb_node : root.children("localbundle")) {
+        BundleItemRaw bundle;
+        pugi::xml_node bname = lb_node.child("name");
+        if (!bname) return EStr(EItemXMLRequestMissing, string("Missing 'name' in localbundle in XML file '") + filepath + "'");
+        bundle.name = bname.text().as_string();
+        if (pugi::xml_node bcomment = lb_node.child("comment")) bundle.comment = bcomment.text().as_string(); else bundle.comment = "";
+        bundle.isenum = lb_node.child("isenum");
+        bundle.isalias = lb_node.child("isalias");
+        for (pugi::xml_node mem_node : lb_node.children("member")) {
+            BundleMemberRaw mem;
+            pugi::xml_node mname = mem_node.child("name");
+            if (!mname) return EStr(EItemXMLRequestMissing, string("Missing 'name' in member of localbundle '") + bundle.name + "' in XML file '" + filepath + "'");
+            mem.name = mname.text().as_string();
+            if (pugi::xml_node mtype = mem_node.child("type")) mem.type = mtype.text().as_string(); else mem.type = "";
+            if (pugi::xml_node muint = mem_node.child("uintlen")) mem.uintlen = muint.text().as_string(); else mem.uintlen = "";
+            if (pugi::xml_node mval = mem_node.child("value")) mem.value = mval.text().as_string(); else mem.value = "";
+            if (pugi::xml_node mcomment = mem_node.child("comment")) mem.comment = mcomment.text().as_string(); else mem.comment = "";
+            for (pugi::xml_node dim_node : mem_node.children("dim")) mem.dims.push_back(dim_node.text().as_string());
+            bundle.members.push_back(std::move(mem));
+        }
+        out_module.local_bundles.push_back(std::move(bundle));
+    }
+
+    // Shared lambda for parsing request/service
+    auto parseReqServ = [&](const pugi::xml_node &node, bool isRequest) -> ErrorMsg {
+        ReqServRaw rs;
+        pugi::xml_node rs_name = node.child("name");
+        if (!rs_name) return EStr(EItemXMLRequestMissing, string("Missing 'name' in ") + (isRequest ? "request" : "service") + " in XML file '" + filepath + "'");
+        rs.name = rs_name.text().as_string();
+        if (pugi::xml_node rs_comment = node.child("comment")) rs.comment = rs_comment.text().as_string(); else rs.comment = "";
+        if (pugi::xml_node rs_array = node.child("array_size")) rs.arraysize = rs_array.text().as_string(); else rs.arraysize = "";
+        rs.handshake = node.child("handshake");
+        for (pugi::xml_node arg_node : node.children("arg")) {
+            ArgRaw a;
+            pugi::xml_node an = arg_node.child("name");
+            if (!an) return EStr(EItemXMLRequestMissing, string("Missing 'name' in arg of ") + rs.name + " in XML file '" + filepath + "'");
+            a.name = an.text().as_string();
+            pugi::xml_node at = arg_node.child("type");
+            if (!at) return EStr(EItemXMLRequestMissing, string("Missing 'type' in arg '") + a.name + "' in XML file '" + filepath + "'");
+            a.type = at.text().as_string();
+            if (pugi::xml_node ac = arg_node.child("comment")) a.comment = ac.text().as_string(); else a.comment = "";
+            rs.args.push_back(std::move(a));
+        }
+        for (pugi::xml_node ret_node : node.children("ret")) {
+            ArgRaw r;
+            pugi::xml_node rn = ret_node.child("name");
+            if (!rn) return EStr(EItemXMLRequestMissing, string("Missing 'name' in ret of ") + rs.name + " in XML file '" + filepath + "'");
+            r.name = rn.text().as_string();
+            pugi::xml_node rt = ret_node.child("type");
+            if (!rt) return EStr(EItemXMLRequestMissing, string("Missing 'type' in ret '") + r.name + "' in XML file '" + filepath + "'");
+            r.type = rt.text().as_string();
+            if (pugi::xml_node rc = ret_node.child("comment")) r.comment = rc.text().as_string(); else r.comment = "";
+            rs.rets.push_back(std::move(r));
+        }
+        if (isRequest) out_module.requests.push_back(std::move(rs)); else out_module.services.push_back(std::move(rs));
+        return "";
+    };
+
+    for (pugi::xml_node req_node : root.children("request")) {
+        ErrorMsg e = parseReqServ(req_node, true);
+        if (!e.empty()) return e;
+    }
+    for (pugi::xml_node serv_node : root.children("service")) {
+        ErrorMsg e = parseReqServ(serv_node, false);
+        if (!e.empty()) return e;
+    }
+
+    // pipein/pipeout
+    for (pugi::xml_node pin_node : root.children("pipein")) {
+        PipePortRaw p;
+        pugi::xml_node pn = pin_node.child("name");
+        if (!pn) return EStr(EItemXMLRequestMissing, string("Missing 'name' in pipein in XML file '") + filepath + "'");
+        p.name = pn.text().as_string();
+        if (pugi::xml_node pc = pin_node.child("comment")) p.comment = pc.text().as_string(); else p.comment = "";
+        pugi::xml_node pt = pin_node.child("type");
+        if (!pt) return EStr(EItemXMLRequestMissing, string("Missing 'type' in pipein '") + p.name + "' in XML file '" + filepath + "'");
+        p.type = pt.text().as_string();
+        out_module.pipe_inputs.push_back(std::move(p));
+    }
+    for (pugi::xml_node pout_node : root.children("pipeout")) {
+        PipePortRaw p;
+        pugi::xml_node pn = pout_node.child("name");
+        if (!pn) return EStr(EItemXMLRequestMissing, string("Missing 'name' in pipeout in XML file '") + filepath + "'");
+        p.name = pn.text().as_string();
+        if (pugi::xml_node pc = pout_node.child("comment")) p.comment = pc.text().as_string(); else p.comment = "";
+        pugi::xml_node pt = pout_node.child("type");
+        if (!pt) return EStr(EItemXMLRequestMissing, string("Missing 'type' in pipeout '") + p.name + "' in XML file '" + filepath + "'");
+        p.type = pt.text().as_string();
+        out_module.pipe_outputs.push_back(std::move(p));
+    }
+
+    // instance entries
+    for (pugi::xml_node inst_node : root.children("instance")) {
+        InstanceRaw inst;
+        pugi::xml_node iname = inst_node.child("name");
+        if (!iname) return EStr(EItemXMLRequestMissing, string("Missing 'name' in instance in XML file '") + filepath + "'");
+        inst.name = iname.text().as_string();
+        if (pugi::xml_node icomment = inst_node.child("comment")) inst.comment = icomment.text().as_string(); else inst.comment = "";
+        pugi::xml_node itype = inst_node.child("type");
+        if (!itype) return EStr(EItemXMLRequestMissing, string("Missing 'type' in instance '") + inst.name + "' in XML file '" + filepath + "'");
+        inst.module_name = itype.text().as_string();
+        for (pugi::xml_node cfg_node : inst_node.children("config")) {
+            LocalConfigRaw cfg;
+            pugi::xml_node cfname = cfg_node.child("name");
+            if (!cfname) return EStr(EItemXMLRequestMissing, string("Missing 'name' in config override of instance '") + inst.name + "' in XML file '" + filepath + "'");
+            cfg.name = cfname.text().as_string();
+            pugi::xml_node cfval = cfg_node.child("value");
+            if (!cfval) return EStr(EItemXMLRequestMissing, string("Missing 'value' in config '") + cfg.name + "' in XML file '" + filepath + "'");
+            cfg.value = cfval.text().as_string();
+            cfg.comment = "";
+            inst.local_config_overrides.push_back(std::move(cfg));
+        }
+        out_module.instances.push_back(std::move(inst));
+    }
+
+    // pipe entries
+    for (pugi::xml_node pipe_node : root.children("pipe")) {
+        PipeRaw pipe;
+        pugi::xml_node pname = pipe_node.child("name");
+        if (!pname) return EStr(EItemXMLRequestMissing, string("Missing 'name' in pipe in XML file '") + filepath + "'");
+        pipe.name = pname.text().as_string();
+        if (pugi::xml_node pcomment = pipe_node.child("comment")) pipe.comment = pcomment.text().as_string(); else pipe.comment = "";
+        pugi::xml_node ptype = pipe_node.child("type");
+        if (!ptype) return EStr(EItemXMLRequestMissing, string("Missing 'type' in pipe '") + pipe.name + "' in XML file '" + filepath + "'");
+        pipe.type = ptype.text().as_string();
+        if (pugi::xml_node pinsize = pipe_node.child("inputsize")) pipe.input_size = pinsize.text().as_string(); else pipe.input_size = "1";
+        if (pugi::xml_node poutsize = pipe_node.child("outputsize")) pipe.output_size = poutsize.text().as_string(); else pipe.output_size = "1";
+        if (pugi::xml_node pbufsize = pipe_node.child("buffersize")) pipe.buffer_size = pbufsize.text().as_string(); else pipe.buffer_size = "0";
+        if (pugi::xml_node platency = pipe_node.child("latency")) pipe.latency = platency.text().as_string(); else pipe.latency = "1";
+        pipe.has_handshake = pipe_node.child("handshake");
+        pipe.has_valid = pipe_node.child("valid");
+        out_module.pipes.push_back(std::move(pipe));
+    }
+
+    // reqconn/pipeconn (connection entries)
+    for (pugi::xml_node conn_node : root.children("reqconn")) {
+        ConnectionRaw conn;
+        pugi::xml_node cfrom = conn_node.child("frominstance");
+        if (!cfrom) return EStr(EItemXMLRequestMissing, string("Missing 'frominstance' in reqconn in XML file '") + filepath + "'");
+        conn.src_instance = cfrom.text().as_string();
+        pugi::xml_node cfromp = conn_node.child("fromport");
+        if (!cfromp) return EStr(EItemXMLRequestMissing, string("Missing 'fromport' in reqconn in XML file '") + filepath + "'");
+        conn.src_name = cfromp.text().as_string();
+        pugi::xml_node cto = conn_node.child("toinstance");
+        if (!cto) return EStr(EItemXMLRequestMissing, string("Missing 'toinstance' in reqconn in XML file '") + filepath + "'");
+        conn.dst_instance = cto.text().as_string();
+        pugi::xml_node ctop = conn_node.child("toport");
+        if (!ctop) return EStr(EItemXMLRequestMissing, string("Missing 'toport' in reqconn in XML file '") + filepath + "'");
+        conn.dst_name = ctop.text().as_string();
+        out_module.reqserv_connections.push_back(std::move(conn));
+    }
+    for (pugi::xml_node conn_node : root.children("pipeconn")) {
+        ConnectionRaw conn;
+        pugi::xml_node cfrom = conn_node.child("frominstance");
+        if (!cfrom) return EStr(EItemXMLRequestMissing, string("Missing 'frominstance' in pipeconn in XML file '") + filepath + "'");
+        conn.src_instance = cfrom.text().as_string();
+        pugi::xml_node cfromp = conn_node.child("fromport");
+        if (!cfromp) return EStr(EItemXMLRequestMissing, string("Missing 'fromport' in pipeconn in XML file '") + filepath + "'");
+        conn.src_name = cfromp.text().as_string();
+        pugi::xml_node cto = conn_node.child("toinstance");
+        if (!cto) return EStr(EItemXMLRequestMissing, string("Missing 'toinstance' in pipeconn in XML file '") + filepath + "'");
+        conn.dst_instance = cto.text().as_string();
+        pugi::xml_node ctop = conn_node.child("toport");
+        if (!ctop) return EStr(EItemXMLRequestMissing, string("Missing 'toport' in pipeconn in XML file '") + filepath + "'");
+        conn.dst_name = ctop.text().as_string();
+        out_module.pipe_connections.push_back(std::move(conn));
+    }
+
+    // stallconn/seqconn (sequence connection entries)
+    for (pugi::xml_node sconn_node : root.children("stallconn")) {
+        SeqConnectionRaw sconn;
+        pugi::xml_node sfrom = sconn_node.child("frominstance");
+        if (!sfrom) return EStr(EItemXMLRequestMissing, string("Missing 'frominstance' in stallconn in XML file '") + filepath + "'");
+        sconn.former_instance = sfrom.text().as_string();
+        pugi::xml_node sto = sconn_node.child("toinstance");
+        if (!sto) return EStr(EItemXMLRequestMissing, string("Missing 'toinstance' in stallconn in XML file '") + filepath + "'");
+        sconn.latter_instance = sto.text().as_string();
+        out_module.stall_connections.push_back(std::move(sconn));
+    }
+    for (pugi::xml_node sconn_node : root.children("seqconn")) {
+        SeqConnectionRaw sconn;
+        pugi::xml_node sfrom = sconn_node.child("frominstance");
+        if (!sfrom) return EStr(EItemXMLRequestMissing, string("Missing 'frominstance' in seqconn in XML file '") + filepath + "'");
+        sconn.former_instance = sfrom.text().as_string();
+        pugi::xml_node sto = sconn_node.child("toinstance");
+        if (!sto) return EStr(EItemXMLRequestMissing, string("Missing 'toinstance' in seqconn in XML file '") + filepath + "'");
+        sconn.latter_instance = sto.text().as_string();
+        out_module.sequence_connections.push_back(std::move(sconn));
+    }
+
+    // userheadercode (optional, Base64 encoded)
+    if (pugi::xml_node uhc_node = root.child("userheadercode")) {
+        string b64_uhc = uhc_node.text().as_string();
+        auto decoded_lines = base64DecodeLines(b64_uhc);
+        if (decoded_lines) {
+            out_module.user_header_code_lines.swap(*decoded_lines);
+        } else {
+            out_module.user_header_code_lines.clear();
+        }
+    }
+
+    // codeblock entries
+    for (pugi::xml_node cb_node : root.children("codeblock")) {
+        CodeblockRaw cb;
+        pugi::xml_node cbin = cb_node.child("instance");
+        if (!cbin) return EStr(EItemXMLRequestMissing, string("Missing 'instance' in codeblock in XML file '") + filepath + "'");
+        cb.instname = cbin.text().as_string();
+        pugi::xml_node cbbn = cb_node.child("blockname");
+        if (!cbbn) return EStr(EItemXMLRequestMissing, string("Missing 'blockname' in codeblock in XML file '") + filepath + "'");
+        cb.blockname = cbbn.text().as_string();
+        if (pugi::xml_node cbcode = cb_node.child("code")) {
+            string b64_code = cbcode.text().as_string();
+            auto decoded_code_lines = base64DecodeLines(b64_code);
+            if (decoded_code_lines) {
+                cb.code_lines.swap(*decoded_code_lines);
+            }
+        }
+        out_module.codeblocks.push_back(std::move(cb));
+    }
+
+    return "";
+}
+
+/**
+ * @brief Write a full module to an XML file.
+ * @param filepath The path to the XML file.
+ * @param module The ModuleRaw to write.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg writeModuleToXMLFile(const string &filepath, const ModuleRaw &module) {
+    pugi::xml_document doc;
+    pugi::xml_node root = doc.append_child("module");
+
+    // version
+    pugi::xml_node version_node = root.append_child("version");
+    char version_buf[64];
+    snprintf(version_buf, sizeof(version_buf), "%u.%u.%u",
+             std::get<0>(MemberVersion),
+             std::get<1>(MemberVersion),
+             std::get<2>(MemberVersion));
+    version_node.append_child(pugi::node_pcdata).set_value(version_buf);
+
+    // name
+    pugi::xml_node name_node = root.append_child("name");
+    name_node.append_child(pugi::node_pcdata).set_value(module.name.c_str());
+
+    // comment (optional)
+    if (!module.comment.empty()) {
+        pugi::xml_node comment_node = root.append_child("comment");
+        comment_node.append_child(pugi::node_pcdata).set_value(module.comment.c_str());
+    }
+
+    // localconf entries
+    for (const auto &lc : module.local_configs) {
+        pugi::xml_node lc_node = root.append_child("localconf");
+        pugi::xml_node lc_name = lc_node.append_child("name");
+        lc_name.append_child(pugi::node_pcdata).set_value(lc.name.c_str());
+        pugi::xml_node lc_value = lc_node.append_child("value");
+        lc_value.append_child(pugi::node_pcdata).set_value(lc.value.c_str());
+        if (!lc.comment.empty()) {
+            pugi::xml_node lc_comment = lc_node.append_child("comment");
+            lc_comment.append_child(pugi::node_pcdata).set_value(lc.comment.c_str());
+        }
+    }
+
+    // localbundle entries
+    for (const auto &bundle : module.local_bundles) {
+        pugi::xml_node bundle_node = root.append_child("localbundle");
+        pugi::xml_node bname = bundle_node.append_child("name");
+        bname.append_child(pugi::node_pcdata).set_value(bundle.name.c_str());
+        if (!bundle.comment.empty()) {
+            pugi::xml_node bcomment = bundle_node.append_child("comment");
+            bcomment.append_child(pugi::node_pcdata).set_value(bundle.comment.c_str());
+        }
+        if (bundle.isenum) bundle_node.append_child("isenum");
+        if (bundle.isalias) bundle_node.append_child("isalias");
+        for (const auto &member : bundle.members) {
+            pugi::xml_node mem_node = bundle_node.append_child("member");
+            pugi::xml_node mname = mem_node.append_child("name");
+            mname.append_child(pugi::node_pcdata).set_value(member.name.c_str());
+            if (!member.type.empty()) {
+                pugi::xml_node mtype = mem_node.append_child("type");
+                mtype.append_child(pugi::node_pcdata).set_value(member.type.c_str());
+            }
+            if (!member.uintlen.empty()) {
+                pugi::xml_node muint = mem_node.append_child("uintlen");
+                muint.append_child(pugi::node_pcdata).set_value(member.uintlen.c_str());
+            }
+            if (!member.value.empty()) {
+                pugi::xml_node mval = mem_node.append_child("value");
+                mval.append_child(pugi::node_pcdata).set_value(member.value.c_str());
+            }
+            if (!member.comment.empty()) {
+                pugi::xml_node mcomment = mem_node.append_child("comment");
+                mcomment.append_child(pugi::node_pcdata).set_value(member.comment.c_str());
+            }
+            for (const auto &dim : member.dims) {
+                pugi::xml_node dim_node = mem_node.append_child("dim");
+                dim_node.append_child(pugi::node_pcdata).set_value(dim.c_str());
+            }
+        }
+    }
+
+    // request entries
+    for (const auto &req : module.requests) {
+        pugi::xml_node req_node = root.append_child("request");
+        pugi::xml_node rname = req_node.append_child("name");
+        rname.append_child(pugi::node_pcdata).set_value(req.name.c_str());
+        if (!req.comment.empty()) {
+            pugi::xml_node rcomment = req_node.append_child("comment");
+            rcomment.append_child(pugi::node_pcdata).set_value(req.comment.c_str());
+        }
+        if (!req.arraysize.empty()) {
+            pugi::xml_node rarray = req_node.append_child("array_size");
+            rarray.append_child(pugi::node_pcdata).set_value(req.arraysize.c_str());
+        }
+        if (req.handshake) req_node.append_child("handshake");
+        for (const auto &arg : req.args) {
+            pugi::xml_node arg_node = req_node.append_child("arg");
+            pugi::xml_node aname = arg_node.append_child("name");
+            aname.append_child(pugi::node_pcdata).set_value(arg.name.c_str());
+            pugi::xml_node atype = arg_node.append_child("type");
+            atype.append_child(pugi::node_pcdata).set_value(arg.type.c_str());
+            if (!arg.comment.empty()) {
+                pugi::xml_node acomment = arg_node.append_child("comment");
+                acomment.append_child(pugi::node_pcdata).set_value(arg.comment.c_str());
+            }
+        }
+        for (const auto &ret : req.rets) {
+            pugi::xml_node ret_node = req_node.append_child("ret");
+            pugi::xml_node rname = ret_node.append_child("name");
+            rname.append_child(pugi::node_pcdata).set_value(ret.name.c_str());
+            pugi::xml_node rtype = ret_node.append_child("type");
+            rtype.append_child(pugi::node_pcdata).set_value(ret.type.c_str());
+            if (!ret.comment.empty()) {
+                pugi::xml_node rcomment = ret_node.append_child("comment");
+                rcomment.append_child(pugi::node_pcdata).set_value(ret.comment.c_str());
+            }
+        }
+    }
+
+    // service entries
+    for (const auto &serv : module.services) {
+        pugi::xml_node serv_node = root.append_child("service");
+        pugi::xml_node sname = serv_node.append_child("name");
+        sname.append_child(pugi::node_pcdata).set_value(serv.name.c_str());
+        if (!serv.comment.empty()) {
+            pugi::xml_node scomment = serv_node.append_child("comment");
+            scomment.append_child(pugi::node_pcdata).set_value(serv.comment.c_str());
+        }
+        if (!serv.arraysize.empty()) {
+            pugi::xml_node sarray = serv_node.append_child("array_size");
+            sarray.append_child(pugi::node_pcdata).set_value(serv.arraysize.c_str());
+        }
+        if (serv.handshake) serv_node.append_child("handshake");
+        for (const auto &arg : serv.args) {
+            pugi::xml_node arg_node = serv_node.append_child("arg");
+            pugi::xml_node aname = arg_node.append_child("name");
+            aname.append_child(pugi::node_pcdata).set_value(arg.name.c_str());
+            pugi::xml_node atype = arg_node.append_child("type");
+            atype.append_child(pugi::node_pcdata).set_value(arg.type.c_str());
+            if (!arg.comment.empty()) {
+                pugi::xml_node acomment = arg_node.append_child("comment");
+                acomment.append_child(pugi::node_pcdata).set_value(arg.comment.c_str());
+            }
+        }
+        for (const auto &ret : serv.rets) {
+            pugi::xml_node ret_node = serv_node.append_child("ret");
+            pugi::xml_node rname = ret_node.append_child("name");
+            rname.append_child(pugi::node_pcdata).set_value(ret.name.c_str());
+            pugi::xml_node rtype = ret_node.append_child("type");
+            rtype.append_child(pugi::node_pcdata).set_value(ret.type.c_str());
+            if (!ret.comment.empty()) {
+                pugi::xml_node rcomment = ret_node.append_child("comment");
+                rcomment.append_child(pugi::node_pcdata).set_value(ret.comment.c_str());
+            }
+        }
+    }
+
+    // pipein entries
+    for (const auto &pin : module.pipe_inputs) {
+        pugi::xml_node pin_node = root.append_child("pipein");
+        pugi::xml_node pname = pin_node.append_child("name");
+        pname.append_child(pugi::node_pcdata).set_value(pin.name.c_str());
+        if (!pin.comment.empty()) {
+            pugi::xml_node pcomment = pin_node.append_child("comment");
+            pcomment.append_child(pugi::node_pcdata).set_value(pin.comment.c_str());
+        }
+        pugi::xml_node ptype = pin_node.append_child("type");
+        ptype.append_child(pugi::node_pcdata).set_value(pin.type.c_str());
+    }
+
+    // pipeout entries
+    for (const auto &pout : module.pipe_outputs) {
+        pugi::xml_node pout_node = root.append_child("pipeout");
+        pugi::xml_node pname = pout_node.append_child("name");
+        pname.append_child(pugi::node_pcdata).set_value(pout.name.c_str());
+        if (!pout.comment.empty()) {
+            pugi::xml_node pcomment = pout_node.append_child("comment");
+            pcomment.append_child(pugi::node_pcdata).set_value(pout.comment.c_str());
+        }
+        pugi::xml_node ptype = pout_node.append_child("type");
+        ptype.append_child(pugi::node_pcdata).set_value(pout.type.c_str());
+    }
+
+    // instance entries
+    for (const auto &inst : module.instances) {
+        pugi::xml_node inst_node = root.append_child("instance");
+        pugi::xml_node iname = inst_node.append_child("name");
+        iname.append_child(pugi::node_pcdata).set_value(inst.name.c_str());
+        if (!inst.comment.empty()) {
+            pugi::xml_node icomment = inst_node.append_child("comment");
+            icomment.append_child(pugi::node_pcdata).set_value(inst.comment.c_str());
+        }
+        pugi::xml_node itype = inst_node.append_child("type");
+        itype.append_child(pugi::node_pcdata).set_value(inst.module_name.c_str());
+        for (const auto &cfg : inst.local_config_overrides) {
+            pugi::xml_node cfg_node = inst_node.append_child("config");
+            pugi::xml_node cfname = cfg_node.append_child("name");
+            cfname.append_child(pugi::node_pcdata).set_value(cfg.name.c_str());
+            pugi::xml_node cfval = cfg_node.append_child("value");
+            cfval.append_child(pugi::node_pcdata).set_value(cfg.value.c_str());
+        }
+    }
+
+    // pipe entries
+    for (const auto &pipe : module.pipes) {
+        pugi::xml_node pipe_node = root.append_child("pipe");
+        pugi::xml_node pname = pipe_node.append_child("name");
+        pname.append_child(pugi::node_pcdata).set_value(pipe.name.c_str());
+        if (!pipe.comment.empty()) {
+            pugi::xml_node pcomment = pipe_node.append_child("comment");
+            pcomment.append_child(pugi::node_pcdata).set_value(pipe.comment.c_str());
+        }
+        pugi::xml_node ptype = pipe_node.append_child("type");
+        ptype.append_child(pugi::node_pcdata).set_value(pipe.type.c_str());
+        if (!pipe.input_size.empty()) {
+            pugi::xml_node pinsize = pipe_node.append_child("inputsize");
+            pinsize.append_child(pugi::node_pcdata).set_value(pipe.input_size.c_str());
+        }
+        if (!pipe.output_size.empty()) {
+            pugi::xml_node poutsize = pipe_node.append_child("outputsize");
+            poutsize.append_child(pugi::node_pcdata).set_value(pipe.output_size.c_str());
+        }
+        if (!pipe.buffer_size.empty()) {
+            pugi::xml_node pbufsize = pipe_node.append_child("buffersize");
+            pbufsize.append_child(pugi::node_pcdata).set_value(pipe.buffer_size.c_str());
+        }
+        if (!pipe.latency.empty()) {
+            pugi::xml_node platency = pipe_node.append_child("latency");
+            platency.append_child(pugi::node_pcdata).set_value(pipe.latency.c_str());
+        }
+        if (pipe.has_handshake) pipe_node.append_child("handshake");
+        if (pipe.has_valid) pipe_node.append_child("valid");
+    }
+
+    // reqconn entries
+    for (const auto &conn : module.reqserv_connections) {
+        pugi::xml_node conn_node = root.append_child("reqconn");
+        pugi::xml_node cfrom = conn_node.append_child("frominstance");
+        cfrom.append_child(pugi::node_pcdata).set_value(conn.src_instance.c_str());
+        pugi::xml_node cfromp = conn_node.append_child("fromport");
+        cfromp.append_child(pugi::node_pcdata).set_value(conn.src_name.c_str());
+        pugi::xml_node cto = conn_node.append_child("toinstance");
+        cto.append_child(pugi::node_pcdata).set_value(conn.dst_instance.c_str());
+        pugi::xml_node ctop = conn_node.append_child("toport");
+        ctop.append_child(pugi::node_pcdata).set_value(conn.dst_name.c_str());
+    }
+
+    // pipeconn entries
+    for (const auto &conn : module.pipe_connections) {
+        pugi::xml_node conn_node = root.append_child("pipeconn");
+        pugi::xml_node cfrom = conn_node.append_child("frominstance");
+        cfrom.append_child(pugi::node_pcdata).set_value(conn.src_instance.c_str());
+        pugi::xml_node cfromp = conn_node.append_child("fromport");
+        cfromp.append_child(pugi::node_pcdata).set_value(conn.src_name.c_str());
+        pugi::xml_node cto = conn_node.append_child("toinstance");
+        cto.append_child(pugi::node_pcdata).set_value(conn.dst_instance.c_str());
+        pugi::xml_node ctop = conn_node.append_child("toport");
+        ctop.append_child(pugi::node_pcdata).set_value(conn.dst_name.c_str());
+    }
+
+    // stallconn entries
+    for (const auto &sconn : module.stall_connections) {
+        pugi::xml_node sconn_node = root.append_child("stallconn");
+        pugi::xml_node sfrom = sconn_node.append_child("frominstance");
+        sfrom.append_child(pugi::node_pcdata).set_value(sconn.former_instance.c_str());
+        pugi::xml_node sto = sconn_node.append_child("toinstance");
+        sto.append_child(pugi::node_pcdata).set_value(sconn.latter_instance.c_str());
+    }
+
+    // seqconn entries
+    for (const auto &sconn : module.sequence_connections) {
+        pugi::xml_node sconn_node = root.append_child("seqconn");
+        pugi::xml_node sfrom = sconn_node.append_child("frominstance");
+        sfrom.append_child(pugi::node_pcdata).set_value(sconn.former_instance.c_str());
+        pugi::xml_node sto = sconn_node.append_child("toinstance");
+        sto.append_child(pugi::node_pcdata).set_value(sconn.latter_instance.c_str());
+    }
+
+    // userheadercode (optional, Base64 encoded)
+    if (!module.user_header_code_lines.empty()) {
+        string b64_uhc = base64Encode(module.user_header_code_lines);
+        pugi::xml_node uhc_node = root.append_child("userheadercode");
+        uhc_node.append_child(pugi::node_pcdata).set_value(b64_uhc.c_str());
+    }
+
+    // codeblock entries
+    for (const auto &cb : module.codeblocks) {
+        pugi::xml_node cb_node = root.append_child("codeblock");
+        pugi::xml_node cbin = cb_node.append_child("instance");
+        cbin.append_child(pugi::node_pcdata).set_value(cb.instname.c_str());
+        pugi::xml_node cbbn = cb_node.append_child("blockname");
+        cbbn.append_child(pugi::node_pcdata).set_value(cb.blockname.c_str());
+        if (!cb.code_lines.empty()) {
+            string b64_code = base64Encode(cb.code_lines);
+            pugi::xml_node cbcode = cb_node.append_child("code");
+            cbcode.append_child(pugi::node_pcdata).set_value(b64_code.c_str());
+        }
+    }
+
+    // Save to file
+    bool saveSucceeded = doc.save_file(filepath.c_str(), PUGIXML_TEXT("\t"), pugi::format_default | pugi::format_no_declaration);
+    if (!saveSucceeded) {
+        return EStr(EItemXMLFileOpenFailed, string("Failed to save XML file '") + filepath + "'");
+    }
+
+    return "";
+}
 
 } // namespace serialize

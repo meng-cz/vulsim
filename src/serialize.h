@@ -85,4 +85,130 @@ ErrorMsg parseBundleLibFromXMLFile(const string &filepath, vector<BundleItemRaw>
  */
 ErrorMsg writeBundleLibToXMLFile(const string &filepath, const vector<BundleItemRaw> &bundles);
 
+typedef struct {
+    string  name;
+    string  type;
+    string  comment;
+} ArgRaw;
+
+typedef struct {
+    string          name;
+    string          comment;
+    vector<ArgRaw>  args;
+    vector<ArgRaw>  rets;
+    string          arraysize;
+    bool            handshake;
+} ReqServRaw;
+
+typedef struct {
+    string  name;
+    string  type;
+    string  comment;
+} PipePortRaw;
+
+typedef struct {
+    string  name;
+    string  value;
+    string  comment;
+} LocalConfigRaw;
+
+typedef struct {
+    string  name;
+    string  comment;
+    vector<LocalConfigRaw>      local_configs;
+    vector<BundleItemRaw>       local_bundles;
+    vector<ReqServRaw>          requests;
+    vector<ReqServRaw>          services;
+    vector<PipePortRaw>         pipe_inputs;
+    vector<PipePortRaw>         pipe_outputs;
+} ModuleBaseRaw;
+
+typedef struct {
+    string          name;
+    string          module_name;
+    string          comment;
+    vector<LocalConfigRaw>  local_config_overrides;
+} InstanceRaw;
+
+typedef struct {
+    string  name;
+    string  type;
+    string  comment;
+    string  input_size;
+    string  output_size;
+    string  buffer_size;
+    string  latency;
+    bool    has_handshake;
+    bool    has_valid;
+} PipeRaw;
+
+typedef struct {
+    string  src_instance;
+    string  src_name;
+    string  dst_instance;
+    string  dst_name;
+} ConnectionRaw;
+
+typedef struct {
+    string  former_instance;
+    string  latter_instance;
+} SeqConnectionRaw;
+
+typedef struct {
+    string instname;
+    string blockname;
+    vector<string> code_lines;
+} CodeblockRaw;
+
+typedef struct {
+    string  name;
+    string  comment;
+    vector<LocalConfigRaw>      local_configs;
+    vector<BundleItemRaw>       local_bundles;
+    vector<ReqServRaw>          requests;
+    vector<ReqServRaw>          services;
+    vector<PipePortRaw>         pipe_inputs;
+    vector<PipePortRaw>         pipe_outputs;
+    vector<InstanceRaw>         instances;
+    vector<PipeRaw>             pipes;
+    vector<ConnectionRaw>       reqserv_connections;
+    vector<ConnectionRaw>       pipe_connections;
+    vector<SeqConnectionRaw>    stall_connections;
+    vector<SeqConnectionRaw>    sequence_connections;
+    vector<CodeblockRaw>        codeblocks;
+    vector<string>              user_header_code_lines;
+} ModuleRaw;
+
+/**
+ * @brief Parse a base module from an XML file.
+ * @param filepath The path to the XML file.
+ * @param out_module Output parameter to hold the parsed VulModuleBase.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg parseModuleBaseFromXMLFile(const string &filepath, ModuleBaseRaw &out_module);
+
+/**
+ * @brief Write a base module to an XML file.
+ * @param filepath The path to the XML file.
+ * @param module The ModuleBaseRaw to write.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg writeModuleBaseToXMLFile(const string &filepath, const ModuleBaseRaw &module);
+
+/**
+ * @brief Parse a full module from an XML file.
+ * @param filepath The path to the XML file.
+ * @param out_module Output parameter to hold the parsed ModuleRaw.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg parseModuleFromXMLFile(const string &filepath, ModuleRaw &out_module);
+
+/**
+ * @brief Write a full module to an XML file.
+ * @param filepath The path to the XML file.
+ * @param module The ModuleRaw to write.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg writeModuleToXMLFile(const string &filepath, const ModuleRaw &module);
+
 } // namespace serialize
