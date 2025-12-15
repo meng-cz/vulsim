@@ -91,17 +91,17 @@ ErrorMsg VulModuleBase::updateDynamicReferences() {
                 _dyn_referenced_bundles.insert(ret.type);
             }
         }
-        if (!rs.array_size.empty()) {
-            string err;
-            uint32_t errpos = 0;
-            auto conf_refs = config_parser::parseReferencedIdentifier(rs.array_size, errpos, err);
-            if (!err.empty()) {
-                return EStr(EItemModConfInvalidValue, string("Invalid array size expression for '") + rs.name + "': " + err);
-            }
-            for (const auto &cn : *conf_refs) {
-                _dyn_referenced_configs.insert(cn);
-            }
-        }
+        // if (!rs.array_size.empty()) {
+        //     string err;
+        //     uint32_t errpos = 0;
+        //     auto conf_refs = config_parser::parseReferencedIdentifier(rs.array_size, errpos, err);
+        //     if (!err.empty()) {
+        //         return EStr(EItemModConfInvalidValue, string("Invalid array size expression for '") + rs.name + "': " + err);
+        //     }
+        //     for (const auto &cn : *conf_refs) {
+        //         _dyn_referenced_configs.insert(cn);
+        //     }
+        // }
         return "";
     };
     for (const auto &req_entry : requests) {
@@ -634,7 +634,7 @@ ErrorMsg VulModule::_4_validateReqServConnections() const {
         .comment = "Clear the pipe",
         .args = {},
         .rets = {},
-        .array_size = "",
+        // .array_size = "",
         .has_handshake = false
     };
 

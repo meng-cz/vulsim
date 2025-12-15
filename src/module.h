@@ -52,11 +52,12 @@ public:
     Comment        comment;
     vector<VulArg>  args;
     vector<VulArg>  rets;
-    ConfigValue     array_size; // empty if not an array request
+    // ConfigValue     array_size; // empty if not an array request
     bool            has_handshake;
 
     inline bool allowMultiConnect() const {
-        return (array_size.empty() && !has_handshake && rets.empty());
+        // return (array_size.empty() && !has_handshake && rets.empty());
+        return (!has_handshake && rets.empty());
     }
 
     /**
@@ -67,9 +68,9 @@ public:
      */
     inline bool match(const VulReqServ &a) const {
         if (a.has_handshake != has_handshake) return false;
-        if (!a.array_size.empty() || !array_size.empty()) {
-            return config_parser::tokenEq(a.array_size, array_size);
-        }
+        // if (!a.array_size.empty() || !array_size.empty()) {
+        //     return config_parser::tokenEq(a.array_size, array_size);
+        // }
         if (a.args.size() != args.size()) return false;
         for (size_t i = 0; i < a.args.size(); ++i) {
             if (a.args[i].type != args[i].type) return false;
@@ -278,7 +279,19 @@ public:
      * @brief Validate the module definition for internal consistency and correctness.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    ErrorMsg validateAll() const;
+    inline ErrorMsg validateAll() const {
+        ErrorMsg err;
+
+        if (!(err = _0_validateBrokenIndexes()).empty()) return err;
+        if (!(err = _1_validateNameConflicts()).empty()) return err;
+        if (!(err = _2_validateLocalConfigBundleDefinitions()).empty()) return err;
+        if (!(err = _3_validateInstanceDefinitions()).empty()) return err;
+        if (!(err = _4_validateReqServConnections()).empty()) return err;
+        if (!(err = _5_validatePipeConnections()).empty()) return err;
+        if (!(err = _6_validateStallSequenceConnections()).empty()) return err;
+
+        return "";
+    }
 
     /**
      * @brief Validate broken indexes in the module definition.
