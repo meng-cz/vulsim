@@ -135,3 +135,8 @@ constexpr uint32_t EItemModUConnInvalidTop = 32605;
 constexpr uint32_t EItemModUConnSelfLoop = 32606;
 constexpr uint32_t EItemModUConnLoop = 32607;
 
+constexpr uint32_t ErrXML = 40000;
+constexpr uint32_t EItemXMLFileOpenFailed = 40000;
+constexpr uint32_t EItemXMLVersionMismatch = 40001;
+constexpr uint32_t EItemXMLRootMissing = 40002;
+constexpr uint32_t EItemXMLRequestMissing = 40003;
