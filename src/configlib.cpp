@@ -49,6 +49,105 @@ shared_ptr<VulConfigLib> VulConfigLib::getInstance() {
 }
 
 /**
+ * @brief Build the config reference tree (bidirectional) for a given config item.
+ * @param root_config_name The name of the root config item.
+ * @param out_root_node Output parameter to hold the root node of the tree.
+ */
+void VulConfigLib::buildConfigReferenceTree(const ConfigName &root_config_name, shared_ptr<ConfigTreeBidirectionalNode> &out_root_node) const {
+    out_root_node.reset();
+
+    // Root must exist
+    auto it_root = config_items.find(root_config_name);
+    if (it_root == config_items.end()) {
+        out_root_node = nullptr;
+        return;
+    }
+
+    // Create root
+    auto root_node = std::make_shared<ConfigTreeBidirectionalNode>();
+    root_node->item = it_root->second.item;
+
+    // Downward: build children-only (dependencies this config references)
+    std::function<void(const ConfigName&, const std::shared_ptr<ConfigTreeBidirectionalNode>&, std::unordered_set<ConfigName>&)> buildDown;
+    buildDown = [&](const ConfigName &name,
+                    const std::shared_ptr<ConfigTreeBidirectionalNode> &node,
+                    std::unordered_set<ConfigName> &path) {
+        auto it = config_items.find(name);
+        if (it == config_items.end()) return;
+        const auto &entry = it->second;
+        for (const auto &dep : entry.references) {
+            if (path.count(dep)) {
+                // Cycle on this path: create a leaf and stop deeper
+                auto cyc = std::make_shared<ConfigTreeBidirectionalNode>();
+                auto jt = config_items.find(dep);
+                if (jt != config_items.end()) {
+                    cyc->item = jt->second.item;
+                } else {
+                    // ignore non-existing
+                    continue;
+                }
+                node->children.push_back(cyc);
+                continue;
+            }
+            auto jt = config_items.find(dep);
+            if (jt == config_items.end()) continue; // ignore library-external
+            auto child = std::make_shared<ConfigTreeBidirectionalNode>();
+            child->item = jt->second.item;
+            node->children.push_back(child); // do not populate child->parents for downward tree
+
+            auto next_path = path;
+            next_path.insert(dep);
+            buildDown(dep, child, next_path);
+        }
+    };
+
+    // Upward: build parents-only (configs that depend on this one)
+    std::function<void(const ConfigName&, const std::shared_ptr<ConfigTreeBidirectionalNode>&, std::unordered_set<ConfigName>&)> buildUp;
+    buildUp = [&](const ConfigName &name,
+                  const std::shared_ptr<ConfigTreeBidirectionalNode> &node,
+                  std::unordered_set<ConfigName> &path) {
+        auto it = config_items.find(name);
+        if (it == config_items.end()) return;
+        const auto &entry = it->second;
+        for (const auto &par : entry.reverse_references) {
+            if (path.count(par)) {
+                // Cycle on this path: create a leaf and stop deeper
+                auto cyc = std::make_shared<ConfigTreeBidirectionalNode>();
+                auto jt = config_items.find(par);
+                if (jt != config_items.end()) {
+                    cyc->item = jt->second.item;
+                } else {
+                    // ignore non-existing
+                    continue;
+                }
+                node->parents.push_back(cyc);
+                continue;
+            }
+            auto jt = config_items.find(par);
+            if (jt == config_items.end()) continue; // ignore library-external
+            auto parent = std::make_shared<ConfigTreeBidirectionalNode>();
+            parent->item = jt->second.item;
+            node->parents.push_back(parent); // do not populate parent->children for upward tree
+
+            auto next_path = path;
+            next_path.insert(par);
+            buildUp(par, parent, next_path);
+        }
+    };
+
+    {
+        std::unordered_set<ConfigName> down_path; down_path.insert(root_config_name);
+        buildDown(root_config_name, root_node, down_path);
+    }
+    {
+        std::unordered_set<ConfigName> up_path; up_path.insert(root_config_name);
+        buildUp(root_config_name, root_node, up_path);
+    }
+
+    out_root_node = root_node;
+}
+
+/**
  * @brief List all config groups/components in the config library.
  * @param out_groups Output vector to hold the names of all config groups.
  */

@@ -70,6 +70,14 @@ public:
     bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
 };
 
+class BundleTreeBidirectionalNode {
+public:
+    vector<shared_ptr<BundleTreeBidirectionalNode>>  parents;
+    vector<shared_ptr<BundleTreeBidirectionalNode>>  children;
+    BundleName  name;
+    Comment     comment;
+};
+
 class VulBundleLib {
 
 public:
@@ -89,6 +97,13 @@ public:
     inline bool checkNameConflict(const BundleName &name) const {
         return bundles.find(name) != bundles.end();
     }
+
+    /**
+     * @brief Build the bundle reference tree (bidirectional) for a given bundle.
+     * @param root_bundle_name The name of the root bundle.
+     * @param out_root_node Output parameter to hold the root node of the tree.
+     */
+    void buildBundleReferenceTree(const BundleName &root_bundle_name, shared_ptr<BundleTreeBidirectionalNode> &out_root_node) const;
 
     /**
      * @brief List all bundle tags in the bundle library.

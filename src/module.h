@@ -108,6 +108,23 @@ typedef struct {
     Comment             comment;
 } VulLocalConfigItem;
 
+class ModuleTreeNode {
+public:
+    vector<shared_ptr<ModuleTreeNode>>  submodules;
+    ModuleName  name;
+    Comment     comment;
+    bool        is_external;
+};
+
+class ModuleTreeBidirectionalNode {
+public:
+    vector<shared_ptr<ModuleTreeBidirectionalNode>>  parents;
+    vector<shared_ptr<ModuleTreeBidirectionalNode>>  children;
+    ModuleName  name;
+    Comment     comment;
+    bool        is_external;
+};
+
 class VulModuleBase {
 public:
     /**
@@ -115,6 +132,21 @@ public:
      * @return A shared_ptr to the module library instance.
      */
     static shared_ptr<unordered_map<ModuleName, shared_ptr<VulModuleBase>>> getModuleLibInstance();
+
+    /**
+     * @brief Build the module tree from the module library.
+     * Must be called after 'updateDynamicReferences' are called for all modules.
+     * @param root_modules Output parameter to hold the root modules of each tree.
+     */
+    static void buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_modules);
+
+    /**
+     * @brief Build a single module reference tree (bidirectional) from the module library.
+     * Must be called after 'updateDynamicReferences' are called for all modules.
+     * @param root_module_name The name of the root module.
+     * @param out_root_node Output parameter to hold the root node of the tree. Nullptr if the module does not exist.
+     */
+    static void buildSingleModuleReferenceTree(const ModuleName &root_module_name, shared_ptr<ModuleTreeBidirectionalNode> &out_root_node);
 
     ModuleName                  name;
     Comment                     comment;
@@ -135,13 +167,15 @@ public:
      */
     virtual ErrorMsg updateDynamicReferences();
 
-    virtual bool isExternalModule() const { return true; } 
+    virtual bool isExternalModule() const = 0; 
 };
 
 typedef string EModuleDir;
 
 class VulExternalModule : public VulModuleBase {
 public:
+    virtual bool isExternalModule() const override { return true; } 
+
     EModuleDir      directory;
 };
 
@@ -219,6 +253,8 @@ class VulModule : public VulModuleBase {
 public:
 
     inline static const InstanceName TopInterface = string("__top__");
+
+    virtual bool isExternalModule() const override { return false; }
 
     bool is_hpp_generated = true; // TODO: always true for now
     bool is_inline_generated = true;

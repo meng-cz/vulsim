@@ -46,6 +46,106 @@ shared_ptr<VulBundleLib> VulBundleLib::getInstance() {
 }
 
 /**
+ * @brief Build the bundle reference tree (bidirectional) for a given bundle.
+ * @param root_bundle_name The name of the root bundle.
+ * @param out_root_node Output parameter to hold the root node of the tree.
+ */
+void VulBundleLib::buildBundleReferenceTree(const BundleName &root_bundle_name, shared_ptr<BundleTreeBidirectionalNode> &out_root_node) const {
+    out_root_node.reset();
+
+    auto it_root = bundles.find(root_bundle_name);
+    if (it_root == bundles.end()) {
+        out_root_node = nullptr;
+        return;
+    }
+
+    auto root = make_shared<BundleTreeBidirectionalNode>();
+    root->name = it_root->second.item.name;
+    root->comment = it_root->second.item.comment;
+
+    // Downward: follow 'references' to children-only
+    std::function<void(const BundleName&, const shared_ptr<BundleTreeBidirectionalNode>&, std::unordered_set<BundleName>&)> buildDown;
+    buildDown = [&](const BundleName &name,
+                    const shared_ptr<BundleTreeBidirectionalNode> &node,
+                    std::unordered_set<BundleName> &path) {
+        auto it = bundles.find(name);
+        if (it == bundles.end()) return;
+        const auto &entry = it->second;
+        for (const auto &dep : entry.references) {
+            if (path.count(dep)) {
+                auto cyc = make_shared<BundleTreeBidirectionalNode>();
+                auto jt = bundles.find(dep);
+                if (jt != bundles.end()) {
+                    cyc->name = jt->second.item.name;
+                    cyc->comment = jt->second.item.comment;
+                } else {
+                    continue;
+                }
+                node->children.push_back(cyc);
+                continue;
+            }
+            auto jt = bundles.find(dep);
+            if (jt == bundles.end()) continue; // ignore library-external
+            auto child = make_shared<BundleTreeBidirectionalNode>();
+            child->name = jt->second.item.name;
+            child->comment = jt->second.item.comment;
+            // Do NOT set child->parents for downward subtree
+            node->children.push_back(child);
+
+            auto next_path = path;
+            next_path.insert(dep);
+            buildDown(dep, child, next_path);
+        }
+    };
+
+    // Upward: follow 'reverse_references' to parents-only
+    std::function<void(const BundleName&, const shared_ptr<BundleTreeBidirectionalNode>&, std::unordered_set<BundleName>&)> buildUp;
+    buildUp = [&](const BundleName &name,
+                  const shared_ptr<BundleTreeBidirectionalNode> &node,
+                  std::unordered_set<BundleName> &path) {
+        auto it = bundles.find(name);
+        if (it == bundles.end()) return;
+        const auto &entry = it->second;
+        for (const auto &par : entry.reverse_references) {
+            if (path.count(par)) {
+                auto cyc = make_shared<BundleTreeBidirectionalNode>();
+                auto jt = bundles.find(par);
+                if (jt != bundles.end()) {
+                    cyc->name = jt->second.item.name;
+                    cyc->comment = jt->second.item.comment;
+                } else {
+                    continue;
+                }
+                node->parents.push_back(cyc);
+                continue;
+            }
+            auto jt = bundles.find(par);
+            if (jt == bundles.end()) continue; // ignore library-external
+            auto parent = make_shared<BundleTreeBidirectionalNode>();
+            parent->name = jt->second.item.name;
+            parent->comment = jt->second.item.comment;
+            // Do NOT set parent->children for upward subtree
+            node->parents.push_back(parent);
+
+            auto next_path = path;
+            next_path.insert(par);
+            buildUp(par, parent, next_path);
+        }
+    };
+
+    {
+        std::unordered_set<BundleName> down_path; down_path.insert(root->name);
+        buildDown(root->name, root, down_path);
+    }
+    {
+        std::unordered_set<BundleName> up_path; up_path.insert(root->name);
+        buildUp(root->name, root, up_path);
+    }
+
+    out_root_node = root;
+}
+
+/**
  * @brief List all bundle tags in the bundle library.
  * @param out_tags Output vector to hold the names of all bundle tags.
  */

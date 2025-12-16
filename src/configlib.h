@@ -51,6 +51,13 @@ typedef struct {
     bool            is_external; // whether this config item is imported from external definition
 } VulConfigItem;
 
+class ConfigTreeBidirectionalNode {
+public:
+    vector<shared_ptr<ConfigTreeBidirectionalNode>>  parents;
+    vector<shared_ptr<ConfigTreeBidirectionalNode>>  children;
+    VulConfigItem   item;
+};
+
 class VulConfigLib {
 
 public:
@@ -70,6 +77,13 @@ public:
     inline bool checkNameConflict(const ConfigName &name) const {
         return config_items.find(name) != config_items.end();
     }
+
+    /**
+     * @brief Build the config reference tree (bidirectional) for a given config item.
+     * @param root_config_name The name of the root config item.
+     * @param out_root_node Output parameter to hold the root node of the tree.
+     */
+    void buildConfigReferenceTree(const ConfigName &root_config_name, shared_ptr<ConfigTreeBidirectionalNode> &out_root_node) const;
 
     /**
      * @brief List all config groups/components in the config library.
