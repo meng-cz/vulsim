@@ -127,26 +127,6 @@ public:
 
 class VulModuleBase {
 public:
-    /**
-     * @brief Get the singleton instance of the module library.
-     * @return A shared_ptr to the module library instance.
-     */
-    static shared_ptr<unordered_map<ModuleName, shared_ptr<VulModuleBase>>> getModuleLibInstance();
-
-    /**
-     * @brief Build the module tree from the module library.
-     * Must be called after 'updateDynamicReferences' are called for all modules.
-     * @param root_modules Output parameter to hold the root modules of each tree.
-     */
-    static void buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_modules);
-
-    /**
-     * @brief Build a single module reference tree (bidirectional) from the module library.
-     * Must be called after 'updateDynamicReferences' are called for all modules.
-     * @param root_module_name The name of the root module.
-     * @param out_root_node Output parameter to hold the root node of the tree. Nullptr if the module does not exist.
-     */
-    static void buildSingleModuleReferenceTree(const ModuleName &root_module_name, shared_ptr<ModuleTreeBidirectionalNode> &out_root_node);
 
     ModuleName                  name;
     Comment                     comment;
@@ -169,6 +149,27 @@ public:
 
     virtual bool isExternalModule() const = 0; 
 };
+
+class VulModuleLib {
+public:
+    unordered_map<ModuleName, shared_ptr<VulModuleBase>>   modules;
+
+    /**
+     * @brief Build the module tree from the module library.
+     * Must be called after 'updateDynamicReferences' are called for all modules.
+     * @param root_modules Output parameter to hold the root modules of each tree.
+     */
+    void buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_modules) const;
+
+    /**
+     * @brief Build a single module reference tree (bidirectional) from the module library.
+     * Must be called after 'updateDynamicReferences' are called for all modules.
+     * @param root_module_name The name of the root module.
+     * @param out_root_node Output parameter to hold the root node of the tree. Nullptr if the module does not exist.
+     */
+    void buildSingleModuleReferenceTree(const ModuleName &root_module_name, shared_ptr<ModuleTreeBidirectionalNode> &out_root_node) const;
+};
+
 
 typedef string EModuleDir;
 
@@ -315,16 +316,16 @@ public:
      * @brief Validate the module definition for internal consistency and correctness.
      * @return An ErrorMsg indicating failure, empty if success.
      */
-    inline ErrorMsg validateAll() const {
+    inline ErrorMsg validateAll(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const {
         ErrorMsg err;
 
-        if (!(err = _0_validateBrokenIndexes()).empty()) return err;
-        if (!(err = _1_validateNameConflicts()).empty()) return err;
-        if (!(err = _2_validateLocalConfigBundleDefinitions()).empty()) return err;
-        if (!(err = _3_validateInstanceDefinitions()).empty()) return err;
-        if (!(err = _4_validateReqServConnections()).empty()) return err;
-        if (!(err = _5_validatePipeConnections()).empty()) return err;
-        if (!(err = _6_validateStallSequenceConnections()).empty()) return err;
+        if (!(err = _0_validateBrokenIndexes(config_lib, bundle_lib, module_lib)).empty()) return err;
+        if (!(err = _1_validateNameConflicts(config_lib, bundle_lib, module_lib)).empty()) return err;
+        if (!(err = _2_validateLocalConfigBundleDefinitions(config_lib, bundle_lib, module_lib)).empty()) return err;
+        if (!(err = _3_validateInstanceDefinitions(config_lib, bundle_lib, module_lib)).empty()) return err;
+        if (!(err = _4_validateReqServConnections(config_lib, bundle_lib, module_lib)).empty()) return err;
+        if (!(err = _5_validatePipeConnections(config_lib, bundle_lib, module_lib)).empty()) return err;
+        if (!(err = _6_validateStallSequenceConnections(config_lib, bundle_lib, module_lib)).empty()) return err;
 
         return "";
     }
@@ -332,7 +333,7 @@ public:
     /**
      * @brief Validate broken indexes in the module definition.
      */
-    ErrorMsg _0_validateBrokenIndexes() const;
+    ErrorMsg _0_validateBrokenIndexes(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
     /**
      * @brief Validate name conflicts within the module.
@@ -340,7 +341,7 @@ public:
      * 2. Check name conflicts within local scope.
      * 3. Check name conflicts from local name to global scope (config, bundle, module).
      */
-    ErrorMsg _1_validateNameConflicts() const;
+    ErrorMsg _1_validateNameConflicts(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
     /**
      * @brief Validate local config value and bundle definitions.
@@ -349,14 +350,14 @@ public:
      * 3. Check storages definitions, similar to bundle members.
      * 4. Check local bundle referencing loop.
      */
-    ErrorMsg _2_validateLocalConfigBundleDefinitions() const;
+    ErrorMsg _2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
     /**
      * @brief Validate instance definitions.
      * 1. Check instance module existence.
      * 2. Check local config overrides valid for each instance.
      */
-    ErrorMsg _3_validateInstanceDefinitions() const;
+    ErrorMsg _3_validateInstanceDefinitions(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
     /**
      * @brief Validate request-service connections.
@@ -369,7 +370,7 @@ public:
      *     b. Connected to child service with matching signature
      *     c. Implemented with request code lines
      */
-    ErrorMsg _4_validateReqServConnections() const;
+    ErrorMsg _4_validateReqServConnections(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
     /**
      * @brief Validate pipe connections.
@@ -378,7 +379,7 @@ public:
      *     a. Connected to top interface pipe port with matching type
      *     b. Connected to pipe instance with matching type
      */
-    ErrorMsg _5_validatePipeConnections() const;
+    ErrorMsg _5_validatePipeConnections(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
     /**
      * @brief Validate stall and sequence connections.
@@ -386,7 +387,7 @@ public:
      * 2. Check no loop in stall & sequence connections.
      * 3. Check no loop in stall connections with TopInterface.
      */
-    ErrorMsg _6_validateStallSequenceConnections() const;
+    ErrorMsg _6_validateStallSequenceConnections(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
 
 };

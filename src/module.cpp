@@ -28,36 +28,24 @@ using std::make_shared;
 using std::function;
 
 /**
- * @brief Get the singleton instance of the module library.
- * @return A shared_ptr to the module library instance.
- */
-shared_ptr<unordered_map<ModuleName, shared_ptr<VulModuleBase>>> VulModuleBase::getModuleLibInstance() {
-    static shared_ptr<unordered_map<ModuleName, shared_ptr<VulModuleBase>>> _singleton_instance;
-    if (!_singleton_instance) {
-        _singleton_instance = make_shared<unordered_map<ModuleName, shared_ptr<VulModuleBase>>>();
-    }
-    return _singleton_instance;
-}
-
-/**
  * @brief Build the module tree from the module library.
  * Must be called after 'updateDynamicReferences' are called for all modules.
  * @param root_modules Output parameter to hold the root modules of each tree.
  */
-void VulModuleBase::buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_modules) {
+void VulModuleLib::buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_modules) const {
     root_modules.clear();
-    auto module_lib = getModuleLibInstance();
+    auto &module_lib = modules;
 
     // Collect all module names
     unordered_set<ModuleName> all_modules;
     unordered_map<ModuleName, uint32_t> indeg;
-    for (const auto &entry : *module_lib) {
+    for (const auto &entry : module_lib) {
         all_modules.insert(entry.first);
         indeg[entry.first] = 0;
     }
 
     // Compute in-degree for referenced modules
-    for (const auto &entry : *module_lib) {
+    for (const auto &entry : module_lib) {
         const auto &mod = entry.second;
         for (const auto &ref : mod->_dyn_referenced_modules) {
             if (all_modules.count(ref)) {
@@ -81,8 +69,8 @@ void VulModuleBase::buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_mod
     // Helper: build a subtree for a module by DFS, avoiding cycles per path
     function<shared_ptr<ModuleTreeNode>(const ModuleName&, unordered_set<ModuleName>&)> buildSubtree;
     buildSubtree = [&](const ModuleName &mn, unordered_set<ModuleName> &pathSeen) -> shared_ptr<ModuleTreeNode> {
-        auto it = module_lib->find(mn);
-        if (it == module_lib->end()) {
+        auto it = module_lib.find(mn);
+        if (it == module_lib.end()) {
             return nullptr;
         }
         if (pathSeen.count(mn)) {
@@ -102,8 +90,8 @@ void VulModuleBase::buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_mod
         for (const auto &ref : it->second->_dyn_referenced_modules) {
             if (!all_modules.count(ref)) {
                 // referenced external or missing module: still show as leaf if present in lib, else skip
-                auto jt = module_lib->find(ref);
-                if (jt != module_lib->end()) {
+                auto jt = module_lib.find(ref);
+                if (jt != module_lib.end()) {
                     auto childSeen = pathSeen; // allow shared path but safe
                     auto child = buildSubtree(ref, childSeen);
                     if (child) node->submodules.push_back(child);
@@ -161,13 +149,13 @@ void VulModuleBase::buildModuleTree(vector<shared_ptr<ModuleTreeNode>> &root_mod
  * @param root_module_name The name of the root module.
  * @param out_root_node Output parameter to hold the root node of the tree. Nullptr if the module does not exist.
  */
-void VulModuleBase::buildSingleModuleReferenceTree(const ModuleName &root_module_name, shared_ptr<ModuleTreeBidirectionalNode> &out_root_node) {
+void VulModuleLib::buildSingleModuleReferenceTree(const ModuleName &root_module_name, shared_ptr<ModuleTreeBidirectionalNode> &out_root_node) const {
     out_root_node.reset();
-    auto module_lib = getModuleLibInstance();
+    auto &module_lib = modules;
 
     // Root must exist in library
-    auto it_root = module_lib->find(root_module_name);
-    if (it_root == module_lib->end()) {
+    auto it_root = module_lib.find(root_module_name);
+    if (it_root == module_lib.end()) {
         out_root_node = nullptr;
         return;
     }
@@ -176,12 +164,12 @@ void VulModuleBase::buildSingleModuleReferenceTree(const ModuleName &root_module
     unordered_map<ModuleName, vector<ModuleName>> down_adj; // M -> deps(M)
     unordered_map<ModuleName, vector<ModuleName>> up_adj;   // M -> parents/dependents(M)
 
-    for (const auto &kv : *module_lib) {
+    for (const auto &kv : module_lib) {
         const ModuleName &mn = kv.first;
         const auto &mod = kv.second;
         for (const auto &dep : mod->_dyn_referenced_modules) {
             // only keep edges within library
-            if (module_lib->find(dep) == module_lib->end()) continue;
+            if (module_lib.find(dep) == module_lib.end()) continue;
             down_adj[mn].push_back(dep);
             up_adj[dep].push_back(mn);
         }
@@ -202,8 +190,8 @@ void VulModuleBase::buildSingleModuleReferenceTree(const ModuleName &root_module
             if (path.count(dep)) {
                 // cycle on this path: create a leaf and stop
                 auto cyc_node = make_shared<ModuleTreeBidirectionalNode>();
-                auto jt = module_lib->find(dep);
-                if (jt != module_lib->end()) {
+                auto jt = module_lib.find(dep);
+                if (jt != module_lib.end()) {
                     cyc_node->name = jt->second->name;
                     cyc_node->comment = jt->second->comment;
                     cyc_node->is_external = jt->second->isExternalModule();
@@ -213,8 +201,8 @@ void VulModuleBase::buildSingleModuleReferenceTree(const ModuleName &root_module
                 node->children.push_back(cyc_node);
                 continue;
             }
-            auto jt = module_lib->find(dep);
-            if (jt == module_lib->end()) continue;
+            auto jt = module_lib.find(dep);
+            if (jt == module_lib.end()) continue;
             auto child = make_shared<ModuleTreeBidirectionalNode>();
             child->name = jt->second->name;
             child->comment = jt->second->comment;
@@ -237,8 +225,8 @@ void VulModuleBase::buildSingleModuleReferenceTree(const ModuleName &root_module
             if (path.count(par)) {
                 // cycle on this path: create a leaf and stop
                 auto cyc_node = make_shared<ModuleTreeBidirectionalNode>();
-                auto jt = module_lib->find(par);
-                if (jt != module_lib->end()) {
+                auto jt = module_lib.find(par);
+                if (jt != module_lib.end()) {
                     cyc_node->name = jt->second->name;
                     cyc_node->comment = jt->second->comment;
                     cyc_node->is_external = jt->second->isExternalModule();
@@ -248,8 +236,8 @@ void VulModuleBase::buildSingleModuleReferenceTree(const ModuleName &root_module
                 node->parents.push_back(cyc_node);
                 continue;
             }
-            auto jt = module_lib->find(par);
-            if (jt == module_lib->end()) continue;
+            auto jt = module_lib.find(par);
+            if (jt == module_lib.end()) continue;
             auto parent = make_shared<ModuleTreeBidirectionalNode>();
             parent->name = jt->second->name;
             parent->comment = jt->second->comment;
@@ -491,7 +479,7 @@ ErrorMsg VulModule::updateDynamicReferences() {
     return "";
 }
 
-ErrorMsg VulModule::_0_validateBrokenIndexes() const {
+ErrorMsg VulModule::_0_validateBrokenIndexes(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const {
     const ErrorMsg prefix = "Module '" + name + "': ";
 
     for (const auto &lc_entry : local_configs) {
@@ -586,15 +574,11 @@ ErrorMsg VulModule::_0_validateBrokenIndexes() const {
     return "";
 }
 
-ErrorMsg VulModule::_1_validateNameConflicts() const {
+ErrorMsg VulModule::_1_validateNameConflicts(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
 
     const ErrorMsg prefix = "Module '" + name + "': ";
 
     vector<pair<string, string>> local_names; // name -> from which element
-
-    auto configlib = VulConfigLib::getInstance();
-    auto bundlelib = VulBundleLib::getInstance();
-    auto modulelib = VulModuleBase::getModuleLibInstance();
 
     auto isGloballyConflict = [&](const string &name) -> string {
         if (configlib->checkNameConflict(name)) {
@@ -603,7 +587,7 @@ ErrorMsg VulModule::_1_validateNameConflicts() const {
         if (bundlelib->checkNameConflict(name)) {
             return "Global bundle";
         }
-        if (modulelib->find(name) != modulelib->end()) {
+        if (modulelib->modules.find(name) != modulelib->modules.end()) {
             return "Global module";
         }
         return "";
@@ -672,13 +656,10 @@ ErrorMsg VulModule::_1_validateNameConflicts() const {
     return "";
 }
 
-ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions() const {
+ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
 
     ErrorMsg err;
     const ErrorMsg prefix = "Module '" + name + "': ";
-
-    auto configlib = VulConfigLib::getInstance();
-    auto bundlelib = VulBundleLib::getInstance();
 
     unordered_map<ConfigName, ConfigRealValue> local_config_values;
     for (const auto &lc_entry : local_configs) {
@@ -834,17 +815,15 @@ ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions() const {
 }
 
 
-ErrorMsg VulModule::_3_validateInstanceDefinitions() const {
+ErrorMsg VulModule::_3_validateInstanceDefinitions(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     ErrorMsg err;
     const ErrorMsg prefix = "Module '" + name + "': ";
-
-    auto modulelib = VulModuleBase::getModuleLibInstance();
 
     for (const auto &inst_entry : instances) {
         const VulInstance &inst = inst_entry.second;
         // check module existence
-        auto mod_iter = modulelib->find(inst.module_name);
-        if (mod_iter == modulelib->end()) [[unlikely]] {
+        auto mod_iter = modulelib->modules.find(inst.module_name);
+        if (mod_iter == modulelib->modules.end()) [[unlikely]] {
             return EStr(EItemModInstRefNotFound, prefix + string("Instance '") + inst.name + "' references undefined module '" + inst.module_name + "'.");
         }
         // check local config overrides
@@ -861,12 +840,10 @@ ErrorMsg VulModule::_3_validateInstanceDefinitions() const {
     return "";
 }
 
-ErrorMsg VulModule::_4_validateReqServConnections() const {
+ErrorMsg VulModule::_4_validateReqServConnections(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     
     const ErrorMsg prefix = "Module '" + name + "': ";
     ErrorMsg err;
-
-    auto modulelib = VulModuleBase::getModuleLibInstance();
 
     VulReqServ pipe_clear_srv = VulReqServ{
         .name = "clear",
@@ -888,8 +865,8 @@ ErrorMsg VulModule::_4_validateReqServConnections() const {
             return nullptr;
         }
         const VulInstance &inst = inst_iter->second;
-        auto mod_iter = modulelib->find(inst.module_name);
-        if (mod_iter == modulelib->end()) [[unlikely]] {
+        auto mod_iter = modulelib->modules.find(inst.module_name);
+        if (mod_iter == modulelib->modules.end()) [[unlikely]] {
             return nullptr;
         }
         const VulModuleBase &inst_mod = *(mod_iter->second);
@@ -906,8 +883,8 @@ ErrorMsg VulModule::_4_validateReqServConnections() const {
             return nullptr;
         }
         const VulInstance &inst = inst_iter->second;
-        auto mod_iter = modulelib->find(inst.module_name);
-        if (mod_iter == modulelib->end()) [[unlikely]] {
+        auto mod_iter = modulelib->modules.find(inst.module_name);
+        if (mod_iter == modulelib->modules.end()) [[unlikely]] {
             return nullptr;
         }
         const VulModuleBase &inst_mod = *(mod_iter->second);
@@ -986,8 +963,8 @@ ErrorMsg VulModule::_4_validateReqServConnections() const {
 
     for (const auto &inst_entry : instances) {
         const auto &inst = inst_entry.second;
-        auto mod_iter = modulelib->find(inst.module_name);
-        if (mod_iter == modulelib->end()) [[unlikely]] {
+        auto mod_iter = modulelib->modules.find(inst.module_name);
+        if (mod_iter == modulelib->modules.end()) [[unlikely]] {
             continue;
         }
         const auto &childmod_ptr = mod_iter->second;
@@ -1025,12 +1002,10 @@ ErrorMsg VulModule::_4_validateReqServConnections() const {
     return "";
 }
 
-ErrorMsg VulModule::_5_validatePipeConnections() const {
+ErrorMsg VulModule::_5_validatePipeConnections(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     
     const ErrorMsg prefix = "Module '" + name + "': ";
     ErrorMsg err;
-
-    auto modulelib = VulModuleBase::getModuleLibInstance();
 
     // confirm all instances and pipe ports exist and match
     for (const auto &pconn_entry : mod_pipe_connections) {
@@ -1041,8 +1016,8 @@ ErrorMsg VulModule::_5_validatePipeConnections() const {
                 return EStr(EItemModPConnInvalidInst, prefix + string("Module-Pipe connection references non-existing instance '") + conn.instance + "': " + conn.toString());
             }
             const VulInstance &inst = inst_iter->second;
-            auto mod_iter = modulelib->find(inst.module_name);
-            if (mod_iter == modulelib->end()) [[unlikely]] {
+            auto mod_iter = modulelib->modules.find(inst.module_name);
+            if (mod_iter == modulelib->modules.end()) [[unlikely]] {
                 return EStr(EItemModPConnInvalidInst, prefix + string("Module-Pipe connection references instance '") + conn.instance + "' which references undefined module '" + inst.module_name + "': " + conn.toString());
             }
             const VulModuleBase &inst_mod = *(mod_iter->second);
@@ -1102,8 +1077,8 @@ ErrorMsg VulModule::_5_validatePipeConnections() const {
 
     for (const auto &inst_entry : instances) {
         const auto &inst = inst_entry.second;
-        auto mod_iter = modulelib->find(inst.module_name);
-        if (mod_iter == modulelib->end()) [[unlikely]] {
+        auto mod_iter = modulelib->modules.find(inst.module_name);
+        if (mod_iter == modulelib->modules.end()) [[unlikely]] {
             continue;
         }
         const auto &childmod_ptr = mod_iter->second;
@@ -1148,7 +1123,7 @@ ErrorMsg VulModule::_5_validatePipeConnections() const {
     return "";
 }
 
-ErrorMsg VulModule::_6_validateStallSequenceConnections() const {
+ErrorMsg VulModule::_6_validateStallSequenceConnections(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     
     const ErrorMsg prefix = "Module '" + name + "': ";
     ErrorMsg err;

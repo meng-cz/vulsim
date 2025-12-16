@@ -398,7 +398,7 @@ inline string _genReqServFuncArgsList(const VulReqServ &item) {
  * @param out_lines Output vector of strings to hold the generated header code lines. With \\n in each line.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
+ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulModuleLib> modulelib) {
 
     vector<string> constructor_param_field;
     vector<string> tick_field;
@@ -594,8 +594,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         const InstanceName &inst_name = reqcl_entry.first;
         for (const auto &req_entry : reqcl_entry.second) {
             const ReqServName &req_name = req_entry.first;
-            auto modulelib = VulModuleBase::getModuleLibInstance();
-            auto &childmod_ptr = modulelib->at(module.instances.at(inst_name).module_name);
+            auto &childmod_ptr = modulelib->modules.at(module.instances.at(inst_name).module_name);
             auto &childreq = childmod_ptr->requests.at(req_name);
             string rettype = _genReqServFuncReturnType(childreq);
             string arglists = _genReqServFuncArgsList(childreq);
@@ -745,8 +744,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines) {
         const InstanceName &inst_name = inst_entry.first;
         const VulInstance &inst = inst_entry.second;
         const ModuleName &child_mod = inst.module_name;
-        auto modulelib = VulModuleBase::getModuleLibInstance();
-        auto &childmod_ptr = modulelib->at(child_mod);
+        auto &childmod_ptr = modulelib->modules.at(child_mod);
         string child_instptr_name = "__instptr_" + inst_entry.first;
         string child_class_name = child_mod;
         if (!childmod_ptr->local_configs.empty()) {

@@ -54,7 +54,7 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
  * @param out_lines Output vector of strings to hold the generated header code lines. With \\n in each line.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines);
+ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulModuleLib> modulelib);
 
 
 } // namespace simgen
