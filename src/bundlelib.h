@@ -84,11 +84,11 @@ public:
 
     const BundleTag DefaultTag = string("__default__");
 
-    /**
-     * @brief Get the singleton instance of the VulBundleLib.
-     * @return A shared_ptr to the VulBundleLib instance.
-     */
-    static shared_ptr<VulBundleLib> getInstance();
+    VulBundleLib(const shared_ptr<VulConfigLib> &configlib) : configlib(configlib) {}
+
+    inline void setConfigLib(const shared_ptr<VulConfigLib> &configlib) {
+        this->configlib = configlib;
+    }
 
     /**
      * @brief Check if a bundle name already exists in the bundle library.
@@ -254,7 +254,7 @@ public:
 
 protected:
 
-    VulBundleLib() = default;
+    shared_ptr<VulConfigLib> configlib;
 
     typedef struct {
         VulBundleItem               item;

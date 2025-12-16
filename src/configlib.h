@@ -65,12 +65,6 @@ public:
     const GroupName DefaultGroupName = "__default__";
 
     /**
-     * @brief Get the singleton instance of the VulConfigLib.
-     * @return A shared_ptr to the VulConfigLib instance.
-     */
-    static shared_ptr<VulConfigLib> getInstance();
-
-    /**
      * @brief Check if a config item name already exists in the config library.
      * @param name The config item name to check.
      */

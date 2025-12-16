@@ -34,18 +34,6 @@ using std::make_shared;
 
 
 /**
- * @brief Get the singleton instance of the VulBundleLib.
- * @return A shared_ptr to the VulBundleLib instance.
- */
-shared_ptr<VulBundleLib> VulBundleLib::getInstance() {
-    static shared_ptr<VulBundleLib> _singleton_instance;
-    if (!_singleton_instance) {
-        _singleton_instance = shared_ptr<VulBundleLib>(new VulBundleLib());
-    }
-    return _singleton_instance;
-}
-
-/**
  * @brief Build the bundle reference tree (bidirectional) for a given bundle.
  * @param root_bundle_name The name of the root bundle.
  * @param out_root_node Output parameter to hold the root node of the tree.
@@ -289,7 +277,7 @@ ErrorMsg VulBundleLib::insertBundle(const VulBundleItem &bundle_item, const Bund
  * @return An ErrorMsg indicating success or failure.
  */
 ErrorMsg VulBundleLib::insertBundles(const vector<VulBundleItem> &bundle_items, const BundleTag &tags) {
-    auto configlib = VulConfigLib::getInstance();
+
     ErrorMsg err;
     
     unordered_set<BundleName> inserting_names;
@@ -789,7 +777,6 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
     out_confs.clear();
     out_references.clear();
 
-    auto configlib = VulConfigLib::getInstance();
     ErrorMsg err;
     ConfigRealValue rvalue;
 

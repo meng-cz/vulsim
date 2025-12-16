@@ -35,19 +35,6 @@ using std::make_unique;
 
 
 
-static shared_ptr<VulConfigLib> _instance;
-
-/**
- * @brief Get the singleton instance of the VulConfigLib.
- * @return A shared_ptr to the VulConfigLib instance.
- */
-shared_ptr<VulConfigLib> VulConfigLib::getInstance() {
-    if (!_instance) {
-        _instance = shared_ptr<VulConfigLib>(new VulConfigLib());
-    }
-    return _instance;
-}
-
 /**
  * @brief Build the config reference tree (bidirectional) for a given config item.
  * @param root_config_name The name of the root config item.
@@ -441,8 +428,6 @@ ErrorMsg VulConfigLib::renameConfigItem(const ConfigName &old_name, const Config
     config_items[new_name] = item;
     config_items.erase(old_name);
 
-    // update bundle lib
-    VulBundleLib::getInstance()->externalConfigRename(old_name, new_name);
     return "";
 }
 
@@ -541,18 +526,6 @@ ErrorMsg VulConfigLib::removeConfigItem(const ConfigName &item_name) {
         }
         return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' is referenced by other config items: ") + ref_confs);
     }
-    auto bundlelib = VulBundleLib::getInstance();
-    auto referencing_bundles = bundlelib->externalConfigReferenced(item_name);
-    if (referencing_bundles) {
-        string bundle_list;
-        for (const auto &bundlename : *referencing_bundles) {
-            if (!bundle_list.empty()) {
-                bundle_list += ", ";
-            }
-            bundle_list += bundlename;
-        }
-        return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' is referenced by bundle definitions: ") + bundle_list);
-    }
 
     // remove references
     for (const auto &ref_item : entry.references) {
@@ -585,7 +558,6 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
     }
 
     auto &group_items = group_iter->second;
-    auto bundlelib = VulBundleLib::getInstance();
 
     // check external references to group items
     for (const auto &item_name : group_items) {
@@ -593,17 +565,6 @@ ErrorMsg VulConfigLib::removeConfigGroup(const GroupName &group_name) {
             if (group_items.find(ref_by_item) == group_items.end()) {
                 return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' in group '") + group_name + string("' is referenced by other config item: ") + ref_by_item);
             }
-        }
-        auto referencing_bundles = bundlelib->externalConfigReferenced(item_name);
-        if (referencing_bundles) {
-            string bundle_list;
-            for (const auto &bundlename : *referencing_bundles) {
-                if (!bundle_list.empty()) {
-                    bundle_list += ", ";
-                }
-                bundle_list += bundlename;
-            }
-            return EStr(EItemConfRemoveRef, string("Config item '") + item_name + string("' in group '") + group_name + string("' is referenced by bundle definitions: ") + bundle_list);
         }
     }
 
