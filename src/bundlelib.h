@@ -84,12 +84,6 @@ public:
 
     const BundleTag DefaultTag = string("__default__");
 
-    VulBundleLib(const shared_ptr<VulConfigLib> &configlib) : configlib(configlib) {}
-
-    inline void setConfigLib(const shared_ptr<VulConfigLib> &configlib) {
-        this->configlib = configlib;
-    }
-
     /**
      * @brief Check if a bundle name already exists in the bundle library.
      * @param name The bundle name to check.
@@ -252,9 +246,30 @@ public:
      */
     void commit(uint64_t snapshot_id);
 
-protected:
+    /**
+     * @brief Extract bundle references and config usages from a bundle definition.
+     * @param bundle_item The VulBundleItem to analyze.
+     * @param out_references Output set to hold the names of referenced bundles.
+     * @param out_confs Output set to hold the names of used config items.
+     * @return An ErrorMsg indicating failure, empty if success.
+     */
+    ErrorMsg extractBundleReferencesAndConfs(
+        const VulBundleItem &bundle_item,
+        unordered_set<BundleName> &out_references,
+        unordered_set<ConfigName> &out_confs
+    ) const;
 
-    shared_ptr<VulConfigLib> configlib;
+    /**
+     * @brief Extract bundle references from a bundle definition without checking.
+     * @param bundle_item The VulBundleItem to analyze.
+     * @param out_references Output set to hold the names of referenced bundles.
+     */
+    void extractBundleReferences(
+        const VulBundleItem &bundle_item,
+        unordered_set<BundleName> &out_references
+    ) const;
+
+protected:
 
     typedef struct {
         VulBundleItem               item;
@@ -285,30 +300,6 @@ protected:
      */
     bool _isBundleSameDefinition(const VulBundleItem &a, const VulBundleItem &b) const;
 
-    /**
-     * @brief Extract and check bundle references and config usages from a bundle definition.
-     * Check that bundle members have valid types.
-     * Check that all referenced bundles and config items exist.
-     * @param bundle_item The VulBundleItem to analyze.
-     * @param out_references Output set to hold the names of referenced bundles.
-     * @param out_confs Output set to hold the names of used config items.
-     * @return An ErrorMsg indicating failure, empty if success.
-     */
-    ErrorMsg _extractAndCheckBundleReferencesAndConfs(
-        const VulBundleItem &bundle_item,
-        unordered_set<BundleName> &out_references,
-        unordered_set<ConfigName> &out_confs
-    ) const;
-
-    /**
-     * @brief Extract bundle references from a bundle definition without checking.
-     * @param bundle_item The VulBundleItem to analyze.
-     * @param out_references Output set to hold the names of referenced bundles.
-     */
-    void _extractBundleReferences(
-        const VulBundleItem &bundle_item,
-        unordered_set<BundleName> &out_references
-    ) const;
 };
 
 

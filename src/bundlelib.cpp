@@ -239,7 +239,7 @@ ErrorMsg VulBundleLib::insertBundle(const VulBundleItem &bundle_item, const Bund
 
     BundleEntry new_entry;
     new_entry.item = bundle_item;
-    ErrorMsg err = _extractAndCheckBundleReferencesAndConfs(bundle_item, new_entry.references, new_entry.confs);
+    ErrorMsg err = extractBundleReferencesAndConfs(bundle_item, new_entry.references, new_entry.confs);
     if (!err.empty()) {
         return err;
     }
@@ -296,7 +296,7 @@ ErrorMsg VulBundleLib::insertBundles(const vector<VulBundleItem> &bundle_items, 
     // extract references
     for (const auto &bundle_item : bundle_items) {
         unordered_set<BundleName> references;
-        _extractBundleReferences(bundle_item, references);
+        extractBundleReferences(bundle_item, references);
         for (const auto &ref_name : references) {
             if (inserting_names.find(ref_name) != inserting_names.end()) {
                 auto rref_iter = reversed_references_map.find(ref_name);;
@@ -497,7 +497,7 @@ ErrorMsg VulBundleLib::updateBundleDefinition(const VulBundleItem &bundle_item) 
     }
     // extract and check new references and confs
     BundleEntry new_entry;
-    ErrorMsg err = _extractAndCheckBundleReferencesAndConfs(bundle_item, new_entry.references, new_entry.confs);
+    ErrorMsg err = extractBundleReferencesAndConfs(bundle_item, new_entry.references, new_entry.confs);
     if (!err.empty()) {
         return err;
     }
@@ -760,15 +760,13 @@ bool VulBundleLib::_isBundleSameDefinition(const VulBundleItem &a, const VulBund
 
 
 /**
- * @brief Extract and check bundle references and config usages from a bundle definition.
- * Check that bundle members have valid types.
- * Check that all referenced bundles and config items exist.
+ * @brief Extract bundle references and config usages from a bundle definition.
  * @param bundle_item The VulBundleItem to analyze.
  * @param out_references Output set to hold the names of referenced bundles.
  * @param out_confs Output set to hold the names of used config items.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
+ErrorMsg VulBundleLib::extractBundleReferencesAndConfs(
     const VulBundleItem &bundle_item,
     unordered_set<BundleName> &out_references,
     unordered_set<ConfigName> &out_confs
@@ -778,7 +776,7 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
     out_references.clear();
 
     ErrorMsg err;
-    ConfigRealValue rvalue;
+    uint32_t errpos;
 
 
     // check enum
@@ -796,17 +794,13 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
                 return EStr(EItemBundMemNameInvalid, string("Invalid enum member name '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("'"));
             }
             if (!enum_member.value.empty()) {
-                err = configlib->calculateConfigExpression(enum_member.value, rvalue, out_confs);
-                if (!err.empty()) {
-                    return err;
+                auto confs = config_parser::parseReferencedIdentifier(enum_member.value, errpos, err);
+                if (!confs) {
+                    return EStr(EItemConfValueGrammerInvalid, string("Invalid enum member value expression '") + enum_member.value + string("' in bundle '") + bundle_item.name + string("': ") + err);
                 }
-                if (rvalue < 0) {
-                    return EStr(EItemBundEnumInvalid, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has invalid value: out of range"));
+                for (const auto &conf_name : *confs) {
+                    out_confs.insert(conf_name);
                 }
-                if (enum_values.find(rvalue) != enum_values.end()) {
-                    return EStr(EItemBundEnumValueDup, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has duplicate value"));
-                }
-                enum_values.insert(rvalue);
             }
             if (enum_names.find(enum_member.name) != enum_names.end()) {
                 return EStr(EItemBundEnumNameDup, string("Enum member '") + enum_member.name + string("' in bundle '") + bundle_item.name + string("' has duplicate name"));
@@ -834,13 +828,12 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
             if (!member.type.empty() && member.type != "__uint__") {
                 return EStr(EItemBundTypeMixed, string("Member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has type/length mismatch: length specified for non-uint type"));
             }
-            ConfigRealValue length;
-            err = configlib->calculateConfigExpression(member.uint_length, length, out_confs);
-            if (!err.empty()) {
-                return err + string(" in uint member '") + member.name + string("' in bundle '") + bundle_item.name + string("'");
+            auto confs = config_parser::parseReferencedIdentifier(member.uint_length, errpos, err);
+            if (!confs) {
+                return EStr(EItemConfValueGrammerInvalid, string("Invalid uint length expression '") + member.uint_length + string("' in member '") + member.name + string("' in bundle '") + bundle_item.name + string("'"));
             }
-            if (length <= 0) {
-                return EStr(EItemBundMemLengthInvalid, string("UInt member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has invalid length: must be positive"));
+            for (const auto &conf_name : *confs) {
+                out_confs.insert(conf_name);
             }
         } else if (!member.type.empty()) {
             if (!isBasicVulType(member.type)) {
@@ -858,20 +851,19 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
         }
         // check default value
         if (!member.value.empty()) {
-            err = configlib->calculateConfigExpression(member.value, rvalue, out_confs);
-            if (!err.empty()) {
-                return err + string(" in member '") + member.name + string("' in bundle '") + bundle_item.name + string("'");
+            auto confs = config_parser::parseReferencedIdentifier(member.value, errpos, err);
+            if (!confs) {
+                return EStr(EItemConfValueGrammerInvalid, string("Invalid default value expression '") + member.value + string("' in member '") + member.name + string("' in bundle '") + bundle_item.name + string("'"));
+            }
+            for (const auto &conf_name : *confs) {
+                out_confs.insert(conf_name);
             }
         }
         // check array dimensions
         for (const auto &dim_expr : member.dims) {
-            ConfigRealValue dim;
-            err = configlib->calculateConfigExpression(dim_expr, dim, out_confs);
-            if (!err.empty()) {
-                return err + string(" in array member '") + member.name + string("' in bundle '") + bundle_item.name + string("'");
-            }
-            if (dim <= 0) {
-                return EStr(EItemBundMemLengthInvalid, string("Array member '") + member.name + string("' in bundle '") + bundle_item.name + string("' has invalid dimension: must be positive: ") + dim_expr);
+            auto confs = config_parser::parseReferencedIdentifier(dim_expr, errpos, err);
+            if (!confs) {
+                return EStr(EItemConfValueGrammerInvalid, string("Invalid array dimension expression '") + dim_expr + string("' in member '") + member.name + string("' in bundle '") + bundle_item.name + string("'"));
             }
         }
     }
@@ -884,7 +876,7 @@ ErrorMsg VulBundleLib::_extractAndCheckBundleReferencesAndConfs(
  * @param bundle_item The VulBundleItem to analyze.
  * @param out_references Output set to hold the names of referenced bundles.
  */
-void VulBundleLib::_extractBundleReferences(
+void VulBundleLib::extractBundleReferences(
     const VulBundleItem &bundle_item,
     unordered_set<BundleName> &out_references
 ) const {

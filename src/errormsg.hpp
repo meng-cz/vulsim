@@ -50,6 +50,7 @@ constexpr uint32_t ErrInstanceMod = 23000;
 constexpr uint32_t ErrPipeMod = 24000;
 constexpr uint32_t ErrConnMod = 25000;
 
+constexpr uint32_t EItemOPInvalid = 20000;
 
 constexpr uint32_t ErrConfLib = 30000;
 constexpr uint32_t EItemConfNameDup = 30000;
