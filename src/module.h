@@ -26,7 +26,6 @@
 #include "type.h"
 #include "configlib.h"
 #include "configexpr.hpp"
-#include "pipetype.hpp"
 #include "bundlelib.h"
 
 #include <map>
@@ -108,23 +107,6 @@ typedef struct {
     Comment             comment;
 } VulLocalConfigItem;
 
-class ModuleTreeNode {
-public:
-    vector<shared_ptr<ModuleTreeNode>>  submodules;
-    ModuleName  name;
-    Comment     comment;
-    bool        is_external;
-};
-
-class ModuleTreeBidirectionalNode {
-public:
-    vector<shared_ptr<ModuleTreeBidirectionalNode>>  parents;
-    vector<shared_ptr<ModuleTreeBidirectionalNode>>  children;
-    ModuleName  name;
-    Comment     comment;
-    bool        is_external;
-};
-
 class VulModuleBase {
 public:
 
@@ -150,6 +132,23 @@ public:
     virtual bool isExternalModule() const = 0; 
 };
 
+class ModuleTreeNode {
+public:
+    vector<shared_ptr<ModuleTreeNode>>  submodules;
+    ModuleName  name;
+    Comment     comment;
+    bool        is_external;
+};
+
+class ModuleTreeBidirectionalNode {
+public:
+    vector<shared_ptr<ModuleTreeBidirectionalNode>>  parents;
+    vector<shared_ptr<ModuleTreeBidirectionalNode>>  children;
+    ModuleName  name;
+    Comment     comment;
+    bool        is_external;
+};
+
 class VulModuleLib {
 public:
     unordered_map<ModuleName, shared_ptr<VulModuleBase>>   modules;
@@ -168,8 +167,25 @@ public:
      * @param out_root_node Output parameter to hold the root node of the tree. Nullptr if the module does not exist.
      */
     void buildSingleModuleReferenceTree(const ModuleName &root_module_name, shared_ptr<ModuleTreeBidirectionalNode> &out_root_node) const;
-};
 
+    /**
+     * @brief Notify the module library that a config item has been renamed.
+     * Update any module definitions that reference the old config name.
+     * Assumes that the dynamic references have been updated.
+     * @param old_name The old config item name.
+     * @param new_name The new config item name.
+     */
+    void externalRenameConfig(const ConfigName &old_name, const ConfigName &new_name);
+
+    /**
+     * @brief Notify the module library that a bundle item has been renamed.
+     * Update any module definitions that reference the old bundle name.
+     * Assumes that the dynamic references have been updated.
+     * @param old_name The old bundle item name.
+     * @param new_name The new bundle item name.
+     */
+    void externalRenameBundle(const BundleName &old_name, const BundleName &new_name);
+};
 
 typedef string EModuleDir;
 
@@ -188,6 +204,22 @@ typedef struct {
     Comment             comment;
     unordered_map<ConfigName, LocalConfigValue> local_config_overrides; // local config overrides for this instance
 } VulInstance;
+
+typedef string PipeName;
+
+typedef string PipeSize;
+
+typedef struct {
+    PipeName       name;
+    DataType       type;
+    Comment        comment;
+    PipeSize       input_size;
+    PipeSize       output_size;
+    PipeSize       buffer_size;
+    PipeSize       latency;
+    bool           has_handshake;
+    bool           has_valid; // only for no-handshake pipes
+} VulPipe;
 
 class VulReqServConnection {
 public:
