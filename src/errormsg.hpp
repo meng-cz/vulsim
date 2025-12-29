@@ -51,6 +51,11 @@ constexpr uint32_t ErrPipeMod = 24000;
 constexpr uint32_t ErrConnMod = 25000;
 
 constexpr uint32_t EItemOPInvalid = 20000;
+constexpr uint32_t EItemOPLoadNotClosed = 20100;
+constexpr uint32_t EItemOPLoadPathInvalid = 20101;
+constexpr uint32_t EItemOPLoadCannotOpen = 20102;
+constexpr uint32_t EItemOPLoadImportNotFound = 20103;
+constexpr uint32_t EItemOPLoadCheckFailed = 20104;
 
 constexpr uint32_t ErrConfLib = 30000;
 constexpr uint32_t EItemConfNameDup = 30000;

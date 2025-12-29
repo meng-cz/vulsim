@@ -41,12 +41,20 @@ class VulProjectOperation;
 
 using OperationFactory = function<unique_ptr<VulProjectOperation>()>;
 
+typedef struct {
+    ProjectPath     abspath;
+    ModuleName      name;
+    unordered_map<ConfigName, VulConfigItem> configs;
+    unordered_map<BundleName, VulBundleItem> bundles;
+    unordered_map<ConfigName, ConfigValue> config_overrides;
+} VulImport;
+
 class VulProject {
 public:
     
-    static void registerOperation(const OperationName &op_name, const OperationFactory &factory);
+    static bool registerOperation(const OperationName &op_name, const OperationFactory &factory);
 
-    VulProject();
+    VulProject(const vector<ProjectPath> &import_paths) : import_paths(import_paths) {};
 
     ProjectName                 name;
     ProjectPath                 path;
@@ -62,6 +70,8 @@ public:
     shared_ptr<VulBundleLib> bundlelib;
     shared_ptr<VulModuleLib> modulelib;
 
+    vector<ProjectPath>     import_paths;
+    unordered_map<ModuleName, VulImport>   imports;
 };
 
 class VulProjectOperation {

@@ -24,8 +24,13 @@
 
 static unordered_map<OperationName, OperationFactory> operationFactories;
 
-void VulProject::registerOperation(const OperationName &op_name, const OperationFactory &factory) {
+bool VulProject::registerOperation(const OperationName &op_name, const OperationFactory &factory) {
+    auto iter = operationFactories.find(op_name);
+    if (iter != operationFactories.end()) {
+        return false;
+    }
     operationFactories[op_name] = factory;
+    return true;
 }
 
 ErrorMsg VulProject::doOperation(const OperationName &op_name, const vector<OperationArg> &op_args) {

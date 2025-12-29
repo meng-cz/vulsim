@@ -1,5 +1,41 @@
 # VulSim XML 文件格式文档
 
+## Vul 项目目录结构
+
+```
+project_root/
+|-- project_name.xml            # Vul 项目文件
+|-- configlib.xml               # Vul 配置库文件
+|-- bundlelib.xml               # Vul Bundle 库文件
+|-- modules/                    # Vul 模块文件目录
+    |-- module1.xml             # Vul 模块文件
+    |-- module2.xml             # Vul 模块文件
+    |-- ...
+```
+
+```
+import_root/
+|-- modulename.xml            # 导入模块文件
+|-- configlib.xml             # 导入配置库文件
+|-- bundlelib.xml             # 导入 Bundle 库文件
+```
+
+## Vul Project XML 文件格式
+
+ProjectVersion: 1.0
+
+```
+project
+|-- version : 版本号
+|-- [import]
+    |-- abspath : 导入项目绝对路径，为空则使用VULLIB环境变量
+    |-- name : 导入模块名称
+    |-- [configoverride]
+        |-- name : 配置项名称
+        |-- value : 配置项值（或表达式）
+|-- topmodule : 顶层模块名称
+```
+
 ## Vul ConfigLib XML 文件格式
 
 ConfigLibVersion: 1.0
