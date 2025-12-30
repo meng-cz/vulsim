@@ -322,7 +322,7 @@ ErrorMsg VulConfigLib::insertConfigGroup(const GroupName &group_name, const vect
     }
     for (const auto &entry : items) {
         uint32_t errpos = 0;
-        ErrorMsg err;
+        string err;
         auto reference_items = config_parser::parseReferencedIdentifier(entry.value, errpos, err);
         if (!err.empty()) {
             return EStr(EItemConfValueTokenInvalid, string("Invalid config value grammar at position ") + std::to_string(errpos) + string(": ") + err);
@@ -596,7 +596,7 @@ ErrorMsg VulConfigLib::calculateConfigExpression(
     unordered_set<ConfigName> &seen_configs
 ) const {
     uint32_t errpos = 0;
-    ErrorMsg err;
+    string err;
     auto tokens = config_parser::tokenizeConfigValueExpression(value, errpos, err);
     if (!tokens) {
         return EStr(EItemConfValueTokenInvalid, string("Invalid token grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);

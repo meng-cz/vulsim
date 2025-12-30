@@ -53,4 +53,5 @@ TODO：详细构建方式
 ### 引用开源项目：
 
 - pugixml: [https://github.com/zeux/pugixml](https://github.com/zeux/pugixml)
+- json : [https://github.com/nlohmann/json](https://github.com/nlohmann/json)
 

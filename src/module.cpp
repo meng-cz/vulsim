@@ -332,10 +332,10 @@ ErrorMsg VulModuleBase::updateDynamicReferences() {
         return "";
     };
     for (const auto &req_entry : requests) {
-        string err = parseReqServReferences(req_entry.second);
+        ErrorMsg err = parseReqServReferences(req_entry.second);
     }
     for (const auto &serv_entry : services) {
-        string err = parseReqServReferences(serv_entry.second);
+        ErrorMsg err = parseReqServReferences(serv_entry.second);
     }
     auto parsePipePortReferences = [&](const VulPipePort &pp) {
         if (!isBasicVulType(pp.type)) {
@@ -422,7 +422,7 @@ ErrorMsg VulModule::updateDynamicReferences() {
         if (!st.uint_length.empty()) {
             err = parseConfigItem(st.uint_length);
             if (!err.empty()) {
-                return EStr(EItemModConfInvalidValue, string("Invalid uint length expression for storage '") + st.name + "': " + err);
+                return EStr(EItemModConfInvalidValue, string("Invalid uint length expression for storage '") + st.name + "': " + err.msg);
             }
         } else if (!isBasicVulType(st.type)) {
             _dyn_referenced_bundles.insert(st.type);
@@ -430,13 +430,13 @@ ErrorMsg VulModule::updateDynamicReferences() {
         for (const auto &dim_expr : st.dims) {
             err = parseConfigItem(dim_expr);
             if (!err.empty()) {
-                return EStr(EItemModConfInvalidValue, string("Invalid dimension expression for storage '") + st.name + "': " + err);
+                return EStr(EItemModConfInvalidValue, string("Invalid dimension expression for storage '") + st.name + "': " + err.msg);
             }
         }
         if (!st.value.empty()) {
             err = parseConfigItem(st.value);
             if (!err.empty()) {
-                return EStr(EItemModConfInvalidValue, string("Invalid initial value expression for storage '") + st.name + "': " + err);
+                return EStr(EItemModConfInvalidValue, string("Invalid initial value expression for storage '") + st.name + "': " + err.msg);
             }
         }
         return "";
@@ -466,7 +466,7 @@ ErrorMsg VulModule::updateDynamicReferences() {
         for (const auto &lc_override : inst.local_config_overrides) {
             err = parseConfigItem(lc_override.second);
             if (!err.empty()) {
-                return EStr(EItemModConfInvalidValue, string("Invalid local config override expression for instance '") + inst.name + "', config item '" + lc_override.first + "': " + err);
+                return EStr(EItemModConfInvalidValue, string("Invalid local config override expression for instance '") + inst.name + "', config item '" + lc_override.first + "': " + err.msg);
             }
         }
     }
@@ -480,7 +480,7 @@ ErrorMsg VulModule::updateDynamicReferences() {
 }
 
 ErrorMsg VulModule::_0_validateBrokenIndexes(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const {
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
 
     for (const auto &lc_entry : local_configs) {
         const VulLocalConfigItem &lc = lc_entry.second;
@@ -576,7 +576,7 @@ ErrorMsg VulModule::_0_validateBrokenIndexes(shared_ptr<VulConfigLib> config_lib
 
 ErrorMsg VulModule::_1_validateNameConflicts(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
 
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
 
     vector<pair<string, string>> local_names; // name -> from which element
 
@@ -659,7 +659,7 @@ ErrorMsg VulModule::_1_validateNameConflicts(shared_ptr<VulConfigLib> configlib,
 ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
 
     ErrorMsg err;
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
 
     unordered_map<ConfigName, ConfigRealValue> local_config_values;
     for (const auto &lc_entry : local_configs) {
@@ -668,7 +668,7 @@ ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfig
         unordered_set<ConfigName> conf_refs;
         err = configlib->calculateConfigExpression(lc.value, val, conf_refs);
         if (!err.empty()) [[unlikely]] {
-            return EStr(EItemModConfInvalidValue, prefix + string("Local config '") + lc.name + "' has invalid default value expression: " + err);
+            return EStr(EItemModConfInvalidValue, prefix + string("Local config '") + lc.name + "' has invalid default value expression: " + err.msg);
         }
         local_config_values[lc.name] = val;
     }
@@ -737,7 +737,7 @@ ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfig
                     unordered_set<ConfigName> conf_refs;
                     err = configlib->calculateConfigExpression(enum_member.value, local_config_values, val, conf_refs);
                     if (!err.empty()) [[unlikely]] {
-                        return EStr(EItemModConfInvalidValue, prefix + string("Local bundle enum '") + lb.name + "', enum member '" + enum_member.name + "' has invalid value expression: " + err);
+                        return EStr(EItemModConfInvalidValue, prefix + string("Local bundle enum '") + lb.name + "', enum member '" + enum_member.name + "' has invalid value expression: " + err.msg);
                     }
                     if (enum_member_values.find(val) != enum_member_values.end()) [[unlikely]] {
                         return EStr(EItemModBundInvalidEnum, prefix + string("Local bundle enum '") + lb.name + "', enum member '" + enum_member.name + "' has duplicate enum member value.");
@@ -807,7 +807,7 @@ ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfig
         unordered_set<ConfigName> conf_refs;
         err = configlib->calculateConfigExpression(expr, local_config_values, val, conf_refs);
         if (!err.empty()) [[unlikely]] {
-            return EStr(EItemModConfInvalidValue, prefix + from_what + " has invalid expression: " + err + string(": ") + expr);
+            return EStr(EItemModConfInvalidValue, prefix + from_what + " has invalid expression: " + err.msg + string(": ") + expr);
         }
     }
 
@@ -817,7 +817,7 @@ ErrorMsg VulModule::_2_validateLocalConfigBundleDefinitions(shared_ptr<VulConfig
 
 ErrorMsg VulModule::_3_validateInstanceDefinitions(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     ErrorMsg err;
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
 
     for (const auto &inst_entry : instances) {
         const VulInstance &inst = inst_entry.second;
@@ -842,7 +842,7 @@ ErrorMsg VulModule::_3_validateInstanceDefinitions(shared_ptr<VulConfigLib> conf
 
 ErrorMsg VulModule::_4_validateReqServConnections(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
     ErrorMsg err;
 
     VulReqServ pipe_clear_srv = VulReqServ{
@@ -1004,7 +1004,7 @@ ErrorMsg VulModule::_4_validateReqServConnections(shared_ptr<VulConfigLib> confi
 
 ErrorMsg VulModule::_5_validatePipeConnections(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
     ErrorMsg err;
 
     // confirm all instances and pipe ports exist and match
@@ -1125,7 +1125,7 @@ ErrorMsg VulModule::_5_validatePipeConnections(shared_ptr<VulConfigLib> configli
 
 ErrorMsg VulModule::_6_validateStallSequenceConnections(shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib, shared_ptr<VulModuleLib> modulelib) const {
     
-    const ErrorMsg prefix = "Module '" + name + "': ";
+    const string prefix = "Module '" + name + "': ";
     ErrorMsg err;
 
     unordered_set<InstanceName> update_seq_instances;

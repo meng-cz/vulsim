@@ -28,10 +28,38 @@
 
 using std::string;
 
-typedef string ErrorMsg;
+struct ErrorMsg {
+    ErrorMsg() : msg(""), code(0) {}
+    ErrorMsg(uint32_t c, const string &m) : msg(m), code(c) {}
+    ErrorMsg(const string &m) : msg(m), code(0) {}
+    ErrorMsg(uint32_t c, const char *m) : msg(m), code(c) {}
+    ErrorMsg(const char *m) : msg(m), code(0) {}
+
+    uint32_t code;
+    string msg;
+
+    bool empty() const {
+        return msg.empty();
+    }
+    bool success() const {
+        return code == 0;
+    }
+    bool error() const {
+        return code != 0;
+    }
+};
 
 inline ErrorMsg EStr(uint32_t code, const string &msg) {
-    return string("#") + std::to_string(code) + ": " + msg;
+    return {code, msg};
+}
+
+inline ErrorMsg operator+(const ErrorMsg &a, const string &b) {
+    return {a.code, a.msg + b};
+}
+
+inline ErrorMsg &operator+=(ErrorMsg &a, const string &b) {
+    a.msg += b;
+    return a;
 }
 
 constexpr uint32_t ErrLoadProject = 10000;
