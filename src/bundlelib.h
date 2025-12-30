@@ -158,7 +158,6 @@ public:
      */
     ErrorMsg insertBundles(const vector<VulBundleItem> &bundle_items, const BundleTag &tags);
 
-protected:
     /**
      * @brief Remove a bundle from the bundle library with a specific tag.
      * If the bundle has no more tags after removal, it will be removed from the library.
@@ -168,7 +167,6 @@ protected:
      */
     ErrorMsg removeBundle(const BundleName &bundle_name, const BundleTag &tags);
 
-public:
     /**
      * @brief Remove a bundle from the bundle library with the default tag.
      * If the bundle has no more tags after removal, it will be removed from the library.
@@ -269,8 +267,6 @@ public:
         unordered_set<BundleName> &out_references
     ) const;
 
-protected:
-
     typedef struct {
         VulBundleItem               item;
         unordered_set<BundleTag>    tags;
@@ -283,6 +279,12 @@ protected:
 
     unordered_map<BundleTag, unordered_set<BundleName>> tag_bundles; // tag -> set of bundle names
     unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles; // config -> set of bundle names using it
+
+    inline void clear() {
+        bundles.clear();
+        tag_bundles.clear();
+        conf_bundles.clear();
+    }
 
 
     typedef struct {

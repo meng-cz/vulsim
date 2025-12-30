@@ -585,6 +585,7 @@ ErrorMsg writeBundleLibToXMLFile(const string &filepath, const vector<BundleItem
 
 static const tuple<uint32_t, uint32_t, uint32_t> MemberVersion = {1, 0, 0};
 
+
 /*
 ModuleVersion: 1.0
 
@@ -1731,6 +1732,154 @@ ErrorMsg writeModuleToXMLFile(const string &filepath, const ModuleRaw &module) {
             cbcode.append_child(pugi::node_pcdata).set_value(b64_code.c_str());
         }
     }
+
+    // Save to file
+    bool saveSucceeded = doc.save_file(filepath.c_str(), PUGIXML_TEXT("\t"), pugi::format_default | pugi::format_no_declaration);
+    if (!saveSucceeded) {
+        return EStr(EItemXMLFileOpenFailed, string("Failed to save XML file '") + filepath + "'");
+    }
+
+    return "";
+}
+
+/*
+
+ProjectVersion: 1.0
+
+```
+project
+|-- version : 版本号
+|-- [import]
+    |-- abspath : 导入项目绝对路径，为空则使用VULLIB环境变量
+    |-- name : 导入模块名称
+    |-- [configoverride]
+        |-- name : 配置项名称
+        |-- value : 配置项值（或表达式）
+|-- topmodule : 顶层模块名称
+```
+*/
+
+static const tuple<uint32_t, uint32_t, uint32_t> ProjectVersion = {1, 0, 0};
+
+/**
+ * @brief Parse a project from an XML file.
+ * @param filepath The path to the XML file.
+ * @param out_project Output parameter to hold the parsed ProjectRaw.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg parseProjectFromXMLFile(const string &filepath, ProjectRaw &out_project) {
+    pugi::xml_document doc;
+    pugi::xml_parse_result result = doc.load_file(filepath.c_str());
+    if (!result) {
+        return EStr(EItemXMLFileOpenFailed, string("Failed to load XML file '") + filepath + "': " + result.description());
+    }
+
+    pugi::xml_node root = doc.child("project");
+    if (!root) {
+        return EStr(EItemXMLRootMissing, string("Missing root element 'project' in XML file '") + filepath + "'");
+    }
+
+    // version
+    pugi::xml_node version_node = root.child("version");
+    if (!version_node) {
+        return EStr(EItemXMLRequestMissing, string("Missing 'version' element in XML file '") + filepath + "'");
+    }
+    {
+        string version_str = version_node.text().as_string();
+        uint32_t major = 0, minor = 0, patch = 0;
+        if (sscanf(version_str.c_str(), "%u.%u.%u", &major, &minor, &patch) < 2) {
+            return EStr(EItemXMLRequestMissing, string("Invalid 'version' format in XML file '") + filepath + "': " + version_str);
+        }
+        if (make_tuple(major, minor, patch) != ProjectVersion) {
+            return EStr(EItemXMLVersionMismatch, string("Version mismatch in XML file '") + filepath + "': expected 1.0.0, got " + version_str);
+        }
+    }
+
+    // import entries (optional)
+    for (pugi::xml_node import_node : root.children("import")) {
+        ImportRaw imp;
+        pugi::xml_node abspath_node = import_node.child("abspath");
+        if (!abspath_node) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'abspath' in import in XML file '") + filepath + "'");
+        }
+        imp.abspath = abspath_node.text().as_string();
+
+        pugi::xml_node name_node = import_node.child("name");
+        if (!name_node) {
+            return EStr(EItemXMLRequestMissing, string("Missing 'name' in import in XML file '") + filepath + "'");
+        }
+        imp.name = name_node.text().as_string();
+
+        // configoverride entries (optional)
+        for (pugi::xml_node cfg_node : import_node.children("configoverride")) {
+            LocalConfigRaw cfg;
+            pugi::xml_node cfg_name = cfg_node.child("name");
+            if (!cfg_name) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'name' in configoverride in import '") + imp.name + "' in XML file '" + filepath + "'");
+            }
+            cfg.name = cfg_name.text().as_string();
+
+            pugi::xml_node cfg_value = cfg_node.child("value");
+            if (!cfg_value) {
+                return EStr(EItemXMLRequestMissing, string("Missing 'value' in configoverride '") + cfg.name + "' in import '" + imp.name + "' in XML file '" + filepath + "'");
+            }
+            cfg.value = cfg_value.text().as_string();
+            cfg.comment = "";
+
+            imp.config_overrides.push_back(std::move(cfg));
+        }
+
+        out_project.imports.push_back(std::move(imp));
+    }
+
+    // topmodule (required)
+    pugi::xml_node topmodule_node = root.child("topmodule");
+    if (!topmodule_node) {
+        return EStr(EItemXMLRequestMissing, string("Missing 'topmodule' element in XML file '") + filepath + "'");
+    }
+    out_project.topmodule = topmodule_node.text().as_string();
+
+    return "";
+}
+
+/**
+ * @brief Write a project to an XML file.
+ * @param filepath The path to the XML file.
+ * @param project The ProjectRaw to write.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg writeProjectToXMLFile(const string &filepath, const ProjectRaw &project) {
+    pugi::xml_document doc;
+    pugi::xml_node root = doc.append_child("project");
+
+    // version
+    pugi::xml_node version_node = root.append_child("version");
+    char version_buf[64];
+    snprintf(version_buf, sizeof(version_buf), "%u.%u.%u",
+             std::get<0>(ProjectVersion),
+             std::get<1>(ProjectVersion),
+             std::get<2>(ProjectVersion));
+    version_node.append_child(pugi::node_pcdata).set_value(version_buf);
+
+    // import entries (optional)
+    for (const auto &imp : project.imports) {
+        pugi::xml_node import_node = root.append_child("import");
+        pugi::xml_node abspath_node = import_node.append_child("abspath");
+        abspath_node.append_child(pugi::node_pcdata).set_value(imp.abspath.c_str());
+        pugi::xml_node name_node = import_node.append_child("name");
+        name_node.append_child(pugi::node_pcdata).set_value(imp.name.c_str());
+        for (const auto &cfg : imp.config_overrides) {
+            pugi::xml_node cfg_node = import_node.append_child("configoverride");
+            pugi::xml_node cfg_name = cfg_node.append_child("name");
+            cfg_name.append_child(pugi::node_pcdata).set_value(cfg.name.c_str());
+            pugi::xml_node cfg_value = cfg_node.append_child("value");
+            cfg_value.append_child(pugi::node_pcdata).set_value(cfg.value.c_str());
+        }
+    }
+
+    // topmodule (required)
+    pugi::xml_node topmodule_node = root.append_child("topmodule");
+    topmodule_node.append_child(pugi::node_pcdata).set_value(project.topmodule.c_str());
 
     // Save to file
     bool saveSucceeded = doc.save_file(filepath.c_str(), PUGIXML_TEXT("\t"), pugi::format_default | pugi::format_no_declaration);

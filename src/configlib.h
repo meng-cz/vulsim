@@ -70,14 +70,6 @@ public:
     }
 
     /**
-     * @brief Initialize the config library with initial groups and config items.
-     * Current contents will be cleared.
-     * @param initial_groups An unordered map of group names to sets of VulConfigItems.
-     * @return An ErrorMsg indicating failure, empty if success.
-     */
-    ErrorMsg initialize(const unordered_map<GroupName, unordered_set<VulConfigItem>> &initial_groups);
-
-    /**
      * @brief Check if a config item name already exists in the config library.
      * @param name The config item name to check.
      */
@@ -252,8 +244,6 @@ public:
      * @param snapshot_id The snapshot ID to commit.
      */
     void commit(uint64_t snapshot_id);
-
-protected:
 
     VulConfigLib() = default;
 

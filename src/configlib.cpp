@@ -35,19 +35,6 @@ using std::make_unique;
 
 
 /**
- * @brief Initialize the config library with initial groups and config items.
- * Current contents will be cleared.
- * @param initial_groups An unordered map of group names to sets of VulConfigItems.
- * @return An ErrorMsg indicating failure, empty if success.
- */
-ErrorMsg VulConfigLib::initialize(const unordered_map<GroupName, unordered_set<VulConfigItem>> &initial_groups) {
-    clear();
-
-    unordered_set<ConfigName> all_names;
-}
-
-
-/**
  * @brief Build the config reference tree (bidirectional) for a given config item.
  * @param root_config_name The name of the root config item.
  * @param out_root_node Output parameter to hold the root node of the tree.

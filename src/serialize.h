@@ -29,12 +29,12 @@
 
 namespace serialize {
 
-typedef struct {
+struct ConfigItemRaw {
     string  name;
     string  value;
     string  comment;
     string  group;
-} ConfigItemRaw;
+};
 
 /**
  * @brief Parse config library from an XML file.
@@ -52,22 +52,22 @@ ErrorMsg parseConfigLibFromXMLFile(const string &filepath, vector<ConfigItemRaw>
  */
 ErrorMsg writeConfigLibToXMLFile(const string &filepath, const vector<ConfigItemRaw> &configs);
 
-typedef struct {
+struct BundleMemberRaw {
     string  name;
     string  type;
     string  uintlen;
     string  value;
     string  comment;
     vector<string> dims;
-} BundleMemberRaw;
+};
 
-typedef struct {
+struct BundleItemRaw {
     string  name;
     string  comment;
     bool    isenum;
     bool    isalias;
     vector<BundleMemberRaw> members;
-} BundleItemRaw;
+};
 
 /**
  * @brief Parse bundle library from an XML file.
@@ -85,34 +85,34 @@ ErrorMsg parseBundleLibFromXMLFile(const string &filepath, vector<BundleItemRaw>
  */
 ErrorMsg writeBundleLibToXMLFile(const string &filepath, const vector<BundleItemRaw> &bundles);
 
-typedef struct {
+struct ArgRaw {
     string  name;
     string  type;
     string  comment;
-} ArgRaw;
+};
 
-typedef struct {
+struct ReqServRaw {
     string          name;
     string          comment;
     vector<ArgRaw>  args;
     vector<ArgRaw>  rets;
     string          arraysize;
     bool            handshake;
-} ReqServRaw;
+};
 
-typedef struct {
+struct PipePortRaw {
     string  name;
     string  type;
     string  comment;
-} PipePortRaw;
+};
 
-typedef struct {
+struct LocalConfigRaw {
     string  name;
     string  value;
     string  comment;
-} LocalConfigRaw;
+};
 
-typedef struct {
+struct ModuleBaseRaw {
     string  name;
     string  comment;
     vector<LocalConfigRaw>      local_configs;
@@ -121,16 +121,16 @@ typedef struct {
     vector<ReqServRaw>          services;
     vector<PipePortRaw>         pipe_inputs;
     vector<PipePortRaw>         pipe_outputs;
-} ModuleBaseRaw;
+};
 
-typedef struct {
+struct InstanceRaw {
     string          name;
     string          module_name;
     string          comment;
     vector<LocalConfigRaw>  local_config_overrides;
-} InstanceRaw;
+};
 
-typedef struct {
+struct PipeRaw {
     string  name;
     string  type;
     string  comment;
@@ -140,27 +140,27 @@ typedef struct {
     string  latency;
     bool    has_handshake;
     bool    has_valid;
-} PipeRaw;
+};
 
-typedef struct {
+struct ConnectionRaw {
     string  src_instance;
     string  src_name;
     string  dst_instance;
     string  dst_name;
-} ConnectionRaw;
+};
 
-typedef struct {
+struct SeqConnectionRaw {
     string  former_instance;
     string  latter_instance;
-} SeqConnectionRaw;
+};
 
-typedef struct {
+struct CodeblockRaw {
     string instname;
     string blockname;
     vector<string> code_lines;
-} CodeblockRaw;
+};
 
-typedef struct {
+struct ModuleRaw {
     string  name;
     string  comment;
     vector<LocalConfigRaw>      local_configs;
@@ -177,7 +177,7 @@ typedef struct {
     vector<SeqConnectionRaw>    sequence_connections;
     vector<CodeblockRaw>        codeblocks;
     vector<string>              user_header_code_lines;
-} ModuleRaw;
+};
 
 /**
  * @brief Parse a base module from an XML file.
@@ -210,5 +210,33 @@ ErrorMsg parseModuleFromXMLFile(const string &filepath, ModuleRaw &out_module);
  * @return An ErrorMsg indicating failure, empty if success.
  */
 ErrorMsg writeModuleToXMLFile(const string &filepath, const ModuleRaw &module);
+
+
+struct ImportRaw {
+    string abspath;
+    string name;
+    vector<LocalConfigRaw> config_overrides;
+};
+
+struct ProjectRaw {
+    string topmodule;
+    vector<ImportRaw> imports;
+};
+
+/**
+ * @brief Parse a project from an XML file.
+ * @param filepath The path to the XML file.
+ * @param out_project Output parameter to hold the parsed ProjectRaw.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg parseProjectFromXMLFile(const string &filepath, ProjectRaw &out_project);
+
+/**
+ * @brief Write a project to an XML file.
+ * @param filepath The path to the XML file.
+ * @param project The ProjectRaw to write.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg writeProjectToXMLFile(const string &filepath, const ProjectRaw &project);
 
 } // namespace serialize

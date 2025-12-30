@@ -4,7 +4,7 @@
 
 ```
 project_root/
-|-- project_name.xml            # Vul 项目文件
+|-- project_name.vul            # Vul 项目文件
 |-- configlib.xml               # Vul 配置库文件
 |-- bundlelib.xml               # Vul Bundle 库文件
 |-- modules/                    # Vul 模块文件目录
@@ -15,7 +15,7 @@ project_root/
 
 ```
 import_root/
-|-- modulename.xml            # 导入模块文件
+|-- modulename.vulmod            # 导入模块文件
 |-- configlib.xml             # 导入配置库文件
 |-- bundlelib.xml             # 导入 Bundle 库文件
 ```

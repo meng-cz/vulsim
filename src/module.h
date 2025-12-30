@@ -153,6 +153,10 @@ class VulModuleLib {
 public:
     unordered_map<ModuleName, shared_ptr<VulModuleBase>>   modules;
 
+    inline void clear() {
+        modules.clear();
+    }
+
     /**
      * @brief Build the module tree from the module library.
      * Must be called after 'updateDynamicReferences' are called for all modules.
