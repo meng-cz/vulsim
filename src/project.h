@@ -35,19 +35,38 @@ typedef string ProjectName;
 typedef string ProjectPath;
 
 typedef string OperationName;
+typedef string OperationArgName;
 typedef string OperationArg;
 
 class VulProjectOperation;
 
 using OperationFactory = function<unique_ptr<VulProjectOperation>()>;
 
-typedef struct {
+struct VulImport {
     ProjectPath     abspath;
     ModuleName      name;
     unordered_map<ConfigName, VulConfigItem> configs;
     unordered_map<BundleName, VulBundleItem> bundles;
     unordered_map<ConfigName, ConfigValue> config_overrides;
-} VulImport;
+};
+
+struct VulOperationPackage {
+    OperationName       name;
+    unordered_map<OperationArgName, OperationArg>   args;
+};
+
+struct VulOperationResponse {
+    uint32_t            code;
+    string              msg;
+    unordered_map<OperationArgName, string>  results;
+    unordered_map<OperationArgName, vector<string>>  list_results;
+
+    VulOperationResponse() : code(0), msg("") {};
+    VulOperationResponse(const ErrorMsg & err) : code(err.code), msg(err.msg) {};
+};
+
+VulOperationPackage serializeOperationPackageFromJSON(const string &json_str);
+string serializeOperationResponseToJSON(const VulOperationResponse &response);
 
 class VulProject {
 public:
@@ -64,7 +83,12 @@ public:
     bool is_opened = false;
     bool is_modified = false;
 
-    ErrorMsg doOperation(const OperationName &op_name, const vector<OperationArg> &op_args);
+    VulOperationResponse doOperation(const VulOperationPackage &op);
+    inline string doOperationJSON(const string &op_json) {
+        VulOperationPackage op = serializeOperationPackageFromJSON(op_json);
+        VulOperationResponse resp = doOperation(op);
+        return serializeOperationResponseToJSON(resp);
+    }
 
     shared_ptr<VulConfigLib> configlib;
     shared_ptr<VulBundleLib> bundlelib;
@@ -76,6 +100,6 @@ public:
 
 class VulProjectOperation {
 public:
-    virtual ErrorMsg execute(VulProject &project, const vector<OperationArg> &op_args) = 0;
+    virtual VulOperationResponse execute(VulProject &project, const VulOperationPackage &op) = 0;
 };
 

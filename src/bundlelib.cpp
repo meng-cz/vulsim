@@ -775,7 +775,7 @@ ErrorMsg VulBundleLib::extractBundleReferencesAndConfs(
     out_confs.clear();
     out_references.clear();
 
-    ErrorMsg err;
+    string err;
     uint32_t errpos;
 
 

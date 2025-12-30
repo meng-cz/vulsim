@@ -22,6 +22,39 @@
 
 #include "project.h"
 
+#include "json.hpp"
+
+using nlohmann::json;
+
+VulOperationPackage serializeOperationPackageFromJSON(const string &json_str) {
+    VulOperationPackage op;
+    json j = json::parse(json_str);
+    op.name = j.at("name").get<OperationName>();
+    if (j.contains("args")) {
+        for (auto& [key, value] : j.at("args").items()) {
+            op.args[key] = value.get<OperationArg>();
+        }
+    }
+    return op;
+}
+
+string serializeOperationResponseToJSON(const VulOperationResponse &response) {
+    json j;
+    j["code"] = response.code;
+    j["msg"] = response.msg;
+    json args_json;
+    for (const auto& [key, value] : response.results) {
+        args_json[key] = value;
+    }
+    j["results"] = args_json;
+    json list_args_json;
+    for (const auto& [key, value] : response.list_results) {
+        list_args_json[key] = value;
+    }
+    j["list_results"] = list_args_json;
+    return j.dump(1, ' ');
+}
+
 static unordered_map<OperationName, OperationFactory> operationFactories;
 
 bool VulProject::registerOperation(const OperationName &op_name, const OperationFactory &factory) {
@@ -33,17 +66,17 @@ bool VulProject::registerOperation(const OperationName &op_name, const Operation
     return true;
 }
 
-ErrorMsg VulProject::doOperation(const OperationName &op_name, const vector<OperationArg> &op_args) {
-    auto iter = operationFactories.find(op_name);
+VulOperationResponse VulProject::doOperation(const VulOperationPackage &op) {
+    auto iter = operationFactories.find(op.name);
     if (iter == operationFactories.end()) {
-        return EStr(EItemOPInvalid, string("Unsupported operation: ") + op_name);
+        return EStr(EItemOPInvalid, string("Unsupported operation: ") + op.name);
     }
     auto &factory = iter->second;
     auto operation = factory();
     if (!operation) {
-        return EStr(EItemOPInvalid, string("Failed to create operation instance for: ") + op_name);
+        return EStr(EItemOPInvalid, string("Failed to create operation instance for: ") + op.name);
     }
-    return operation->execute(*this, op_args);
+    return operation->execute(*this, op);
 }
 
 
