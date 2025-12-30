@@ -22,7 +22,6 @@
 
 #include "simgen.h"
 #include "toposort.hpp"
-#include "pipetype.hpp"
 
 #include <chrono>
 #include <iomanip>
@@ -41,9 +40,49 @@ const string ApplyTickFunctionName = "apply_next_tick";
 const string UIntClassName = "UInt";
 const string StorageNextClassName = "StorageNext";
 const string StorageNextArrayClassName = "StorageNextArray";
+const string PipeClassName = "Pipe";
 
-string _genPipeClassName(const VulPipe &pipe) {
-    PipeImplType type = determinePipeImplType(pipe);
+
+enum class PipeImplType {
+    Invalid,
+    SimpleNoHandshakeNoBuffer,
+    SimpleValidNoBuffer,
+    SimpleHandshakeNoBuffer,
+    SimpleHandshakeBuffer,
+    MultiPortHandshakeBuffer,
+};
+
+inline PipeImplType determinePipeImplType(uint64_t input, uint64_t output, uint64_t buffer,
+                                         bool has_handshake, bool has_valid) {
+    if (has_handshake) {
+        if (buffer > 0) {
+            if (input > 1 && output > 1) {
+                return PipeImplType::MultiPortHandshakeBuffer;
+            } else {
+                return PipeImplType::SimpleHandshakeBuffer;
+            }
+        } else {
+            if (input > 1 && output > 1) {
+                return PipeImplType::Invalid;
+            } else {
+                return PipeImplType::SimpleHandshakeNoBuffer;
+            }
+        }
+    } else {
+        if (input > 1 && output > 1) {
+            return PipeImplType::Invalid;
+        } else if (has_valid) {
+            return PipeImplType::SimpleValidNoBuffer;
+        } else {
+            return PipeImplType::SimpleNoHandshakeNoBuffer;
+        }
+    }
+}
+
+
+string _genPipeClassName(uint64_t input, uint64_t output, uint64_t buffer,
+                                         bool has_handshake, bool has_valid) {
+    PipeImplType type = determinePipeImplType(input, output, buffer, has_handshake, has_valid);
     switch (type) {
         case PipeImplType::SimpleNoHandshakeNoBuffer: return "Pipe";
         case PipeImplType::SimpleValidNoBuffer: return "PipeV";
@@ -683,13 +722,13 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     // generate pipe instance
     for (const auto &pipe_entry : module.pipe_instances) {
         const VulPipe &pipe = pipe_entry.second;
-        string pipe_class_raw = _genPipeClassName(pipe);
+        string pipe_class_raw = PipeClassName;
         string pipe_class = pipe_class_raw + "<" +
             pipe.type + ", " +
-            std::to_string(pipe.input_size) + ", " +
-            std::to_string(pipe.output_size) + ", " +
-            std::to_string(pipe.buffer_size) + ", " +
-            std::to_string(pipe.latency) + ">";
+            (pipe.input_size) + ", " +
+            (pipe.output_size) + ", " +
+            (pipe.buffer_size) + ", " +
+            (pipe.latency) + ">";
         string pipe_instptr_name = "__instptr_" + pipe_entry.first;
         member_field.push_back("std::unique_ptr<" + pipe_class + "> " + pipe_instptr_name + ";\n");
 
