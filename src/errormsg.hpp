@@ -192,3 +192,11 @@ constexpr uint32_t EOPLoadBundleMissingConf = 30013;
 constexpr uint32_t EOPLoadBundleLoopRef = 30014;
 constexpr uint32_t EOPLoadModuleMissingInst = 30015;
 constexpr uint32_t EOPLoadModuleLoopRef = 30016;
+
+constexpr uint32_t EOPCancel = 30050;
+constexpr uint32_t EOPCancelNotOpened = 30051;
+
+constexpr uint32_t EOPSave = 30060;
+constexpr uint32_t EOPSaveNotOpened = 30061;
+constexpr uint32_t EOPSaveFileFailed = 30062;
+

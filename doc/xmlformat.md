@@ -157,6 +157,13 @@ module
     |-- (latency) : 管道延迟（可选，默认1）
     |-- (handshake) : 是否启用握手（可选，默认false）
     |-- (valid) : 是否启用数据有效标志（可选，默认false）
+|-- [storage/storagenext/storagetmp]
+    |-- name : 成员名称
+    |-- (type) : 成员类型（可选）
+    |-- (uintlen) : 成员类型位宽（可选，针对整数类型）
+    |-- (value) : 成员值（可选，枚举类型时为必须）
+    |-- (comment) : 成员描述（可选）
+    |-- [dims] : 成员数组维度（可选，重复时代表多维）
 |-- [reqconn/pipeconn]
     |-- frominstance : 源实例名称
     |-- fromport : 源端口名称
@@ -166,9 +173,16 @@ module
     |-- frominstance : 源实例名称
     |-- toinstance : 目标实例名称
 |-- (userheadercode)： 用户自定义头文件代码行Base64（可选）
-|-- [codeblock]
-    |-- instance : 模块实例名称
-    |-- blockname : 代码块名称（Req，Serv端口名称）
-    |-- code : 模块实例时钟周期处理代码行Base64（可选）
+|-- [servcode]
+    |-- name : 服务名称
+    |-- code : 代码行Base64
+|-- [childreqcode]
+    |-- instname : 子模块实例名称
+    |-- reqname : 请求名称
+    |-- code : 代码行Base64
+|-- [tickcode]
+    |-- name : 名称
+    |-- (comment) : 注释
+    |-- code : 代码行Base64
 ```
 

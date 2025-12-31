@@ -10,7 +10,8 @@ endif()
 
 include_directories( ./src )
 
-file(GLOB CORE_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+file(GLOB CORE_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/operation/*.cpp")
+
 file(GLOB TUI_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/tui/*.cpp")
 
 file(GLOB_RECURSE GUI_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.cpp")

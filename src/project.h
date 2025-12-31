@@ -63,14 +63,22 @@ typedef string OperationArg;
 
 class VulProjectOperation;
 
-using OperationFactory = function<unique_ptr<VulProjectOperation>()>;
-
 struct VulImport {
     ProjectPath     abspath;
     ModuleName      name;
     unordered_map<ConfigName, VulConfigItem> configs;
     unordered_map<BundleName, VulBundleItem> bundles;
     unordered_map<ConfigName, ConfigValue> config_overrides;
+};
+
+struct VulImportRaw {
+    string abspath;
+    string name;
+    unordered_map<ConfigName, ConfigValue> config_overrides;
+};
+struct VulProjectRaw {
+    ModuleName                      top_module;
+    vector<VulImportRaw>            imports;
 };
 
 struct VulOperationPackage {
@@ -92,6 +100,8 @@ struct VulOperationResponse {
 VulOperationPackage serializeOperationPackageFromJSON(const string &json_str);
 string serializeOperationResponseToJSON(const VulOperationResponse &response);
 
+using OperationFactory = function<unique_ptr<VulProjectOperation>(const VulOperationPackage &)>;
+
 class VulProject {
 public:
     
@@ -101,17 +111,24 @@ public:
         configlib = std::make_shared<VulConfigLib>();
         bundlelib = std::make_shared<VulBundleLib>();
         modulelib = std::make_shared<VulModuleLib>();
+        initEnvs();
     };
 
     ProjectName                 name;
-    ProjectPath                 path;
+    ProjectPath                 dirpath;
 
     ModuleName                  top_module;
 
     bool is_opened = false;
     bool is_modified = false;
 
+    bool is_config_modified = false;
+    bool is_bundle_modified = false;
+    unordered_set<ModuleName> modified_modules;
+
     VulOperationResponse doOperation(const VulOperationPackage &op);
+    void undoLastOperation();
+    void redoLastOperation();
     inline string doOperationJSON(const string &op_json) {
         VulOperationPackage op = serializeOperationPackageFromJSON(op_json);
         VulOperationResponse resp = doOperation(op);
@@ -122,12 +139,44 @@ public:
     shared_ptr<VulBundleLib> bundlelib;
     shared_ptr<VulModuleLib> modulelib;
 
-    vector<ProjectPath>     import_paths;
     unordered_map<ModuleName, VulImport>   imports;
+    vector<ProjectPath>     import_paths;
+    ProjectPath             project_local_path;
+    void initEnvs();
+    string findProjectPathInLocalLibrary(const ProjectName &name);
+
+    std::deque<unique_ptr<VulProjectOperation>>   operation_undo_history;
+    std::deque<unique_ptr<VulProjectOperation>>   operation_redo_history;
+
+    inline void closeAndFinalize() {
+        is_modified = false;
+        is_opened = false;
+        is_config_modified = false;
+        is_bundle_modified = false;
+        modified_modules.clear();
+        name = "";
+        dirpath = "";
+        top_module = "";
+        configlib->clear();
+        bundlelib->clear();
+        modulelib->clear();
+        imports.clear();
+        operation_undo_history.clear();
+        operation_redo_history.clear();
+    }
 };
 
 class VulProjectOperation {
 public:
-    virtual VulOperationResponse execute(VulProject &project, const VulOperationPackage &op) = 0;
+
+    VulProjectOperation(const VulOperationPackage &op) : op(op) {}
+
+    virtual VulOperationResponse execute(VulProject &project) = 0;
+    virtual void undo(VulProject &project) {}; // not supported by default
+    virtual bool is_undoable() const { return false; }; // not undoable by default
+    virtual bool is_modify() const { return false; }; // does not modify project by default
+    
+protected:
+    VulOperationPackage    op;
 };
 

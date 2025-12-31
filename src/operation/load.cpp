@@ -36,14 +36,17 @@ namespace operation_load {
  * If a project is already opened, return an error.
  * 
  * Arguments:
- * - "path": The file path to load the project from.
+ * - "name": The project name to load.
  * - "import_paths": (optional) A colon-separated list of import paths to search for import modules.
  */
 
 
 class LoadOperation : public VulProjectOperation {
 public:
-    virtual VulOperationResponse execute(VulProject &project, const VulOperationPackage &op) override;
+    using VulProjectOperation::VulProjectOperation;
+
+    virtual VulOperationResponse execute(VulProject &project) override;
+    virtual bool is_modify() const override { return true; }; // modifies project
 
     ErrorMsg loadImports(VulProject &project, const vector<string> &import_paths, const string &abspath, const string &name, VulImport &out_import, shared_ptr<VulModuleBase> &out_module_base);
 
@@ -68,54 +71,6 @@ public:
     vector<string> logs;
 };
 
-inline VulBundleItem fromBundleItemRaw(const serialize::BundleItemRaw &raw) {
-    VulBundleItem item;
-    item.name = raw.name;
-    item.comment = raw.comment;
-    item.is_alias = raw.isalias;
-    if (raw.isenum) {
-        for (const auto &enum_member_raw : raw.members) {
-            VulBundleEnumMember enum_member;
-            enum_member.name = enum_member_raw.name;
-            enum_member.value = enum_member_raw.value;
-            enum_member.comment = enum_member_raw.comment;
-            item.enum_members.push_back(enum_member);
-        }
-    } else {
-        for (const auto &member_raw : raw.members) {
-            VulBundleMember member;
-            member.name = member_raw.name;
-            member.type = member_raw.type;
-            member.value = member_raw.value;
-            member.uint_length = member_raw.uintlen;
-            member.dims = member_raw.dims;
-            member.comment = member_raw.comment;
-            item.members.push_back(member);
-        }
-    }
-    return item;
-}
-inline VulReqServ fromReqServRaw(const serialize::ReqServRaw &raw) {
-    VulReqServ reqserv;
-    reqserv.name = raw.name;
-    reqserv.comment = raw.comment;
-    reqserv.has_handshake = raw.handshake;
-    for (const auto &arg_raw : raw.args) {
-        VulArg arg;
-        arg.name = arg_raw.name;
-        arg.type = arg_raw.type;
-        arg.comment = arg_raw.comment;
-        reqserv.args.push_back(arg);
-    }
-    for (const auto &ret_raw : raw.rets) {
-        VulArg ret;
-        ret.name = ret_raw.name;
-        ret.type = ret_raw.type;
-        ret.comment = ret_raw.comment;
-        reqserv.rets.push_back(ret);
-    }
-    return reqserv;
-}
 
 ErrorMsg LoadOperation::loadImports(VulProject &project, const vector<string> &import_paths, const string &abspath, const string &name, VulImport &out_import, shared_ptr<VulModuleBase> &out_module_base) {
     using namespace serialize;
@@ -161,54 +116,12 @@ ErrorMsg LoadOperation::loadImports(VulProject &project, const vector<string> &i
     out_import.bundles.clear();
     out_import.config_overrides.clear();
 
-    shared_ptr<VulExternalModule> import_module = nullptr;
+    shared_ptr<VulExternalModule> import_module = std::make_shared<VulExternalModule>();
     {
-        ModuleBaseRaw module_base_raw;
-        ErrorMsg err = parseModuleBaseFromXMLFile(import_abs_path.string(), module_base_raw);
+        ErrorMsg err = parseModuleBaseFromXMLFile(import_abs_path.string(), *import_module);
         if (err) {
             return err;
         }
-        import_module = std::make_shared<VulExternalModule>();
-        import_module->directory = import_dir.string();
-        import_module->name = module_base_raw.name;
-        import_module->comment = module_base_raw.comment;
-        // parse local configs
-        for (const auto &local_config_raw : module_base_raw.local_configs) {
-            VulLocalConfigItem local_config;
-            local_config.name = local_config_raw.name;
-            local_config.value = local_config_raw.value;
-            local_config.comment = local_config_raw.comment;
-            import_module->local_configs[local_config.name] = local_config;
-        }
-        // parse local bundles
-        for (const auto &bundle_raw : module_base_raw.local_bundles) {
-            import_module->local_bundles[bundle_raw.name] = fromBundleItemRaw(bundle_raw);
-        }
-        // parse requests
-        for (const auto &req_raw : module_base_raw.requests) {
-            import_module->requests[req_raw.name] = fromReqServRaw(req_raw);
-        }
-        // parse services
-        for (const auto &serv_raw : module_base_raw.services) {
-            import_module->services[serv_raw.name] = fromReqServRaw(serv_raw);
-        }
-        // parse pipe inputs
-        for (const auto &pipein_raw : module_base_raw.pipe_inputs) {
-            VulPipePort pipein;
-            pipein.name = pipein_raw.name;
-            pipein.type = pipein_raw.type;
-            pipein.comment = pipein_raw.comment;
-            import_module->pipe_inputs[pipein.name] = pipein;
-        }
-        // parse pipe outputs
-        for (const auto &pipeout_raw : module_base_raw.pipe_outputs) {
-            VulPipePort pipeout;
-            pipeout.name = pipeout_raw.name;
-            pipeout.type = pipeout_raw.type;
-            pipeout.comment = pipeout_raw.comment;
-            import_module->pipe_outputs[pipeout.name] = pipeout;
-        }
-
     }
     logs.emplace_back("Import module '" + name + "' parsed successfully.");
     out_module_base = import_module;
@@ -218,18 +131,13 @@ ErrorMsg LoadOperation::loadImports(VulProject &project, const vector<string> &i
         return EStr(EOPLoadImportInvalidPath, "Config library file '" + configlib_path.string() + "' for import module '" + name + "' does not exist.");
     }
     {
-        vector<ConfigItemRaw> config_items_raw;
+        vector<VulConfigItem> config_items_raw;
         ErrorMsg err = parseConfigLibFromXMLFile(configlib_path.string(), config_items_raw);
         if (err) {
             return err;
         }
         for (const auto &config_item_raw : config_items_raw) {
-            VulConfigItem config_item;
-            config_item.name = config_item_raw.name;
-            config_item.value = config_item_raw.value;
-            config_item.comment = config_item_raw.comment;
-            config_item.is_external = false;
-            out_import.configs[config_item.name] = config_item;
+            out_import.configs[config_item_raw.name] = config_item_raw;
         }
     }
     logs.emplace_back("Config library for import module '" + name + "' loaded successfully.");
@@ -239,13 +147,12 @@ ErrorMsg LoadOperation::loadImports(VulProject &project, const vector<string> &i
         return EStr(EOPLoadImportInvalidPath, "Bundle library file '" + bundlelib_path.string() + "' for import module '" + name + "' does not exist.");
     }
     {
-        vector<BundleItemRaw> bundle_items_raw;
+        vector<VulBundleItem> bundle_items_raw;
         ErrorMsg err = parseBundleLibFromXMLFile(bundlelib_path.string(), bundle_items_raw);
         if (err) {
             return err;
         }
-        for (const auto &bundle_item_raw : bundle_items_raw) {
-            VulBundleItem bundle_item = fromBundleItemRaw(bundle_item_raw);
+        for (const auto &bundle_item : bundle_items_raw) {
             out_import.bundles[bundle_item.name] = bundle_item;
         }
     }
@@ -264,131 +171,15 @@ ErrorMsg LoadOperation::loadModule(VulProject &project, const string &module_pat
     }
 
     shared_ptr<VulModule> module_ptr = std::make_shared<VulModule>();
-    ModuleRaw module_raw;
-    ErrorMsg err = parseModuleFromXMLFile(module_abs_path.string(), module_raw);
+    ErrorMsg err = parseModuleFromXMLFile(module_abs_path.string(), *module_ptr);
     if (err) {
         return err;
     }
-    module_ptr->name = module_raw.name;
-    module_ptr->comment = module_raw.comment;
-    // parse local configs
-    for (const auto &local_config_raw : module_raw.local_configs) {
-        VulLocalConfigItem local_config;
-        local_config.name = local_config_raw.name;
-        local_config.value = local_config_raw.value;
-        local_config.comment = local_config_raw.comment;
-        module_ptr->local_configs[local_config.name] = local_config;
-    }
-    // parse local bundles
-    for (const auto &bundle_raw : module_raw.local_bundles) {
-        module_ptr->local_bundles[bundle_raw.name] = fromBundleItemRaw(bundle_raw);
-    }
-    // parse requests
-    for (const auto &req_raw : module_raw.requests) {
-        module_ptr->requests[req_raw.name] = fromReqServRaw(req_raw);
-    }
-    // parse services
-    for (const auto &serv_raw : module_raw.services) {
-        module_ptr->services[serv_raw.name] = fromReqServRaw(serv_raw);
-    }
-    // parse pipe inputs
-    for (const auto &pipein_raw : module_raw.pipe_inputs) {
-        VulPipePort pipein;
-        pipein.name = pipein_raw.name;
-        pipein.type = pipein_raw.type;
-        pipein.comment = pipein_raw.comment;
-        module_ptr->pipe_inputs[pipein.name] = pipein;
-    }
-    // parse pipe outputs
-    for (const auto &pipeout_raw : module_raw.pipe_outputs) {
-        VulPipePort pipeout;
-        pipeout.name = pipeout_raw.name;
-        pipeout.type = pipeout_raw.type;
-        pipeout.comment = pipeout_raw.comment;
-        module_ptr->pipe_outputs[pipeout.name] = pipeout;
-    }
-    // parse instances
-    for (const auto &inst_raw : module_raw.instances) {
-        VulInstance instance;
-        instance.name = inst_raw.name;
-        instance.module_name = inst_raw.module_name;
-        instance.comment = inst_raw.comment;
-        for (const auto &config_override_raw : inst_raw.local_config_overrides) {
-            instance.local_config_overrides[config_override_raw.name] = config_override_raw.value;
-        }
-        module_ptr->instances[instance.name] = instance;
-    }
-    // parse pipes
-    for (const auto &pipe_raw : module_raw.pipes) {
-        VulPipe pipe;
-        pipe.name = pipe_raw.name;
-        pipe.type = pipe_raw.type;
-        pipe.comment = pipe_raw.comment;
-        pipe.input_size = pipe_raw.input_size;
-        pipe.output_size = pipe_raw.output_size;
-        pipe.buffer_size = pipe_raw.buffer_size;
-        pipe.latency = pipe_raw.latency;
-        pipe.has_handshake = pipe_raw.has_handshake;
-        pipe.has_valid = pipe_raw.has_valid;
-        module_ptr->pipe_instances[pipe.name] = pipe;
-    }
-    // parse reqserv connections
-    for (const auto &conn_raw : module_raw.reqserv_connections) {
-        VulReqServConnection conn;
-        conn.req_instance = conn_raw.src_instance;
-        conn.req_name = conn_raw.src_name;
-        conn.serv_instance = conn_raw.dst_instance;
-        conn.serv_name = conn_raw.dst_name;
-        module_ptr->req_connections[conn.req_instance].insert(conn);
-    }
-    // parse pipe connections
-    for (const auto &conn_raw : module_raw.pipe_connections) {
-        VulModulePipeConnection conn;
-        conn.instance = conn_raw.src_instance;
-        conn.instance_pipe_port = conn_raw.src_name;
-        conn.pipe_instance = conn_raw.dst_instance;
-        conn.top_pipe_port = conn_raw.dst_name;
-        module_ptr->mod_pipe_connections[conn.instance].insert(conn);
-    }
-    // parse stalled connections
-    for (const auto &seqconn_raw : module_raw.stall_connections) {
-        VulSequenceConnection conn;
-        conn.former_instance = seqconn_raw.former_instance;
-        conn.latter_instance = seqconn_raw.latter_instance;
-        module_ptr->stalled_connections.insert(conn);
-    }
-    // parse sequence connections
-    for (const auto &seqconn_raw : module_raw.sequence_connections) {
-        VulSequenceConnection conn;
-        conn.former_instance = seqconn_raw.former_instance;
-        conn.latter_instance = seqconn_raw.latter_instance;
-        module_ptr->update_constraints.insert(conn);
-    }
-
-    // parse user_header_field_codelines
-    module_ptr->user_header_field_codelines = module_raw.user_header_code_lines;
-    // parse codeblocks
-    for (const auto &codeblock_raw : module_raw.codeblocks) {
-        if (codeblock_raw.instname.empty() || codeblock_raw.instname == VulModule::TopInterface) {
-            if (module_ptr->services.find(codeblock_raw.blockname) != module_ptr->services.end()) {
-                module_ptr->serv_codelines[codeblock_raw.blockname] = codeblock_raw.code_lines;
-            } else {
-                VulTickCodeBlock tick_block;
-                tick_block.name = codeblock_raw.blockname;
-                tick_block.comment = "";
-                tick_block.codelines = codeblock_raw.code_lines;
-                module_ptr->user_tick_codeblocks[codeblock_raw.blockname] = tick_block;
-            }
-        } else {
-            module_ptr->req_codelines[codeblock_raw.instname][codeblock_raw.blockname] = codeblock_raw.code_lines;
-        }
-    }
-
     out_module_base = module_ptr;
     return ErrorMsg(); // Success
 }
 
-VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperationPackage &op) {
+VulOperationResponse LoadOperation::execute(VulProject &project) {
     logs.clear();
 
     auto &configlib = project.configlib;
@@ -399,9 +190,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
         return resp(EOPLoadNotClosed, "Project already opened, cannot load another project without closing first.");
     }
 
-    configlib->clear();
-    bundlelib->clear();
-    modulelib->clear();
+    project.closeAndFinalize();
     
 
     using namespace serialize;
@@ -409,11 +198,14 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
 
     string path_str;
     {
-        auto it = op.args.find("path");
+        auto it = op.args.find("name");
         if (it == op.args.end()) {
-            return resp(EOPLoadMissArg, "Load operation missing 'path' argument.");
+            return resp(EOPLoadMissArg, "Load operation missing 'name' argument.");
         }
-        path_str = it->second;
+        path_str = project.findProjectPathInLocalLibrary(it->second);
+        if (path_str.empty()) {
+            return resp(EOPLoadInvalidPath, "Cannot find project '" + it->second + "' in local project library.");
+        }
     }
     path project_abs_path = absolute(path_str);
     if (!exists(project_abs_path) || !is_regular_file(project_abs_path)) {
@@ -422,7 +214,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
     logs.emplace_back("Loading project from '" + project_abs_path.string() + "'...");
     path project_dir = project_abs_path.parent_path();
 
-    ProjectRaw project_raw;
+    VulProjectRaw project_raw;
     ErrorMsg err = serialize::parseProjectFromXMLFile(project_abs_path.string(), project_raw);
     if (err) {
         return resp(err);
@@ -465,9 +257,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
         if (err) {
             return resp(err);
         }
-        for (const auto &config_override_raw : import_raw.config_overrides) {
-            import.meta.config_overrides[config_override_raw.name] = config_override_raw.value;
-        }
+        import.meta.config_overrides = import_raw.config_overrides;
     }
     logs.emplace_back("All imports loaded successfully.");
 
@@ -477,17 +267,12 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
         if (!exists(configlib_path) || !is_regular_file(configlib_path)) {
             return resp(EOPLoadInvalidPath, "Config library file '" + configlib_path.string() + "' does not exist.");
         }
-        vector<ConfigItemRaw> config_items_raw;
+        vector<VulConfigItem> config_items_raw;
         ErrorMsg err = parseConfigLibFromXMLFile(configlib_path.string(), config_items_raw);
         if (err) {
             return resp(err);
         }
-        for (const auto &config_item_raw : config_items_raw) {
-            VulConfigItem config_item;
-            config_item.name = config_item_raw.name;
-            config_item.value = config_item_raw.value;
-            config_item.comment = config_item_raw.comment;
-            config_item.is_external = false;
+        for (const auto &config_item : config_items_raw) {
             all_configs_from_lib[config_item.name] = config_item;
         }
     }
@@ -499,13 +284,12 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
         if (!exists(bundlelib_path) || !is_regular_file(bundlelib_path)) {
             return resp(EOPLoadInvalidPath, "Bundle library file '" + bundlelib_path.string() + "' does not exist.");
         }
-        vector<BundleItemRaw> bundle_items_raw;
+        vector<VulBundleItem> bundle_items_raw;
         ErrorMsg err = parseBundleLibFromXMLFile(bundlelib_path.string(), bundle_items_raw);
         if (err) {
             return resp(err);
         }
-        for (const auto &bundle_item_raw : bundle_items_raw) {
-            VulBundleItem bundle_item = fromBundleItemRaw(bundle_item_raw);
+        for (const auto &bundle_item : bundle_items_raw) {
             all_bundles_from_lib[bundle_item.name] = bundle_item;
         }
     }
@@ -536,7 +320,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
     unordered_map<ConfigName, GroupName> final_config_to_group;
     {
         // first, add all configs from imports
-        for (const auto &import : imports) {
+        for (auto &import : imports) {
             for (const auto &config_pair : import.meta.configs) {
                 auto iter = final_configs.find(config_pair.first);
                 if (iter != final_configs.end()) {
@@ -553,12 +337,22 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
                     logs.emplace_back("Warning: Config override '" + override_pair.first + "' from import '" + import.meta.name + "' does not match any existing config item.");
                 }
             }
+            for (const auto &config_pair : import.meta.configs) {
+                auto iter = all_configs_from_lib.find(config_pair.first);
+                if (iter != all_configs_from_lib.end()) {
+                    logs.emplace_back("Warning: Config item '" + config_pair.first + "' from main config library overrides config item previously defined by '" + final_config_to_group[config_pair.first] + "'.");
+                    import.meta.config_overrides[config_pair.first] = iter->second.value;
+                    all_configs_from_lib.erase(iter);
+                    project.is_modified = true;
+                    project.is_config_modified = true;
+                }
+            }
         }
-        // then, add/override with configs from main configlib
+        // then, add configs from main configlib
         for (const auto &config_pair : all_configs_from_lib) {
             auto iter = final_configs.find(config_pair.first);
-            if (iter != final_configs.end()) {
-                logs.emplace_back("Warning: Config item '" + config_pair.first + "' from main config library overrides config item previously defined by '" + final_config_to_group[config_pair.first] + "'.");
+            if (iter != final_configs.end()) [[unlikely]] {
+                continue; // already defined by imports, skip
             }
             final_configs[config_pair.first] = config_pair.second;
             final_config_to_group[config_pair.first] = configlib->DefaultGroupName;
@@ -721,6 +515,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
                 }
                 module_refby_edges[inst.module_name].insert(module_pair.first);
             }
+
         }
         vector<string> loop_nodes;
         auto sorted_modules = topologicalSort(all_module_nodes, module_refby_edges, loop_nodes);
@@ -735,10 +530,9 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
 
     // finalize
     project.name = project_abs_path.stem().string();
-    project.path = project_dir.string();
-    project.top_module = project_raw.topmodule;
+    project.dirpath = project_dir.string();
+    project.top_module = project_raw.top_module;
     project.is_opened = true;
-    project.is_modified = false;
     project.imports.clear();
     for (const auto &import : imports) {
         project.imports[import.meta.name] = import.meta;
@@ -765,15 +559,13 @@ VulOperationResponse LoadOperation::execute(VulProject &project, const VulOperat
     return resp(); // Success
 }
 
-OperationFactory loadOperationFactory = []() {
-    return std::make_unique<LoadOperation>();
+OperationFactory loadOperationFactory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {
+    return std::make_unique<LoadOperation>(op);
 };
 
 struct RegisterLoadOperation {
     RegisterLoadOperation() {
-        if (!VulProject::registerOperation("load", loadOperationFactory)) {
-            throw std::runtime_error("Failed to register load operation");
-        }
+        VulProject::registerOperation("load", loadOperationFactory);
     }
 } registerLoadOperationInstance;
 
