@@ -255,6 +255,10 @@ public:
     } ConfigEntry;
 
     unordered_map<ConfigName, ConfigEntry> config_items; // config item name -> ConfigEntry
+
+
+private:
+
     unordered_map<GroupName, unordered_set<ConfigName>> groups; // group name -> set of config item names
     
     struct SnapshotEntry {

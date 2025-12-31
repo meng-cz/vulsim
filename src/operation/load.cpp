@@ -539,21 +539,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
     }
 
     configlib->config_items.swap(final_config_entries);
-    configlib->groups.clear();
-    for (const auto &confige_pair : configlib->config_items) {
-        configlib->groups[confige_pair.second.group].insert(confige_pair.first);
-    }
-
     bundlelib->bundles.swap(final_bundle_entries);
-    for (const auto &bundlee_pair : bundlelib->bundles) {
-        for (const auto &tag : bundlee_pair.second.tags) {
-            bundlelib->tag_bundles[tag].insert(bundlee_pair.first);
-        }
-        for (const auto &conf : bundlee_pair.second.confs) {
-            bundlelib->conf_bundles[conf].insert(bundlee_pair.first);
-        }
-    }
-
     modulelib->modules.swap(final_modules);
 
     return resp(); // Success

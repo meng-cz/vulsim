@@ -277,22 +277,11 @@ public:
 
     unordered_map<BundleName, BundleEntry> bundles; // bundle name -> BundleEntry
 
-    unordered_map<BundleTag, unordered_set<BundleName>> tag_bundles; // tag -> set of bundle names
-    unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles; // config -> set of bundle names using it
-
     inline void clear() {
         bundles.clear();
         tag_bundles.clear();
         conf_bundles.clear();
     }
-
-
-    typedef struct {
-        unordered_map<BundleName, BundleEntry> bundles;
-        unordered_map<BundleTag, unordered_set<BundleName>> tag_bundles;
-        unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles;
-    } SnapshotEntry;
-    unordered_map<uint64_t, SnapshotEntry> snapshots;
 
     /**
      * @brief Check if two bundle definitions are the same.
@@ -301,6 +290,20 @@ public:
      * @return true if the definitions are the same, false otherwise.
      */
     bool _isBundleSameDefinition(const VulBundleItem &a, const VulBundleItem &b) const;
+
+
+private:
+
+    unordered_map<BundleTag, unordered_set<BundleName>> tag_bundles; // tag -> set of bundle names
+    unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles; // config -> set of bundle names using it
+
+
+    typedef struct {
+        unordered_map<BundleName, BundleEntry> bundles;
+        unordered_map<BundleTag, unordered_set<BundleName>> tag_bundles;
+        unordered_map<ConfigName, unordered_set<BundleName>> conf_bundles;
+    } SnapshotEntry;
+    unordered_map<uint64_t, SnapshotEntry> snapshots;
 
 };
 
