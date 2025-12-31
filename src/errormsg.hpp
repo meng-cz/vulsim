@@ -200,3 +200,8 @@ constexpr uint32_t EOPSave = 30060;
 constexpr uint32_t EOPSaveNotOpened = 30061;
 constexpr uint32_t EOPSaveFileFailed = 30062;
 
+constexpr uint32_t EOPCreate = 30070;
+constexpr uint32_t EOPCreateAlreadyOpened = 30071;
+constexpr uint32_t EOPCreateMissArg = 30072;
+constexpr uint32_t EOPCreateNameExists = 30073;
+constexpr uint32_t EOPCreateFileFailed = 30074;
