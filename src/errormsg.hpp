@@ -205,3 +205,45 @@ constexpr uint32_t EOPCreateAlreadyOpened = 30071;
 constexpr uint32_t EOPCreateMissArg = 30072;
 constexpr uint32_t EOPCreateNameExists = 30073;
 constexpr uint32_t EOPCreateFileFailed = 30074;
+
+constexpr uint32_t EOPInfo= 30080;
+constexpr uint32_t EOPInfoNotOpened = 30081;
+
+constexpr uint32_t EOPUndo = 30090;
+constexpr uint32_t EOPUndoFailed = 30091;
+constexpr uint32_t EOPRedoFailed = 30092;
+
+constexpr uint32_t EOPConfAdd = 30200;
+constexpr uint32_t EOPConfAddMissArg = 30201;
+constexpr uint32_t EOPConfAddNameInvalid = 30202;
+constexpr uint32_t EOPConfAddNameConflict = 30203;
+constexpr uint32_t EOPConfAddValueInvalid = 30204;
+constexpr uint32_t EOPConfAddRefNotFound = 30205;
+
+constexpr uint32_t EOPConfRename = 30210;
+constexpr uint32_t EOPConfRenameMissArg = 30211;
+constexpr uint32_t EOPConfRenameNameNotFound = 30212;
+constexpr uint32_t EOPConfRenameNameInvalid = 30213;
+constexpr uint32_t EOPConfRenameNameConflict = 30214;
+constexpr uint32_t EOPConfRenameReferenced = 30215;
+constexpr uint32_t EOPConfRenameImport = 30216;
+
+constexpr uint32_t EOPConfComment = 30220;
+constexpr uint32_t EOPConfCommentMissArg = 30221;
+constexpr uint32_t EOPConfCommentNameNotFound = 30222;
+constexpr uint32_t EOPConfCommentImport = 30223;
+
+constexpr uint32_t EOPConfUpdate = 30230;
+constexpr uint32_t EOPConfUpdateMissArg = 30231;
+constexpr uint32_t EOPConfUpdateNameNotFound = 30232;
+constexpr uint32_t EOPConfUpdateValueInvalid = 30233;
+
+constexpr uint32_t EOPConfRemove = 30240;
+constexpr uint32_t EOPConfRemoveMissArg = 30241;
+constexpr uint32_t EOPConfRemoveNameNotFound = 30242;
+constexpr uint32_t EOPConfRemoveReferenced = 30243;
+constexpr uint32_t EOPConfRemoveImport = 30244;
+
+constexpr uint32_t EOPConfListRef = 30250;
+constexpr uint32_t EOPConfListRefMissArg = 30251;
+constexpr uint32_t EOPConfListRefNameNotFound = 30252;

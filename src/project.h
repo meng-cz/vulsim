@@ -101,6 +101,14 @@ public:
         }
         return nullptr;
     };
+    bool getBoolArg(const OperationArgName &arg_name, uint32_t index) const {
+        auto arg_ptr = getArg(arg_name, index);
+        if (!arg_ptr) {
+            return false;
+        }
+        string val_str = *arg_ptr;
+        return (val_str == "true" || val_str == "True" || val_str == "TRUE" || val_str == "1");
+    }
 };
 
 struct VulOperationResponse {
@@ -144,8 +152,8 @@ public:
     unordered_set<ModuleName> modified_modules;
 
     VulOperationResponse doOperation(const VulOperationPackage &op);
-    void undoLastOperation();
-    void redoLastOperation();
+    string undoLastOperation();
+    string redoLastOperation();
     inline string doOperationJSON(const string &op_json) {
         VulOperationPackage op = serializeOperationPackageFromJSON(op_json);
         VulOperationResponse resp = doOperation(op);
@@ -183,21 +191,27 @@ public:
         operation_undo_history.clear();
         operation_redo_history.clear();
     }
+
+    inline bool globalNameConflictCheck(const string &name) const {
+        return configlib->config_items.find(name) != configlib->config_items.end() ||
+               bundlelib->bundles.find(name) != bundlelib->bundles.end() ||
+               modulelib->modules.find(name) != modulelib->modules.end();
+    }
 };
 
 class VulProjectOperation {
 public:
 
-    VulProjectOperation(const VulOperationPackage &op) : op(op) {}
+    VulProjectOperation(const VulOperationPackage &op);
 
     virtual VulOperationResponse execute(VulProject &project) = 0;
-    virtual void undo(VulProject &project) {}; // not supported by default
+    virtual string undo(VulProject &project) { return  ""; }; // not supported by default
     virtual bool is_undoable() const { return false; }; // not undoable by default
     virtual bool is_modify() const { return false; }; // does not modify project by default
 
     virtual vector<string> help() const { return vector<string>(); };
     
-protected:
     VulOperationPackage    op;
+    string timestamp;
 };
 

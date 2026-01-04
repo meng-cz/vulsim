@@ -121,6 +121,11 @@ public:
         return {
             "List all projects in the local project library.",
             "Arguments: None",
+            "Results:",
+            "  - rootpath: The root path of the local project library.",
+            "  - project_names: List of project names found.",
+            "  - project_paths: List of project paths found, relative to rootpath.",
+            "  - project_modtimes: List of last modification times for each project."
         };
     }
 };

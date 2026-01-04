@@ -184,24 +184,29 @@ VulOperationResponse VulProject::doOperation(const VulOperationPackage &op) {
     return resp;
 }
 
-void VulProject::undoLastOperation() {
+string VulProject::undoLastOperation() {
     if (operation_undo_history.empty()) {
-        return;
+        return "";
     }
     auto &operation = operation_undo_history.back();
     if (operation->is_undoable()) {
-        operation->undo(*this);
+        string err = operation->undo(*this);
+        if (!err.empty()) {
+            return err;
+        }
         operation_redo_history.push_back(std::move(operation));
         operation_undo_history.pop_back();
     } else {
         // should not happen
         operation_undo_history.clear();
         operation_redo_history.clear();
+        return "Last operation is not undoable.";
     }
+    return "";
 }
-void VulProject::redoLastOperation() {
+string VulProject::redoLastOperation() {
     if (operation_redo_history.empty()) {
-        return;
+        return "";
     }
     auto &operation = operation_redo_history.back();
     VulOperationResponse resp = operation->execute(*this);
@@ -212,7 +217,9 @@ void VulProject::redoLastOperation() {
         // should not happen
         operation_undo_history.clear();
         operation_redo_history.clear();
+        return resp.msg;
     }
+    return "";
 }
 
 vector<string> VulProject::listHelpForOperation(const OperationName &op_name) const {
@@ -232,4 +239,11 @@ vector<string> VulProject::listHelpForOperation(const OperationName &op_name) co
     return operation->help();
 }
 
-
+VulProjectOperation::VulProjectOperation(const VulOperationPackage &op) : op(op) {
+    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+    std::time_t tt = std::chrono::system_clock::to_time_t(now);
+    std::tm* ptm = std::localtime(&tt);
+    std::ostringstream oss;
+    oss << std::put_time(ptm, "%Y-%m-%d %H:%M:%S");
+    timestamp = oss.str();
+}
