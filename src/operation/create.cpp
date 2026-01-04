@@ -48,11 +48,11 @@ public:
 
         ProjectName proj_name;
         {
-            auto it = op.args.find("name");
-            if (it == op.args.end()) {
+            auto it = op.getArg("name", 0);
+            if (!it) {
                 return EStr(EOPCreateMissArg, "Missing argument: name");
             }
-            proj_name = it->second;
+            proj_name = *it;
 
             string findpath = project.findProjectPathInLocalLibrary(proj_name);
             if (!findpath.empty()) {
@@ -99,6 +99,17 @@ public:
     }
     
     virtual bool is_modify() const override { return true; }; // modifies project
+
+    virtual vector<string> help() const override {
+        return {
+            "Create Operation:",
+            "Create a new project with the specified name in the local project library.",
+            "The new project will be initialized with empty module, config, and bundle libraries.",
+            "",
+            "Arguments:",
+            "- [0] 'name': The name of the new project to create."
+        };
+    }
 };
 
 OperationFactory createOperationFactory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {

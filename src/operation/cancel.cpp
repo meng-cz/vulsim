@@ -37,6 +37,16 @@ public:
         return VulOperationResponse(); // Success
     }
     virtual bool is_modify() const override { return true; }; // modifies project
+
+    virtual vector<string> help() const override {
+        return {
+            "Cancel Operation:",
+            "Close the currently opened project without saving any changes.",
+            "If no project is opened, return an error.",
+            "",
+            "Arguments: None.",
+        };
+    }
 };
 
 OperationFactory cancelOperationFactory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {

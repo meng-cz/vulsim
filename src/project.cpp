@@ -100,8 +100,33 @@ VulOperationPackage serializeOperationPackageFromJSON(const string &json_str) {
     json j = json::parse(json_str);
     op.name = j.at("name").get<OperationName>();
     if (j.contains("args")) {
-        for (auto& [key, value] : j.at("args").items()) {
-            op.args[key] = value.get<OperationArg>();
+        /*
+        {
+        "args": [
+            { "index": 0, "name": "width", "value": 64 },
+            { "index": 1, "name": "height", "value": 32 },
+            { "index": 2, "name": "pipeline_depth", "value": 5 }
+        ]
+        }
+        */
+        for (const auto &arg_json : j.at("args")) {
+            VulOperationArg arg;
+            if (arg_json.contains("index")) {
+                arg.index = arg_json.at("index").get<uint32_t>();
+            } else {
+                arg.index = -1;
+            }
+            if (arg_json.contains("name")) {
+                arg.name = arg_json.at("name").get<OperationArgName>();
+            } else {
+                arg.name = "";
+            }
+            if (arg_json.contains("value")) {
+                arg.value = arg_json.at("value").get<OperationArg>();
+            } else {
+                arg.value = OperationArg();
+            }
+            op.arg_list.push_back(std::move(arg));
         }
     }
     return op;
@@ -190,6 +215,21 @@ void VulProject::redoLastOperation() {
     }
 }
 
-
+vector<string> VulProject::listHelpForOperation(const OperationName &op_name) const {
+    auto iter = operationFactories.find(op_name);
+    if (iter == operationFactories.end()) {
+        vector<string> ret;
+        ret.push_back("No help available for unknown operation: " + op_name);
+        return ret;
+    }
+    auto &factory = iter->second;
+    auto operation = factory(VulOperationPackage());
+    if (!operation) {
+        vector<string> ret;
+        ret.push_back("Failed to create operation instance for: " + op_name);
+        return ret;
+    }
+    return operation->help();
+}
 
 

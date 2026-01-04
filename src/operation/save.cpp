@@ -33,8 +33,18 @@ using namespace serialize;
 class SaveOperation : public VulProjectOperation {
 public:
     using VulProjectOperation::VulProjectOperation;
-    
+
     virtual VulOperationResponse execute(VulProject &project) override;
+
+    virtual vector<string> help() const override {
+        return {
+            "Save Operation:",
+            "Save the currently opened project to disk, including its modules, configs, and bundles.",
+            "If no project is opened, return an error.",
+            "",
+            "Arguments: None.",
+        };
+    }
 };
 
 VulOperationResponse SaveOperation::execute(VulProject &project) {

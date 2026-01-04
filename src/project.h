@@ -81,9 +81,26 @@ struct VulProjectRaw {
     vector<VulImportRaw>            imports;
 };
 
-struct VulOperationPackage {
+struct VulOperationArg {
+    uint32_t            index;
+    OperationArgName    name;
+    OperationArg        value;
+};
+
+class VulOperationPackage {
+public:
     OperationName       name;
-    unordered_map<OperationArgName, OperationArg>   args;
+    vector<VulOperationArg>    arg_list;
+
+    std::unique_ptr<OperationArg> getArg(const OperationArgName &arg_name, uint32_t index) const {
+        for (const auto &arg : arg_list) {
+            if ((!arg.name.empty() && arg.name != arg_name) || (arg.index != -1 && arg.index != index)) {
+                continue;
+            }
+            return std::make_unique<OperationArg>(arg.value);
+        }
+        return nullptr;
+    };
 };
 
 struct VulOperationResponse {
@@ -135,6 +152,8 @@ public:
         return serializeOperationResponseToJSON(resp);
     }
 
+    vector<string> listHelpForOperation(const OperationName &op_name) const;
+
     shared_ptr<VulConfigLib> configlib;
     shared_ptr<VulBundleLib> bundlelib;
     shared_ptr<VulModuleLib> modulelib;
@@ -175,6 +194,8 @@ public:
     virtual void undo(VulProject &project) {}; // not supported by default
     virtual bool is_undoable() const { return false; }; // not undoable by default
     virtual bool is_modify() const { return false; }; // does not modify project by default
+
+    virtual vector<string> help() const { return vector<string>(); };
     
 protected:
     VulOperationPackage    op;

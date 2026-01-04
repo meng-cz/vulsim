@@ -117,6 +117,12 @@ public:
         return ret;
     }
 
+    virtual vector<string> help() const override {
+        return {
+            "List all projects in the local project library.",
+            "Arguments: None",
+        };
+    }
 };
 
 OperationFactory factory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {

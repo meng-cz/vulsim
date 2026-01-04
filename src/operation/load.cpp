@@ -48,6 +48,18 @@ public:
     virtual VulOperationResponse execute(VulProject &project) override;
     virtual bool is_modify() const override { return true; }; // modifies project
 
+    virtual vector<string> help() const override {
+        return {
+            "Load Operation:",
+            "Load a project from disk, including its modules, configs, and bundles.",
+            "If a project is already opened, return an error.",
+            "",
+            "Arguments:",
+            "- [0] 'name': The project name to load.",
+            "- [1] 'import_paths': (optional) A colon-separated list of import paths to search for import modules."
+        };
+    }
+
     ErrorMsg loadImports(VulProject &project, const vector<string> &import_paths, const string &abspath, const string &name, VulImport &out_import, shared_ptr<VulModuleBase> &out_module_base);
 
     ErrorMsg loadModule(VulProject &project, const string &module_path, shared_ptr<VulModuleBase> &out_module_base);
@@ -198,13 +210,13 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
 
     string path_str;
     {
-        auto it = op.args.find("name");
-        if (it == op.args.end()) {
+        auto iter = op.getArg("name", 0);
+        if (!iter) {
             return resp(EOPLoadMissArg, "Load operation missing 'name' argument.");
         }
-        path_str = project.findProjectPathInLocalLibrary(it->second);
+        path_str = project.findProjectPathInLocalLibrary(*iter);
         if (path_str.empty()) {
-            return resp(EOPLoadInvalidPath, "Cannot find project '" + it->second + "' in local project library.");
+            return resp(EOPLoadInvalidPath, "Cannot find project '" + *iter + "' in local project library.");
         }
     }
     path project_abs_path = absolute(path_str);
@@ -223,9 +235,9 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
 
     vector<string> additional_import_paths = project.import_paths;
     {
-        auto iter = op.args.find("import_paths");;
-        if (iter != op.args.end()) {
-            string import_paths_str = iter->second;
+        auto iter = op.getArg("import_paths", 1);
+        if (iter) {
+            string import_paths_str = *iter;
             size_t start = 0;
             size_t end = import_paths_str.find(':');
             while (end != string::npos) {
