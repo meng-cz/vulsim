@@ -126,7 +126,7 @@ auto factory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperati
 };
 struct RegisterConfigLibListRefOperation {
     RegisterConfigLibListRefOperation() {
-        VulProject::registerOperation("configlib_listref", factory);
+        VulProject::registerOperation("configlib.listref", factory);
     }
 } registerConfigLibListRefOperationInstance;
 

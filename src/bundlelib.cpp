@@ -32,6 +32,190 @@
 using std::make_unique;
 using std::make_shared;
 
+#include "json.hpp"
+using nlohmann::json;
+
+/**
+ * json format:
+ * {
+ *   "members": [
+ *    {
+ *    "name": "...",
+ *    "comment": "...",
+ *    "type": "...",
+ *    "value": "...",
+ *    "uint_length": "...",
+ *    "dims": ["...", "...", ...]
+ *   },
+ *   "enum_members": [
+ *   {
+ *   "name": "...",
+ *   "comment": "...",
+ *   "value": "..."
+ *   },
+ *   "is_alias": true/false
+ * }
+ */
+
+string VulBundleItem::toMemberJson() const {
+    json j;
+    j["is_alias"] = is_alias;
+    j["members"] = json::array();
+    for (const auto &mem : members) {
+        json jm;
+        jm["name"] = mem.name;
+        jm["comment"] = mem.comment;
+        jm["type"] = mem.type;
+        jm["value"] = mem.value;
+        jm["uint_length"] = mem.uint_length;
+        jm["dims"] = json::array();
+        for (const auto &d : mem.dims) {
+            jm["dims"].push_back(d);
+        }
+        j["members"].push_back(jm);
+    }
+    j["enum_members"] = json::array();
+    for (const auto &emen : enum_members) {
+        json je;
+        je["name"] = emen.name;
+        je["comment"] = emen.comment;
+        je["value"] = emen.value;
+        j["enum_members"].push_back(je);
+    }
+    return j.dump();
+};
+void VulBundleItem::fromMemberJson(const string &json_str) {
+    members.clear();
+    enum_members.clear();
+    json j = json::parse(json_str);
+    if (j.contains("is_alias")) {
+        is_alias = j.at("is_alias").get<bool>();
+    } else {
+        is_alias = false;
+    }
+    if (j.contains("members")) {
+        for (const auto &jm : j.at("members")) {
+            VulBundleMember mem;
+            mem.name = jm.contains("name") ? jm.at("name").get<BMemberName>() : "";
+            mem.comment =  jm.contains("comment") ? jm.at("comment").get<Comment>() : "";
+            mem.type = jm.contains("type") ? jm.at("type").get<BMemberType>() : "";
+            mem.value = jm.contains("value") ? jm.at("value").get<ConfigValue>() : ConfigValue();
+            mem.uint_length = jm.contains("uint_length") ? jm.at("uint_length").get<ConfigValue>() : ConfigValue();
+            if (jm.contains("dims"))
+            {
+                for (const auto &d : jm.at("dims")) {
+                    mem.dims.push_back(d.get<ConfigValue>());
+                }
+            }
+            members.push_back(mem);
+        }
+    }
+    if (j.contains("enum_members")) {
+        for (const auto &je : j.at("enum_members")) {
+            VulBundleEnumMember emen;
+            emen.name = je.contains("name") ? je.at("name").get<BMemberName>() : "";
+            emen.comment = je.contains("comment") ? je.at("comment").get<Comment>() : "";
+            emen.value = je.contains("value") ? je.at("value").get<ConfigValue>() : ConfigValue();
+            enum_members.push_back(emen);
+        }
+    }
+}
+
+string VulBundleItem::checkAndExtractReferences(unordered_set<BundleName> &out_bundle_refs, unordered_set<ConfigName> &out_config_refs) const {
+    
+    auto &out_confs = out_config_refs;
+    auto &out_references = out_bundle_refs;
+
+    out_confs.clear();
+    out_references.clear();
+
+    string err;
+    uint32_t errpos;
+
+    // check alias
+    if (is_alias) {
+        if (members.size() != 1) {
+            return string("Alias bundle '") + name + string("' must have exactly one member");
+        }
+    }
+
+    // check enum
+    if (!enum_members.empty()) {
+        if (!members.empty()) {
+            return string("Bundle '") + name + string("' has invalid definition: enum members cannot coexist with other member types");
+        }
+        unordered_set<BundleName> enum_names;
+        for (const auto &enum_member : enum_members) {
+            if (!isValidIdentifier(enum_member.name)) {
+                return string("Invalid enum member name '") + enum_member.name + string("' in bundle '") + name + string("'");
+            }
+            if (!enum_member.value.empty()) {
+                auto confs = config_parser::parseReferencedIdentifier(enum_member.value, errpos, err);
+                if (!confs) {
+                    return string("Invalid enum member value expression '") + enum_member.value + string("' in bundle '") + name + string("': ") + err;
+                }
+                for (const auto &conf_name : *confs) {
+                    out_confs.insert(conf_name);
+                }
+            }
+            if (enum_names.find(enum_member.name) != enum_names.end()) {
+                return string("Enum member '") + enum_member.name + string("' in bundle '") + name + string("' has duplicate name");
+            }
+            enum_names.insert(enum_member.name);
+        }
+        return "";
+    }
+    
+    // check members
+    for (const auto &member : members) {
+        if (!isValidIdentifier(member.name)) {
+            return string("Invalid member name '") + member.name + string("' in bundle '") + name + string("'");
+        }
+        // check type
+        if (!member.uint_length.empty()) {
+            // this is a uint member
+            if (!member.type.empty() && member.type != "__uint__") {
+                return string("Member '") + member.name + string("' in bundle '") + name + string("' has type/length mismatch: length specified for non-uint type");
+            }
+            auto confs = config_parser::parseReferencedIdentifier(member.uint_length, errpos, err);
+            if (!confs) {
+                return string("Invalid uint length expression '") + member.uint_length + string("' in member '") + member.name + string("' in bundle '") + name + string("'");
+            }
+            for (const auto &conf_name : *confs) {
+                out_confs.insert(conf_name);
+            }
+        } else if (!member.type.empty()) {
+            if (!isBasicVulType(member.type)) {
+                // check if it's a bundle type
+                if (!member.value.empty()) {
+                    return string("Member '") + member.name + string("' in bundle '") + name + string("' of bundle type cannot have a default value");
+                }
+                out_references.insert(member.type);
+            }
+        } else {
+            return string("Member '") + member.name + string("' in bundle '") + name + string("' is missing type or length");
+        }
+        // check default value
+        if (!member.value.empty()) {
+            auto confs = config_parser::parseReferencedIdentifier(member.value, errpos, err);
+            if (!confs) {
+                return string("Invalid default value expression '") + member.value + string("' in member '") + member.name + string("' in bundle '") + name + string("'");
+            }
+            for (const auto &conf_name : *confs) {
+                out_confs.insert(conf_name);
+            }
+        }
+        // check array dimensions
+        for (const auto &dim_expr : member.dims) {
+            auto confs = config_parser::parseReferencedIdentifier(dim_expr, errpos, err);
+            if (!confs) {
+                return string("Invalid array dimension expression '") + dim_expr + string("' in member '") + member.name + string("' in bundle '") + name + string("'");
+            }
+        }
+    }
+
+    return "";
+}
 
 /**
  * @brief Build the bundle reference tree (bidirectional) for a given bundle.

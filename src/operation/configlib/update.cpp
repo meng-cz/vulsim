@@ -85,6 +85,44 @@ VulOperationResponse ConfigLibUpdateOperation::execute(VulProject &project) {
         return EStr(EOPConfUpdateValueInvalid, string("Invalid config value expression for '") + name + "': Self-reference is not allowed.");
     }
 
+    // check loop
+    struct LoopCheckNode {
+        ConfigName name;
+        vector<ConfigName> references;
+    };
+    vector<LoopCheckNode> loop_check_stack;
+    unordered_set<ConfigName> in_stack;
+    loop_check_stack.push_back({name, vector<ConfigName>(referenced.begin(), referenced.end())});
+    in_stack.insert(name);
+    while (!loop_check_stack.empty()) {
+        auto &current_node = loop_check_stack.back();
+        if (current_node.references.empty()) {
+            in_stack.erase(current_node.name);
+            loop_check_stack.pop_back();
+            continue;
+        }
+        ConfigName next_name = current_node.references.back();
+        current_node.references.pop_back();
+        if (in_stack.find(next_name) != in_stack.end()) {
+            string pathstr = "";
+            for (const auto &node : loop_check_stack) {
+                if (!pathstr.empty()) {
+                    pathstr += " -> ";
+                }
+                pathstr += node.name;
+            }
+            return EStr(EOPConfUpdateRefLoop, string("Invalid config value expression for '") + name + "': Circular reference detected :" + pathstr + ".");
+        }
+        auto next_iter = configlib->config_items.find(next_name);
+        if (next_iter != configlib->config_items.end()) {
+            const auto &next_confe = next_iter->second;
+            if (!next_confe.references.empty()) {
+                loop_check_stack.push_back({next_name, vector<ConfigName>(next_confe.references.begin(), next_confe.references.end())});
+                in_stack.insert(next_name);
+            }
+        }
+    }
+
     for (const auto &ref_name : confe.references) {
         auto ref_item_iter = configlib->config_items.find(ref_name);
         if (ref_item_iter != configlib->config_items.end()) [[likely]] {

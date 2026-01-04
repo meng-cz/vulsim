@@ -7,10 +7,11 @@
 ```json
 {
     "name": "operation_name",
-    "args": {
-        "key1": "value1",
-        // 操作参数
-    }
+    "args": [
+            { "index": 0, "name": "width", "value": 64 },
+            { "index": 1, "name": "height", "value": 32 },
+            { "index": 2, "name": "pipeline_depth", "value": 5 }
+        ]
 }
 ```
 

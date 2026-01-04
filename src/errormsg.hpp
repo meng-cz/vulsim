@@ -237,6 +237,7 @@ constexpr uint32_t EOPConfUpdate = 30230;
 constexpr uint32_t EOPConfUpdateMissArg = 30231;
 constexpr uint32_t EOPConfUpdateNameNotFound = 30232;
 constexpr uint32_t EOPConfUpdateValueInvalid = 30233;
+constexpr uint32_t EOPConfUpdateRefLoop = 30234;
 
 constexpr uint32_t EOPConfRemove = 30240;
 constexpr uint32_t EOPConfRemoveMissArg = 30241;
@@ -247,3 +248,13 @@ constexpr uint32_t EOPConfRemoveImport = 30244;
 constexpr uint32_t EOPConfListRef = 30250;
 constexpr uint32_t EOPConfListRefMissArg = 30251;
 constexpr uint32_t EOPConfListRefNameNotFound = 30252;
+
+constexpr uint32_t EOPBundAdd = 30400;
+constexpr uint32_t EOPBundAddMissArg = 30401;
+constexpr uint32_t EOPBundAddNameInvalid = 30402;
+constexpr uint32_t EOPBundAddNameConflict = 30403;
+constexpr uint32_t EOPBundAddDefinitionInvalid = 30404;
+
+constexpr uint32_t EOPBundListRef = 30410;
+constexpr uint32_t EOPBundListRefMissArg = 30411;
+constexpr uint32_t EOPBundListRefNameNotFound = 30412;
