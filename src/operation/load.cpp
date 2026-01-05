@@ -387,7 +387,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
         // then, add/override with bundles from main bundlelib
         for (const auto &bundle_pair : all_bundles_from_lib) {
             if (final_bundles.find(bundle_pair.first) != final_bundles.end()) {
-                if (!bundlelib->_isBundleSameDefinition(bundle_pair.second, final_bundles[bundle_pair.first])) {
+                if (bundle_pair.second != final_bundles[bundle_pair.first]) {
                     return resp(EOPLoadBundleConflict, "Bundle item '" + bundle_pair.first + "' from main bundle library conflicts with bundle item previously defined.");
                 }
             } else {
@@ -477,13 +477,9 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
             VulBundleLib::BundleEntry entry;
             entry.item = bundle_pair.second;
             entry.tags = final_bundle_to_tags[bundle_pair.first];
-            ErrorMsg err = bundlelib->extractBundleReferencesAndConfs(
-                bundle_pair.second,
-                entry.references,
-                entry.confs
-            );
-            if (err) {
-                return resp(EOPLoadBundleInvalidValue, "Bundle item '" + bundle_pair.first + "' has invalid value during reference extraction: " + err.msg);
+            string err = bundle_pair.second.checkAndExtractReferences(entry.references, entry.confs);
+            if (!err.empty()) {
+                return resp(EOPLoadBundleInvalidValue, "Bundle item '" + bundle_pair.first + "' has invalid value during reference extraction: " + err);
             }
             for (const auto &conf : entry.confs) {
                 if (final_config_entries.find(conf) == final_config_entries.end()) {
