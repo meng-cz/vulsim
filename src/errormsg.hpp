@@ -258,3 +258,27 @@ constexpr uint32_t EOPBundAddDefinitionInvalid = 30404;
 constexpr uint32_t EOPBundListRef = 30410;
 constexpr uint32_t EOPBundListRefMissArg = 30411;
 constexpr uint32_t EOPBundListRefNameNotFound = 30412;
+
+constexpr uint32_t EOPBundRename = 30420;
+constexpr uint32_t EOPBundRenameMissArg = 30421;
+constexpr uint32_t EOPBundRenameNameNotFound = 30422;
+constexpr uint32_t EOPBundRenameNameConflict = 30423;
+constexpr uint32_t EOPBundRenameReferenced = 30424;
+constexpr uint32_t EOPBundRenameImport = 30425;
+
+constexpr uint32_t EOPBundComment = 30430;
+constexpr uint32_t EOPBundCommentMissArg = 30431;
+constexpr uint32_t EOPBundCommentNameNotFound = 30432;
+
+constexpr uint32_t EOPBundUpdate = 30440;
+constexpr uint32_t EOPBundUpdateMissArg = 30441;
+constexpr uint32_t EOPBundUpdateNameNotFound = 30442;
+constexpr uint32_t EOPBundUpdateDefinitionInvalid = 30443;
+constexpr uint32_t EOPBundUpdateImport = 30444;
+constexpr uint32_t EOPBundUpdateRefLoop = 30445;
+
+constexpr uint32_t EOPBundRemove = 30450;
+constexpr uint32_t EOPBundRemoveMissArg = 30451;
+constexpr uint32_t EOPBundRemoveNameNotFound = 30452;
+constexpr uint32_t EOPBundRemoveReferenced = 30453;
+constexpr uint32_t EOPBundRemoveImport = 30454;
