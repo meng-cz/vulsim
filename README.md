@@ -38,8 +38,6 @@ TODO: user guide.
 
 ## 构建
 
-概述：基于CMake+Qt6构建
-
 TODO：详细构建方式
 
 ## “泺源”简介
@@ -54,4 +52,4 @@ TODO：详细构建方式
 
 - pugixml: [https://github.com/zeux/pugixml](https://github.com/zeux/pugixml)
 - json : [https://github.com/nlohmann/json](https://github.com/nlohmann/json)
-
+- argparse : [https://github.com/p-ranav/argparse](https://github.com/p-ranav/argparse)
