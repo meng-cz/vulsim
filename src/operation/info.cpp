@@ -87,7 +87,14 @@ public:
 
 };
 
-
+auto factory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {
+    return make_unique<InfoOperation>(op);
+};
+struct Register {
+    Register() {
+        VulProject::registerOperation("info", factory);
+    }
+} register_instance;
 
 
 } // namespace operation_info

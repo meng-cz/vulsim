@@ -179,5 +179,10 @@ string BundleLibUpdateOperation::undo(VulProject &project) {
 auto factory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {
     return make_unique<BundleLibUpdateOperation>(op);
 };
+struct Register {
+    Register() {
+        VulProject::registerOperation("bundlelib.update", factory);
+    }
+} register_bundlelib_update_operation;
 
 } // namespace operation_bundlelib_update
