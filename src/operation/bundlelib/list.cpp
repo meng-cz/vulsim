@@ -22,6 +22,8 @@
 
 #include "project.h"
 
+#include "serializejson.h"
+
 namespace operation_bundlelib_list {
 
 class BundleLibListOperation : public VulProjectOperation {
@@ -106,7 +108,7 @@ VulOperationResponse BundleLibListOperation::execute(VulProject &project) {
         }
         tags.push_back(tag_str);
         if (include_definition) {
-            definitions.push_back(bunde_entry.item.toMemberJson());
+            definitions.push_back(serialize::serializeBundleItemToJSON(bunde_entry.item));
         }
         if (include_references) {
             string refs;

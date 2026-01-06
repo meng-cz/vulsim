@@ -69,11 +69,7 @@ public:
     vector<VulBundleEnumMember>     enum_members;   // if not empty, other members must be empty
     bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
 
-    string toMemberJson() const;
-    void fromMemberJson(const string &json_str);
-
     string checkAndExtractReferences(unordered_set<BundleName> &out_bundle_refs, unordered_set<ConfigName> &out_config_refs) const;
-
 };
 
 bool operator==(const VulBundleItem &a, const VulBundleItem &b);

@@ -22,6 +22,8 @@
 
 #include "project.h"
 
+#include "serializejson.h"
+
 namespace operation_bundlelib_update {
 
 class BundleLibUpdateOperation : public VulProjectOperation {
@@ -78,7 +80,7 @@ VulOperationResponse BundleLibUpdateOperation::execute(VulProject &project) {
     previous_item = bunde.item;
     new_item.name = bundle_name;
     new_item.comment = previous_item.comment;
-    new_item.fromMemberJson(definition_json);
+    serialize::parseBundleItemFromJSON(definition_json, new_item);
 
     VulBundleLib::BundleEntry new_entry;
     string err = new_item.checkAndExtractReferences(new_entry.references, new_entry.confs);

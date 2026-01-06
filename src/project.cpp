@@ -22,9 +22,7 @@
 
 #include "project.h"
 
-#include "json.hpp"
-
-using nlohmann::json;
+#include <filesystem>
 
 void VulProject::initEnvs() {
 
@@ -95,60 +93,6 @@ string VulProject::findProjectPathInLocalLibrary(const ProjectName &name) {
     return "";
 }
 
-VulOperationPackage serializeOperationPackageFromJSON(const string &json_str) {
-    VulOperationPackage op;
-    json j = json::parse(json_str);
-    op.name = j.at("name").get<OperationName>();
-    if (j.contains("args")) {
-        /*
-        {
-        "args": [
-            { "index": 0, "name": "width", "value": 64 },
-            { "index": 1, "name": "height", "value": 32 },
-            { "index": 2, "name": "pipeline_depth", "value": 5 }
-        ]
-        }
-        */
-        for (const auto &arg_json : j.at("args")) {
-            VulOperationArg arg;
-            if (arg_json.contains("index")) {
-                arg.index = arg_json.at("index").get<uint32_t>();
-            } else {
-                arg.index = -1;
-            }
-            if (arg_json.contains("name")) {
-                arg.name = arg_json.at("name").get<OperationArgName>();
-            } else {
-                arg.name = "";
-            }
-            if (arg_json.contains("value")) {
-                arg.value = arg_json.at("value").get<OperationArg>();
-            } else {
-                arg.value = OperationArg();
-            }
-            op.arg_list.push_back(std::move(arg));
-        }
-    }
-    return op;
-}
-
-string serializeOperationResponseToJSON(const VulOperationResponse &response) {
-    json j;
-    j["code"] = response.code;
-    j["msg"] = response.msg;
-    json args_json;
-    for (const auto& [key, value] : response.results) {
-        args_json[key] = value;
-    }
-    j["results"] = args_json;
-    json list_args_json;
-    for (const auto& [key, value] : response.list_results) {
-        list_args_json[key] = value;
-    }
-    j["list_results"] = list_args_json;
-    return j.dump(1, ' ');
-}
-
 static unordered_map<OperationName, OperationFactory> operationFactories;
 
 bool VulProject::registerOperation(const OperationName &op_name, const OperationFactory &factory) {
@@ -158,6 +102,14 @@ bool VulProject::registerOperation(const OperationName &op_name, const Operation
     }
     operationFactories[op_name] = factory;
     return true;
+}
+
+vector<OperationName> VulProject::listAllRegisteredOperations() {
+    vector<OperationName> op_names;
+    for (const auto& [name, factory] : operationFactories) {
+        op_names.push_back(name);
+    }
+    return op_names;
 }
 
 VulOperationResponse VulProject::doOperation(const VulOperationPackage &op) {

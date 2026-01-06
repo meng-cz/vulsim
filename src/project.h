@@ -122,15 +122,13 @@ struct VulOperationResponse {
     VulOperationResponse(const uint32_t c, const string &m) : code(c), msg(m) {};
 };
 
-VulOperationPackage serializeOperationPackageFromJSON(const string &json_str);
-string serializeOperationResponseToJSON(const VulOperationResponse &response);
-
 using OperationFactory = function<unique_ptr<VulProjectOperation>(const VulOperationPackage &)>;
 
 class VulProject {
 public:
     
     static bool registerOperation(const OperationName &op_name, const OperationFactory &factory);
+    static vector<OperationName> listAllRegisteredOperations();
 
     VulProject(const vector<ProjectPath> &import_paths) : import_paths(import_paths) {
         configlib = std::make_shared<VulConfigLib>();
@@ -154,11 +152,6 @@ public:
     VulOperationResponse doOperation(const VulOperationPackage &op);
     string undoLastOperation();
     string redoLastOperation();
-    inline string doOperationJSON(const string &op_json) {
-        VulOperationPackage op = serializeOperationPackageFromJSON(op_json);
-        VulOperationResponse resp = doOperation(op);
-        return serializeOperationResponseToJSON(resp);
-    }
 
     vector<string> listHelpForOperation(const OperationName &op_name) const;
 

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "project.h"
+#include "serializejson.h"
 
 namespace operation_bundlelib_add {
 
@@ -90,7 +91,7 @@ VulOperationResponse BundleLibAddOperation::execute(VulProject &project) {
 
     if (!definition.empty()) {
         try {
-            added_bundle.fromMemberJson(definition);
+            serialize::parseBundleItemFromJSON(definition, added_bundle);
         } catch (const std::exception &e) {
             return EStr(EOPBundAddDefinitionInvalid, string("Invalid bundle definition JSON: ") + e.what());
         }

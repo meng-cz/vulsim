@@ -25,6 +25,7 @@
 
 #include "tcpsocket.hpp"
 #include "argparse.hpp"
+#include "serializejson.h"
 
 #include <atomic>
 #include <mutex>
@@ -42,6 +43,8 @@ std::atomic<bool> g_main_socket_terminate_flag;
 int32_t g_port_main_socket = 17995;
 
 void main_socket_thread_func() {
+    using namespace serialize;
+
     TCPSocket main_socket(g_port_main_socket, g_listening_public_address, println_stdout);
     while (!g_main_socket_terminate_flag.load(std::memory_order_acquire)) {
         string req_json = main_socket.receive_blocked();
