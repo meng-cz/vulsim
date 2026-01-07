@@ -282,3 +282,60 @@ constexpr uint32_t EOPBundRemoveMissArg = 30451;
 constexpr uint32_t EOPBundRemoveNameNotFound = 30452;
 constexpr uint32_t EOPBundRemoveReferenced = 30453;
 constexpr uint32_t EOPBundRemoveImport = 30454;
+
+constexpr uint32_t EOPModAdd = 31000;
+constexpr uint32_t EOPModAddMissArg = 31001;
+constexpr uint32_t EOPModAddNameInvalid = 31002;
+constexpr uint32_t EOPModAddNameConflict = 31003;
+
+constexpr uint32_t EOPModRemove = 31010;
+constexpr uint32_t EOPModRemoveMissArg = 31011;
+constexpr uint32_t EOPModRemoveNameNotFound = 31012;
+constexpr uint32_t EOPModRemoveImport = 31013;
+constexpr uint32_t EOPModRemoveNotEmpty = 31014;
+
+constexpr uint32_t EOPModRename = 31020;
+constexpr uint32_t EOPModRenameMissArg = 31021;
+constexpr uint32_t EOPModRenameNameNotFound = 31022;
+constexpr uint32_t EOPModRenameNameInvalid = 31023;
+constexpr uint32_t EOPModRenameNameConflict = 31024;
+constexpr uint32_t EOPModRenameImport = 31025;
+constexpr uint32_t EOPModRenameReferenced = 31026;
+
+constexpr uint32_t EOPModCommonMissArg = 31030;
+constexpr uint32_t EOPModCommonNotFound = 31031;
+constexpr uint32_t EOPModCommonImport = 31032;
+
+constexpr uint32_t EOPModConn = 31100;
+constexpr uint32_t EOPModConnMissArg = 31101;
+constexpr uint32_t EOPModConnSrcInstNotFound = 31102;
+constexpr uint32_t EOPModConnSrcPortNotFound = 31103;
+constexpr uint32_t EOPModConnDstInstNotFound = 31104;
+constexpr uint32_t EOPModConnDstPortNotFound = 31105;
+constexpr uint32_t EOPModConnMismatch = 31106;
+constexpr uint32_t EOPModConnMultiConn = 31107;
+constexpr uint32_t EOPModConnAlreadyExists = 31108;
+
+constexpr uint32_t EOPModPConn = 31120;
+constexpr uint32_t EOPModPConnMissArg = 31121;
+constexpr uint32_t EOPModPConnSrcInstNotFound = 31122;
+constexpr uint32_t EOPModPConnSrcPortNotFound = 31123;
+constexpr uint32_t EOPModPConnDstPipeNotFound = 31124;
+constexpr uint32_t EOPModPConnDstPortNotFound = 31125;
+constexpr uint32_t EOPModPConnMismatch = 31126;
+constexpr uint32_t EOPModPConnMultiConn = 31127;
+constexpr uint32_t EOPModPConnAlreadyExists = 31128;
+
+constexpr uint32_t EOPModSConn = 31140;
+constexpr uint32_t EOPModSConnMissArg = 31141;
+constexpr uint32_t EOPModSConnSrcInstNotFound = 31142;
+constexpr uint32_t EOPModSConnDstInstNotFound = 31143;
+constexpr uint32_t EOPModSConnSelfLoop = 31144;
+constexpr uint32_t EOPModSConnLoop = 31145;
+
+constexpr uint32_t EOPModUConn = 31160;
+constexpr uint32_t EOPModUConnMissArg = 31161;
+constexpr uint32_t EOPModUConnSrcInstNotFound = 31162;
+constexpr uint32_t EOPModUConnDstInstNotFound = 31163;
+constexpr uint32_t EOPModUConnSelfLoop = 31164;
+constexpr uint32_t EOPModUConnLoop = 31165;

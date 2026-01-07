@@ -35,5 +35,17 @@ string serializeOperationResponseToJSON(const VulOperationResponse &response);
 string serializeBundleItemToJSON(const VulBundleItem &bundle);
 void parseBundleItemFromJSON(const string &json_str, VulBundleItem &out_bundle);
 
+string serializeReqServToJSON(const VulReqServ &reqserv);
+void parseReqServFromJSON(const string &json_str, VulReqServ &out_reqserv);
+
+string serializeInstanceToJSON(const VulInstance &inst);
+void parseInstanceFromJSON(const string &json_str, VulInstance &out_inst);
+
+string serializePipeToJSON(const VulPipe &pipe);
+void parsePipeFromJSON(const string &json_str, VulPipe &out_pipe);
+
+string serializeModuleInfoToJSON(const VulModule &mod_info);
+
+string serializeModuleBaseInfoToJSON(const VulModuleBase &mod_info);
 
 } // namespace serialize

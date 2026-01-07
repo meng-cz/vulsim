@@ -80,6 +80,53 @@ public:
         }
         return true;
     }
+
+    inline string signatureArgNameList() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += args[i].name;
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += rets[i].name;
+        }
+        return sig;
+    }
+
+    inline string signatureArgTypeOnly() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += args[i].type + " " + (isBasicVulType(args[i].type) ? "" : "&");
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += rets[i].type + " *";
+        }
+        return sig;
+    }
+
+    inline string signatureArgOnly() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += (args[i].type + " " + (isBasicVulType(args[i].type) ? "" : "& ") + args[i].name);
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += (rets[i].type + " * " + rets[i].name);
+        }
+        return sig;
+    }
+
+    inline string signatureNoRetType(const string name_prefix = "") const {
+        return  name_prefix + name + "(" + signatureArgOnly() + ")";
+    }
+
+    inline string signatureFull(const string name_prefix = "") const {
+        return (has_handshake ? "bool " : "void ") + signatureNoRetType(name_prefix);
+    }
 };
 
 
