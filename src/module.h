@@ -130,6 +130,13 @@ public:
     virtual ErrorMsg updateDynamicReferences();
 
     virtual bool isExternalModule() const = 0; 
+
+    virtual bool isEmptyModule() const {
+        return requests.empty() &&
+               services.empty() &&
+               pipe_inputs.empty() &&
+               pipe_outputs.empty();
+    }
 };
 
 class ModuleTreeNode {
@@ -286,6 +293,15 @@ typedef struct {
     vector<CCodeLine>   codelines;     // user tick function body codelines
 } VulTickCodeBlock;
 
+inline bool isCodeLineEmpty(const vector<CCodeLine> &codelines) {
+    for (const auto &line : codelines) {
+        if (!line.empty() && line.find_first_not_of(" \t\r\n") != string::npos) {
+            return false;
+        }
+    }
+    return true;
+}
+
 class VulModule : public VulModuleBase {
 public:
 
@@ -333,6 +349,25 @@ public:
 
     unordered_set<VulSequenceConnection, SeqConnHash>    stalled_connections;
     unordered_set<VulSequenceConnection, SeqConnHash>    update_constraints;
+
+    unique_ptr<vector<InstanceName>> getInstanceUpdateOrder(const vector<VulSequenceConnection> & additional_conn, vector<InstanceName> & looped_inst) const;
+
+    inline unique_ptr<vector<InstanceName>> getInstanceUpdateOrder(const VulSequenceConnection & additional_conn, vector<InstanceName> & looped_inst) const {
+        vector<VulSequenceConnection> additional_conns;
+        additional_conns.push_back(additional_conn);
+        return getInstanceUpdateOrder(additional_conns, looped_inst);
+    }
+
+    inline unique_ptr<vector<InstanceName>> getInstanceUpdateOrder(vector<InstanceName> & looped_inst) const {
+        vector<VulSequenceConnection> dummy_additional_conn;
+        return getInstanceUpdateOrder(dummy_additional_conn, looped_inst);
+    }
+
+    virtual bool isEmptyModule() const override {
+        return VulModuleBase::isEmptyModule() &&
+               instances.empty() &&
+               pipe_instances.empty();
+    }
 
     /**
      * @brief Check if the given name conflicts with existing names in local scope.

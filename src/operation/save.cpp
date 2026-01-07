@@ -69,6 +69,12 @@ VulOperationResponse SaveOperation::execute(VulProject &project) {
         path project_file = tmp_save_dir / (project.name + ".vul");
         VulProjectRaw project_raw;
         project_raw.top_module = project.top_module;
+        project_raw.imports.clear();
+        project_raw.modules.clear();
+        for (const auto &mod_pair : project.modulelib->modules) {
+            const ModuleName &mod_name = mod_pair.first;
+            project_raw.modules.push_back(mod_name);
+        }
         for (const auto &imp_pair : project.imports) {
             const ModuleName &mod_name = imp_pair.first;
             const VulImport &imp = imp_pair.second;

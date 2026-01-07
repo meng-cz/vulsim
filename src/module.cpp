@@ -983,3 +983,55 @@ ErrorMsg VulModule::_6_validateStallSequenceConnections(shared_ptr<VulConfigLib>
     return "";
 }
 
+unique_ptr<vector<InstanceName>> VulModule::getInstanceUpdateOrder(const vector<VulSequenceConnection> & additional_conn, vector<InstanceName> & looped_inst) const {
+    
+    unordered_set<InstanceName> update_seq_instances;
+    unordered_map<InstanceName, unordered_set<InstanceName>> update_seq_graph;
+
+    unordered_set<InstanceName> all_user_tick_instances;
+
+    for (const auto &inst_entry : instances) {
+        update_seq_instances.insert(inst_entry.first);
+        update_seq_graph[inst_entry.first] = unordered_set<InstanceName>();
+    }
+    for (const auto &cb : user_tick_codeblocks) {
+        all_user_tick_instances.insert(cb.first);
+        update_seq_instances.insert(cb.first);
+        update_seq_graph[cb.first] = unordered_set<InstanceName>();
+    }
+
+    auto addConn = [&](const VulSequenceConnection & conn) {
+        if (conn.former_instance != TopInterface && update_seq_instances.find(conn.former_instance) == update_seq_instances.end()) {
+            return;
+        }
+        if (conn.latter_instance != TopInterface && update_seq_instances.find(conn.latter_instance) == update_seq_instances.end()) {
+            return;
+        }
+        if (conn.former_instance == conn.latter_instance) {
+            return;
+        }
+        if (conn.former_instance == TopInterface) {
+            // add all user_tick instances to former side
+            for (const auto &cb : user_tick_codeblocks) {
+                update_seq_graph[cb.first].insert(conn.latter_instance);
+            }
+        } else if (conn.latter_instance == TopInterface) {
+            // add all user_tick instances to latter side
+            update_seq_graph[conn.former_instance].insert(all_user_tick_instances.begin(), all_user_tick_instances.end());
+        } else {
+            update_seq_graph[conn.former_instance].insert(conn.latter_instance);
+        }
+    };
+
+    for (const auto &conn : stalled_connections) {
+        addConn(conn);
+    }
+    for (const auto &conn : update_constraints) {
+        addConn(conn);
+    }
+    for (const auto &conn : additional_conn) {
+        addConn(conn);
+    }
+    return topologicalSort(update_seq_instances, update_seq_graph, looped_inst);
+}
+

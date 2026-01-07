@@ -79,6 +79,7 @@ struct VulImportRaw {
 struct VulProjectRaw {
     ModuleName                      top_module;
     vector<VulImportRaw>            imports;
+    vector<ModuleName>              modules;
 };
 
 struct VulOperationArg {

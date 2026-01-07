@@ -313,15 +313,18 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
         if (!exists(modules_dir) || !is_directory(modules_dir)) {
             return resp(EOPLoadInvalidPath, "Modules directory '" + modules_dir.string() + "' does not exist.");
         }
-        for (const auto &ent : recursive_directory_iterator(modules_dir, directory_options::skip_permission_denied)) {
-            if (!ent.is_regular_file() || ent.path().extension() != ".xml") continue;
+        for (const auto &module_name : project_raw.modules) {
+            path module_path = modules_dir / (module_name + ".xml");
+            if (!exists(module_path) || !is_regular_file(module_path)) {
+                return resp(EOPLoadInvalidPath, "Module file '" + module_path.string() + "' does not exist.");
+            }
             shared_ptr<VulModuleBase> module_base;
-            ErrorMsg err = loadModule(project, ent.path().string(), module_base);
+            ErrorMsg err = loadModule(project, module_path.string(), module_base);
             if (err) {
                 return resp(err);
             }
             all_modules[module_base->name] = module_base;
-            logs.emplace_back("Module '" + module_base->name + "' loaded successfully from '" + ent.path().string() + "'.");
+            logs.emplace_back("Module '" + module_base->name + "' loaded successfully from '" + module_path.string() + "'.");
         }
     }
     logs.emplace_back("All modules loaded successfully. Total " + std::to_string(all_modules.size()) + " modules.");

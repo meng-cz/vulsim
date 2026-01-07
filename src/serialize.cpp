@@ -1576,6 +1576,7 @@ project
         |-- name : 配置项名称
         |-- value : 配置项值（或表达式）
 |-- topmodule : 顶层模块名称
+|-- [module]
 ```
 */
 
@@ -1657,6 +1658,10 @@ ErrorMsg parseProjectFromXMLFile(const string &filepath, VulProjectRaw &out_proj
     }
     out_project.top_module = topmodule_node.text().as_string();
 
+    for (pugi::xml_node module_node : root.children("module")) {
+        out_project.modules.push_back(module_node.text().as_string());
+    }
+
     return "";
 }
 
@@ -1698,6 +1703,11 @@ ErrorMsg writeProjectToXMLFile(const string &filepath, const VulProjectRaw &proj
     // topmodule (required)
     pugi::xml_node topmodule_node = root.append_child("topmodule");
     topmodule_node.append_child(pugi::node_pcdata).set_value(project.top_module.c_str());
+
+    for (const auto &module_name : project.modules) {
+        pugi::xml_node module_node = root.append_child("module");
+        module_node.append_child(pugi::node_pcdata).set_value(module_name.c_str());
+    }
 
     // Save to file
     bool saveSucceeded = doc.save_file(filepath.c_str(), PUGIXML_TEXT("\t"), pugi::format_default | pugi::format_no_declaration);
