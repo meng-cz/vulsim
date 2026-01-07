@@ -43,6 +43,8 @@ using std::function;
 
 static_assert(sizeof(uint32_t) == 4, "uint32_t size is not 4 bytes");
 
+constexpr uint32_t MagicNumber = 0x37549260U;
+
 class TCPSocket {
 public:
     TCPSocket(int32_t port, bool listen_global, function<void(const string &)> println_log) : port(port), listen_global(listen_global), println_log(println_log) {}
@@ -105,7 +107,10 @@ public:
                 bytes_read += ret;
             }
             if (ret < 0) {
-                throw std::runtime_error("Socket receive failed on port " + std::to_string(port));
+                println_log("Socket receive failed on port " + std::to_string(port) + ", closing connection.");
+                close(socketfd);
+                socketfd = -1;
+                return false;
             } else if (ret == 0) {
                 // double check for EOF
                 char buf[1];
@@ -118,6 +123,18 @@ public:
             }
             return true;
         };
+
+        uint32_t magic = 0;
+        if (!read_exact(sizeof(magic), &magic)) {
+            return "";
+        }
+        if (magic != MagicNumber) {
+            // invalid magic number, close socket
+            println_log("Socket received invalid magic number on port " + std::to_string(port) + ", closing connection.");
+            close(socketfd);
+            socketfd = -1;
+            return "";
+        }
 
         uint32_t msg_size = 0;
         if (!read_exact(sizeof(msg_size), &msg_size)) {
@@ -134,10 +151,12 @@ public:
         if (socketfd < 0) {
             return;
         }
+        uint32_t magic = MagicNumber;
         uint32_t msg_size = data.size();
-        vector<uint8_t> send_buf(sizeof(msg_size) + msg_size);
-        memcpy(send_buf.data(), &msg_size, sizeof(msg_size));
-        memcpy(send_buf.data() + sizeof(msg_size), data.data(), msg_size);
+        vector<uint8_t> send_buf(sizeof(magic) + sizeof(msg_size) + msg_size);
+        memcpy(send_buf.data(), &magic, sizeof(magic));
+        memcpy(send_buf.data() + sizeof(magic), &msg_size, sizeof(msg_size));
+        memcpy(send_buf.data() + sizeof(magic) + sizeof(msg_size), data.data(), msg_size);
         uint32_t bytes_sent = 0;
         while (bytes_sent < send_buf.size()) {
             int64_t ret = send(socketfd, send_buf.data() + bytes_sent, send_buf.size() - bytes_sent, 0);
