@@ -50,7 +50,8 @@ typedef struct {
     Comment             comment;
 } VulBundleEnumMember;
 
-typedef struct {
+class VulBundleMember {
+public:
     BMemberName         name;
     ConfigValue         value; // only for basic types and uint types, default zero-initialized
     Comment             comment;
@@ -59,7 +60,15 @@ typedef struct {
     ConfigValue         uint_length; // only for uint types
 
     vector<ConfigValue> dims;
-} VulBundleMember;
+
+    inline string typeString() const {
+        string t = (uint_length.empty() ? type : ("UInt<" + uint_length + ">"));
+        for (const auto &d : dims) {
+            t += "[" + d + "]";
+        }
+        return t;
+    }
+};
 
 class VulBundleItem {
 public:

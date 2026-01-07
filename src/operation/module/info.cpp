@@ -66,7 +66,7 @@ VulOperationResponse ModuleInfoOperation::execute(VulProject &project) {
     if (!mod_ptr) {
         response.results["info"] = serialize::serializeModuleBaseInfoToJSON(*(mod_iter->second));
     } else {
-        response.results["info"] = serialize::serializeModuleInfoToJSON(*mod_ptr);
+        response.results["info"] = serialize::serializeModuleInfoToJSON(*mod_ptr, modulelib);
     }
 
     return response;

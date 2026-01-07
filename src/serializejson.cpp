@@ -400,7 +400,7 @@ void parsePipeFromJSON(const string &json_str, VulPipe &out_pipe) {
  *   { "name": "...", "comment": "...", "type": "..." }, ...
  *  ],
  *  "instances": [
- *   { "name": "...", "comment": "...", "module": "...", "order": "...", "configs": [{ "name": "...", "value": "..." }, ...] }, ...
+ *   { "name": "...", "comment": "...", "module": "...", "order": "...", "configs": [{ "name": "...", "value": "..." }, ...], "module" : {...} }, ...
  *  ],
  *  "pipes": [
  *   { "name": "...", "comment": "...", "type": "...", "has_handshake": true/false, "has_valid": true/false }, ...
@@ -411,6 +411,9 @@ void parsePipeFromJSON(const string &json_str, VulPipe &out_pipe) {
  *  "serv_codelines": [ "...", ... ],
  *  "req_codelines": [
  *   { "instance": "...", "req_name": "..."}, ...
+ *  ],
+ *  "storages": [
+ *   { "name": "...", "category": "...", "type": "...", "comment": "..." },
  *  ],
  *  "connections" : [
  *   { "src_instance": "...", "src_port": "...", "dst_instance": "...", "dst_port": "..." }, ...
@@ -427,7 +430,7 @@ void parsePipeFromJSON(const string &json_str, VulPipe &out_pipe) {
  * }
  */
 
-string serializeModuleInfoToJSON(const VulModule &mod_info) {
+json _constructModuleBase(const VulModuleBase &mod_info) {
     json j;
     j["comment"] = mod_info.comment;
     // local_configs
@@ -483,6 +486,11 @@ string serializeModuleInfoToJSON(const VulModule &mod_info) {
         jpipe["type"] = pipe.type;
         j["pipeout"].push_back(jpipe);
     }
+    return j;
+}
+
+string serializeModuleInfoToJSON(const VulModule &mod_info, shared_ptr<VulModuleLib> modulelib) {
+    json j = _constructModuleBase(mod_info);
     // pipes
     j["pipes"] = json::array();
     for (const auto& [pipe_name, pipe] : mod_info.pipe_instances) {
@@ -502,6 +510,27 @@ string serializeModuleInfoToJSON(const VulModule &mod_info) {
     unique_ptr<vector<InstanceName>> inst_update_order = mod_info.getInstanceUpdateOrder(_dummy);
     j["instances"] = json::array();
     j["user_tick_codeblocks"] = json::array();
+
+    auto constructInstance = [&](const VulInstance &inst, uint64_t order) -> json {
+        json jinst;
+        jinst["name"] = inst.name;
+        jinst["comment"] = inst.comment;
+        jinst["module"] = inst.module_name;
+        jinst["order"] = order;
+        jinst["configs"] = json::array();
+        for (const auto& [cfg_name, cfg_value] : inst.local_config_overrides) {
+            json jcfg;
+            jcfg["name"] = cfg_name;
+            jcfg["value"] = cfg_value;
+            jinst["configs"].push_back(jcfg);
+        }
+        auto childmod_iter = modulelib->modules.find(inst.module_name);
+        if (childmod_iter != modulelib->modules.end()) {
+            jinst["module"] = _constructModuleBase(*(childmod_iter->second));
+        }
+        return jinst;
+    };
+
     if (inst_update_order) {
         for (uint64_t i = 0; i < inst_update_order->size(); i++) {
             const InstanceName &inst_name = (*inst_update_order)[i];
@@ -509,19 +538,7 @@ string serializeModuleInfoToJSON(const VulModule &mod_info) {
             auto cbiter = mod_info.user_tick_codeblocks.find(inst_name);
             if (iter != mod_info.instances.end()) {
                 const VulInstance &inst = iter->second;
-                json jinst;
-                jinst["name"] = inst_name;
-                jinst["comment"] = inst.comment;
-                jinst["module"] = inst.module_name;
-                jinst["order"] = i + 1;
-                jinst["configs"] = json::array();
-                for (const auto& [cfg_name, cfg_value] : inst.local_config_overrides) {
-                    json jcfg;
-                    jcfg["name"] = cfg_name;
-                    jcfg["value"] = cfg_value;
-                    jinst["configs"].push_back(jcfg);
-                }
-                j["instances"].push_back(jinst);
+                j["instances"].push_back(constructInstance(inst, i + 1));
             } else if (cbiter != mod_info.user_tick_codeblocks.end()) {
                 const auto &cb = cbiter->second;
                 json jcb;
@@ -533,19 +550,7 @@ string serializeModuleInfoToJSON(const VulModule &mod_info) {
         }
     } else {
         for (const auto& [inst_name, inst] : mod_info.instances) {
-            json jinst;
-            jinst["name"] = inst_name;
-            jinst["comment"] = inst.comment;
-            jinst["module"] = inst.module_name;
-            jinst["order"] = 0;
-            jinst["configs"] = json::array();
-            for (const auto& [cfg_name, cfg_value] : inst.local_config_overrides) {
-                json jcfg;
-                jcfg["name"] = cfg_name;
-                jcfg["value"] = cfg_value;
-                jinst["configs"].push_back(jcfg);
-            }
-            j["instances"].push_back(jinst);
+            j["instances"].push_back(constructInstance(inst, 0));
         }
         for (const auto& [cb_name, cb] : mod_info.user_tick_codeblocks) {
             json jcb;
@@ -571,6 +576,25 @@ string serializeModuleInfoToJSON(const VulModule &mod_info) {
             jreq["req_name"] = req_name;
             j["req_codelines"].push_back(jreq);
         }
+    }
+    // storages
+    j["storages"] = json::array();
+    auto addStorageJson = [&](const VulStorage &storage, const string & category) {
+        json jstor;
+        jstor["name"] = storage.name;
+        jstor["category"] = category;
+        jstor["type"] = storage.typeString();
+        jstor["comment"] = storage.comment;
+        j["storages"].push_back(jstor);
+    };
+    for (const auto & storage : mod_info.storages) {
+        addStorageJson(storage.second, "regular");
+    }
+    for (const auto & storage : mod_info.storagenexts) {
+        addStorageJson(storage.second, "register");
+    }
+    for (const auto & storage : mod_info.storagetmp) {
+        addStorageJson(storage.second, "temporary");
     }
     // connections
     j["connections"] = json::array();
@@ -616,61 +640,7 @@ string serializeModuleInfoToJSON(const VulModule &mod_info) {
 }
 
 string serializeModuleBaseInfoToJSON(const VulModuleBase &mod_info) {
-    json j;
-    j["comment"] = mod_info.comment;
-    // local_configs
-    j["local_configs"] = json::array();
-    for (const auto& [cfg_name, cfg_value] : mod_info.local_configs) {
-        json jcfg;
-        jcfg["name"] = cfg_name;
-        jcfg["value"] = cfg_value.value;
-        jcfg["comment"] = cfg_value.comment;
-        j["local_configs"].push_back(jcfg);
-    }
-    // local_bundles
-    j["local_bundles"] = json::array();
-    for (const auto& [bundle_name, bundle_item] : mod_info.local_bundles) {
-        json jbun;
-        jbun["name"] = bundle_name;
-        jbun["comment"] = bundle_item.comment;
-        j["local_bundles"].push_back(jbun);
-    }
-    // requests
-    j["requests"] = json::array();
-    for (const auto& [req_name, reqserv] : mod_info.requests) {
-        json jreq;
-        jreq["name"] = req_name;
-        jreq["comment"] = reqserv.comment;
-        jreq["sig"] = reqserv.signatureFull();
-        j["requests"].push_back(jreq);
-    }
-    // services
-    j["services"] = json::array();
-    for (const auto& [serv_name, reqserv] : mod_info.services) {
-        json jserv;
-        jserv["name"] = serv_name;
-        jserv["comment"] = reqserv.comment;
-        jserv["sig"] = reqserv.signatureFull();
-        j["services"].push_back(jserv);
-    }
-    // pipein
-    j["pipein"] = json::array();
-    for (const auto& [pipe_name, pipe] : mod_info.pipe_inputs) {
-        json jpipe;
-        jpipe["name"] = pipe_name;
-        jpipe["comment"] = pipe.comment;
-        jpipe["type"] = pipe.type;
-        j["pipein"].push_back(jpipe);
-    }
-    // pipeout
-    j["pipeout"] = json::array();
-    for (const auto& [pipe_name, pipe] : mod_info.pipe_outputs) {
-        json jpipe;
-        jpipe["name"] = pipe_name;
-        jpipe["comment"] = pipe.comment;
-        jpipe["type"] = pipe.type;
-        j["pipeout"].push_back(jpipe);
-    }
+    json j= _constructModuleBase(mod_info);
     return j.dump();
 }
 
