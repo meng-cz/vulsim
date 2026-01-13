@@ -339,3 +339,72 @@ constexpr uint32_t EOPModUConnSrcInstNotFound = 31162;
 constexpr uint32_t EOPModUConnDstInstNotFound = 31163;
 constexpr uint32_t EOPModUConnSelfLoop = 31164;
 constexpr uint32_t EOPModUConnLoop = 31165;
+
+constexpr uint32_t EOPModReqAdd = 31200;
+constexpr uint32_t EOPModReqAddReqNameDup = 31201;
+constexpr uint32_t EOPModReqAddReqNameInvalid = 31202;
+
+constexpr uint32_t EOPModReqRename = 31210;
+constexpr uint32_t EOPModReqRenameReqNotFound = 31211;
+constexpr uint32_t EOPModReqRenameReqNameDup = 31212;
+constexpr uint32_t EOPModReqRenameReqNameInvalid = 31213;
+constexpr uint32_t EOPModReqRenameConnected = 31214;
+
+constexpr uint32_t EOPModReqGet = 31220;
+constexpr uint32_t EOPModReqGetReqNotFound = 31221;
+constexpr uint32_t EOPModReqGetServNotFound = 31222;
+
+constexpr uint32_t EOPModReqUpdate = 31230;
+constexpr uint32_t EOPModReqUpdateNotFound = 31231;
+constexpr uint32_t EOPModReqUpdateConnected = 31232;
+
+constexpr uint32_t EOPModReqRemove = 31240;
+constexpr uint32_t EOPModReqRemoveNotFound = 31241;
+constexpr uint32_t EOPModReqRemoveConnected = 31242;
+
+constexpr uint32_t EOPModPipePortAdd = 31300;
+constexpr uint32_t EOPModPipePortAddNameDup = 31301;
+constexpr uint32_t EOPModPipePortAddNameInvalid = 31302;
+
+constexpr uint32_t EOPModPipePortRename = 31310;
+constexpr uint32_t EOPModPipePortRenameNotFound = 31311;
+constexpr uint32_t EOPModPipePortRenameNameDup = 31312;
+constexpr uint32_t EOPModPipePortRenameNameInvalid = 31313;
+constexpr uint32_t EOPModPipePortRenameConnected = 31314;
+
+constexpr uint32_t EOPModPipePortUpdate = 31320;
+constexpr uint32_t EOPModPipePortUpdateNotFound = 31321;
+constexpr uint32_t EOPModPipePortUpdateConnected = 31322;
+
+constexpr uint32_t EOPModPipePortRemove = 31330;
+constexpr uint32_t EOPModPipePortRemoveNotFound = 31331;
+constexpr uint32_t EOPModPipePortRemoveConnected = 31332;
+
+constexpr uint32_t EOPModConf = 31400;
+constexpr uint32_t EOPModConfNotFound = 31401;
+constexpr uint32_t EOPModConfNameInvalid = 31402;
+constexpr uint32_t EOPModConfNameDup = 31403;
+constexpr uint32_t EOPModConfValueInvalid = 31404;
+
+constexpr uint32_t EOPModBund = 31500;
+constexpr uint32_t EOPModBundNotFound = 31501;
+constexpr uint32_t EOPModBundNameInvalid = 31502;
+constexpr uint32_t EOPModBundNameDup = 31503;
+constexpr uint32_t EOPModBundDefinitionInvalid = 31504;
+constexpr uint32_t EOPModBundRefLoop = 31505;
+
+constexpr uint32_t EOPModStorage = 31600;
+constexpr uint32_t EOPModStorageNotFound = 31601;
+constexpr uint32_t EOPModStorageNameInvalid = 31602;
+constexpr uint32_t EOPModStorageNameDup = 31603;
+constexpr uint32_t EOPModStorageDefinitionInvalid = 31604;
+
+constexpr uint32_t EOPModInstance = 31700;
+constexpr uint32_t EOPModInstanceNotFound = 31701;
+constexpr uint32_t EOPModInstanceNameInvalid = 31702;
+constexpr uint32_t EOPModInstanceNameDup = 31703;
+
+constexpr uint32_t EOPModPipe = 31800;
+constexpr uint32_t EOPModPipeNotFound = 31801;
+constexpr uint32_t EOPModPipeNameInvalid = 31802;
+constexpr uint32_t EOPModPipeNameDup = 31803;

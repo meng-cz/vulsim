@@ -44,6 +44,9 @@ void parseInstanceFromJSON(const string &json_str, VulInstance &out_inst);
 string serializePipeToJSON(const VulPipe &pipe);
 void parsePipeFromJSON(const string &json_str, VulPipe &out_pipe);
 
+string serializeStorageToJSON(const VulStorage &storage);
+void parseStorageFromJSON(const string &json_str, VulStorage &out_storage);
+
 string serializeModuleInfoToJSON(const VulModule &mod_info, shared_ptr<VulModuleLib> modulelib);
 
 string serializeModuleBaseInfoToJSON(const VulModuleBase &mod_info);

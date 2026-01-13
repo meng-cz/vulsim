@@ -377,6 +377,49 @@ void parsePipeFromJSON(const string &json_str, VulPipe &out_pipe) {
     }
 }
 
+
+/**
+ * json format for storage:
+ *    {
+ *    "name": "...",
+ *    "comment": "...",
+ *    "type": "...",
+ *    "value": "...",
+ *    "uint_length": "...",
+ *    "dims": ["...", "...", ...]
+ *   }
+ */
+string serializeStorageToJSON(const VulStorage &storage) {
+    json j;
+    j["name"] = storage.name;
+    j["comment"] = storage.comment;
+    j["type"] = storage.type;
+    j["value"] = storage.value;
+    j["uint_length"] = storage.uint_length;
+    j["dims"] = json::array();
+    for (const auto &d : storage.dims) {
+        j["dims"].push_back(d);
+    }
+    return j.dump();
+}
+
+void parseStorageFromJSON(const string &json_str, VulStorage &out_storage) {
+    json j = json::parse(json_str);
+    out_storage.name = j.contains("name") ? j.at("name").get<BMemberName>() : "";
+    out_storage.comment =  j.contains("comment") ? j.at("comment").get<Comment>() : "";
+    out_storage.type = j.contains("type") ? j.at("type").get<BMemberType>() : "";
+    out_storage.value = j.contains("value") ? j.at("value").get<ConfigValue>() : ConfigValue();
+    out_storage.uint_length = j.contains("uint_length") ? j.at("uint_length").get<ConfigValue>() : ConfigValue();
+    out_storage.dims.clear();
+    if (j.contains("dims"))
+    {
+        for (const auto &d : j.at("dims")) {
+            out_storage.dims.push_back(d.get<ConfigValue>());
+        }
+    }
+}
+
+
 /**
  * json format for module:
  * {
