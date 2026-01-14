@@ -51,49 +51,9 @@ public:
 
     string receive_blocked() {
         if (socketfd < 0) {
-            int listenfd = socket(AF_INET, SOCK_STREAM, 0);
-            if (listenfd < 0) {
-                throw std::runtime_error("Socket creation failed on port " + std::to_string(port));
+            if (!listen_blocked()) {
+                return "";
             }
-            int opt = 1;
-            setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-            sockaddr_in addr;
-            addr.sin_family = AF_INET;
-            addr.sin_addr.s_addr = listen_global ? INADDR_ANY : htonl(INADDR_LOOPBACK);
-            addr.sin_port = htons(port);
-            if (bind(listenfd, (sockaddr *)&addr, sizeof(addr)) < 0) {
-                close(listenfd);
-                throw std::runtime_error("Socket bind failed on port " + std::to_string(port));
-            }
-            if (listen(listenfd, 1) < 0) {
-                close(listenfd);
-                throw std::runtime_error("Socket listen failed on port " + std::to_string(port));
-            }
-            {
-                // listen with 1 second timeout
-                fd_set fds;
-                FD_ZERO(&fds);
-                FD_SET(listenfd, &fds);
-                timeval tv;
-                tv.tv_sec = 1;
-                tv.tv_usec = 0;
-                int ret = select(listenfd + 1, &fds, nullptr, nullptr, &tv);
-                if (ret < 0) {
-                    close(listenfd);
-                    throw std::runtime_error("Socket select failed on port " + std::to_string(port));
-                } else if (ret == 0 || !FD_ISSET(listenfd, &fds)) {
-                    close(listenfd);
-                    return "";
-                }
-            }
-            socklen_t client_len = sizeof(client_addr);
-            socketfd = accept(listenfd, (sockaddr *)&client_addr, &client_len);
-            close(listenfd);
-            if (socketfd < 0) {
-                throw std::runtime_error("Socket accept failed on port " + std::to_string(port));
-            }
-            string client_ip = inet_ntoa(client_addr.sin_addr);
-            println_log("Socket connected from " + client_ip + " on port " + std::to_string(port));
         }
         
         auto read_exact = [&](const uint32_t size, void * buf) -> bool {
@@ -147,9 +107,11 @@ public:
         return result;
     }
 
-    void send_blocked(const string &data) {
+    void send_blocked(const string &data, const bool wait_for_connection = false) {
         if (socketfd < 0) {
-            return;
+            if (!wait_for_connection || !listen_blocked()) {
+                return;
+            }
         }
         uint32_t magic = MagicNumber;
         uint32_t msg_size = data.size();
@@ -173,6 +135,54 @@ public:
     }
 
 private:
+
+    bool listen_blocked() {
+        int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (listenfd < 0) {
+            throw std::runtime_error("Socket creation failed on port " + std::to_string(port));
+        }
+        int opt = 1;
+        setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = listen_global ? INADDR_ANY : htonl(INADDR_LOOPBACK);
+        addr.sin_port = htons(port);
+        if (bind(listenfd, (sockaddr *)&addr, sizeof(addr)) < 0) {
+            close(listenfd);
+            throw std::runtime_error("Socket bind failed on port " + std::to_string(port));
+        }
+        if (listen(listenfd, 1) < 0) {
+            close(listenfd);
+            throw std::runtime_error("Socket listen failed on port " + std::to_string(port));
+        }
+        {
+            // listen with 1 second timeout
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(listenfd, &fds);
+            timeval tv;
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+            int ret = select(listenfd + 1, &fds, nullptr, nullptr, &tv);
+            if (ret < 0) {
+                close(listenfd);
+                throw std::runtime_error("Socket select failed on port " + std::to_string(port));
+            } else if (ret == 0 || !FD_ISSET(listenfd, &fds)) {
+                close(listenfd);
+                return false;
+            }
+        }
+        socklen_t client_len = sizeof(client_addr);
+        socketfd = accept(listenfd, (sockaddr *)&client_addr, &client_len);
+        close(listenfd);
+        if (socketfd < 0) {
+            throw std::runtime_error("Socket accept failed on port " + std::to_string(port));
+        }
+        string client_ip = inet_ntoa(client_addr.sin_addr);
+        println_log("Socket connected from " + client_ip + " on port " + std::to_string(port));
+        return true;
+    }
+
     int32_t port = 0;
     bool listen_global = false;
     function<void(const string &)> println_log;

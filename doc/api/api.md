@@ -2,13 +2,18 @@
 
 ## TCP Socket
 
-VulSim 前后端通过 TCP Socket 进行通讯。后端监听一个指定端口，默认17995，前端连接到该端口以发送和接收数据.
+VulSim 前后端通过两个 TCP Socket 进行通讯。后端监听两个指定端口，默认17995和17996，前端连接到该端口以发送和接收数据.
 
-TCP Socket 执行同步半双工通讯。每一次通讯都包含一个请求和一个响应。前端发送请求后，必须等待后端的响应才能发送下一个请求。
+1. 主控 Socket （17995）: 用于普通操作请求和响应。端口号可配置。
+2. 日志 Socket （17996）: 用于发送日志。端口号固定为主控 Socket 端口号加一。
+
+主控 TCP Socket 执行半双工通讯。每一次通讯都包含一个请求和一个响应。前端发送请求后，必须等待后端的响应才能发送下一个请求。
+
+日志 TCP Socket 执行异步单向通讯。后端会在有日志消息时发送数据，前端仅需连接 Socket 并读取，无需发送任何请求。
 
 ## 数据格式
 
-所有 请求和响应 结构相同：
+所有 请求和响应 结构相同， 包括日志消息：
 
 ```
 | Magic Number | Payload Length |      Payload      |
@@ -76,6 +81,19 @@ Payload 使用 JSON 格式编码。响应的 JSON 结构如下：
 同样，结果字符串的值可以为另一个 JSON 子对象。此时内部JSON对象需要先序列化为字符串，然后作为外层 JSON 对象的字符串值传递，其中的双引号需要进行转义。
 
 所有的操作都是事务化的，即要么完全成功，要么完全失败，不会出现部分成功的情况。当操作的返回码非零时，对项目数据不应产生任何影响。
+
+## 日志数据格式
+
+Payload 使用 JSON 格式编码。日志消息的 JSON 结构如下：
+
+```json
+{
+  "level": "Info", // 日志级别， Debug Info Warning Error Critical
+  "category": "Simulation", // 日志类别， General Generation Compilation Simulation 等
+  "message": "This is a log message.",
+  "timestamp": 1234567890 // Unix 时间戳（微秒）
+}
+```
 
 ## 操作子 JSON
 

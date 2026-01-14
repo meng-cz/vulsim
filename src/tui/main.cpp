@@ -22,8 +22,11 @@
 
 
 #include "project.h"
+#include "tui.h"
 
-#include "tcpsocket.hpp"
+#include "platform/tcpsocket.hpp"
+#include "simulation/logsocket.h"
+
 #include "argparse.hpp"
 #include "serializejson.h"
 
@@ -34,8 +37,6 @@
 
 bool g_listening_public_address = false;
 
-void println_stdout(const string &msg);
-
 unique_ptr<VulProject> g_vul_project;
 std::mutex g_vul_project_mutex;
 
@@ -45,7 +46,7 @@ int32_t g_port_main_socket = 17995;
 void main_socket_thread_func() {
     using namespace serialize;
 
-    TCPSocket main_socket(g_port_main_socket, g_listening_public_address, println_stdout);
+    TCPSocket main_socket(g_port_main_socket, g_listening_public_address, logStdoutLine);
     while (!g_main_socket_terminate_flag.load(std::memory_order_acquire)) {
         string req_json = main_socket.receive_blocked();
         if (req_json.empty()) {
@@ -56,13 +57,11 @@ void main_socket_thread_func() {
         VulOperationResponse resp = g_vul_project->doOperation(op);
         g_vul_project_mutex.unlock();
         string logstr = "Operation '" + op.name + "' executed. Response code: " + std::to_string(resp.code) + ", message: " + resp.msg;
-        println_stdout(logstr);
+        logStdoutLine(logstr);
         string resp_json = serializeOperationResponseToJSON(resp);
         main_socket.send_blocked(resp_json);
     }
 }
-
-void cmd_loop();
 
 int main(int argc, char *argv[]) {
     
@@ -75,6 +74,10 @@ int main(int argc, char *argv[]) {
         .help("listen on public address instead of loopback")
         .default_value(false)
         .implicit_value(true);
+    parser.add_argument("--level")
+        .help("sets the log level (debug, info, warning, error). Default is info.")
+        .default_value(std::string("info"))
+        .action([](const std::string &value) { return value; });
 
     try {
         parser.parse_args(argc, argv);
@@ -89,35 +92,30 @@ int main(int argc, char *argv[]) {
 
     g_vul_project = std::make_unique<VulProject>(vector<ProjectPath>{});
 
-    println_stdout("VulSim TUI started. Listening on port " + std::to_string(g_port_main_socket) + (g_listening_public_address ? " (public)" : " (loopback)"));
+    logStdoutLine("Initializing log socket on port " + std::to_string(g_port_main_socket + 1) + "..." );
+
+    logSocketInit(g_port_main_socket + 1, g_listening_public_address);
+    logSocketSetLevel(parser.get<std::string>("--level"));
+    logSocketSetEcho([](const string &msg) {
+        std::cout << msg;
+    });
+    logSocketSetErrorEcho([](const string &msg) {
+        std::cerr << msg;
+    });
+
+    logStdoutLine("Initializing main socket ..." );
 
     g_main_socket_terminate_flag.store(false, std::memory_order_seq_cst);
     std::thread main_socket_thread(main_socket_thread_func);
+
+    logStdoutLine("VulSim TUI started. Listening on port " + std::to_string(g_port_main_socket) + (g_listening_public_address ? " (public)" : " (loopback)"));
 
     cmd_loop();
 
     g_main_socket_terminate_flag.store(true, std::memory_order_release);
     main_socket_thread.join();
 
+    logSocketTerminate();
+
     return 0;
-}
-
-void println_stdout(const string &msg) {
-    std::cout << msg << std::endl;
-}
-void cmd_loop() {
-    println_stdout("Type 'exit' or 'quit' to terminate the program.");
-
-    std::string line;
-    while (true) {
-        std::cout << "vulsim> ";
-        if (!std::getline(std::cin, line)) {
-            break;
-        }
-        if (line == "exit" || line == "quit") {
-            break;
-        }
-        // Process other commands here
-        std::cout << "Unknown command: " << line << std::endl;
-    }
 }
