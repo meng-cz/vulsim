@@ -38,9 +38,9 @@ const string TickFunctionName = "on_current_tick";
 const string ApplyTickFunctionName = "apply_next_tick";
 
 const string UIntClassName = "UInt";
-const string StorageNextClassName = "StorageNext";
-const string StorageNextArrayClassName = "StorageNextArray";
-const string PipeClassName = "Pipe";
+const string StorageNextClassName = "VulStorageNext";
+const string StorageNextArrayClassName = "VulStorageNextArray";
+const string PipeClassName = "VulPipe";
 
 
 enum class PipeImplType {
@@ -82,14 +82,15 @@ inline PipeImplType determinePipeImplType(uint64_t input, uint64_t output, uint6
 
 string _genPipeClassName(uint64_t input, uint64_t output, uint64_t buffer,
                                          bool has_handshake, bool has_valid) {
-    PipeImplType type = determinePipeImplType(input, output, buffer, has_handshake, has_valid);
-    switch (type) {
-        case PipeImplType::SimpleNoHandshakeNoBuffer: return "Pipe";
-        case PipeImplType::SimpleValidNoBuffer: return "PipeV";
-        case PipeImplType::SimpleHandshakeNoBuffer: return "PipeH";
-        case PipeImplType::SimpleHandshakeBuffer: return "PipeHB";
-    }
-    return "PipeMHB";
+    // PipeImplType type = determinePipeImplType(input, output, buffer, has_handshake, has_valid);
+    // switch (type) {
+    //     case PipeImplType::SimpleNoHandshakeNoBuffer: return "Pipe";
+    //     case PipeImplType::SimpleValidNoBuffer: return "PipeV";
+    //     case PipeImplType::SimpleHandshakeNoBuffer: return "PipeH";
+    //     case PipeImplType::SimpleHandshakeBuffer: return "PipeHB";
+    // }
+    // return "PipeMHB";
+    return PipeClassName;
 }
 
 vector<string> _genUnpackMultilineNoNext(const string &s) {
@@ -1036,7 +1037,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     out_lines.push_back("FORCE_INLINE bool is_stalled() const { return __is_stalled; }\n");
     out_lines.push_back("FORCE_INLINE void __stall_propagate_out() {\n");
     out_lines.push_back(CodeTab + "__is_stalled = true;\n");
-    out_lines.push_back(CodeTab + "__params.__stall(__params.__parent_module);\n");
+    out_lines.push_back(CodeTab + "if (__params.__stall) __params.__stall(__params.__parent_module);\n");
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
 
@@ -1058,6 +1059,50 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     out_lines.push_back("\n");
     return "";
 }
+
+/**
+ * @brief Generate simulation.cpp C++ code for the top-level module.
+ * @param top_module_name The name of the top-level module.
+ * @param local_configs The vector of local config values for the top-level module.
+ * @param out_lines Output vector of strings to hold the generated C++ code lines. With \\n in each line.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg genTopSimCpp(const ModuleName &top_module_name, const vector<ConfigValue> &local_configs, vector<string> &out_lines) {
+    out_lines = genHeaderPrelude();
+    out_lines.push_back("#include \"simulation.h\"\n");
+    out_lines.push_back("#include \"" + top_module_name + ".hpp\"\n");
+    out_lines.push_back("\n");
+
+    string top_module_name_str = top_module_name + "<";
+    for (size_t i = 0; i < local_configs.size(); i++) {
+        if (i > 0) {
+            top_module_name_str += ", ";
+        }
+        top_module_name_str += replaceLog2CeilChar(local_configs[i]);
+    }
+    top_module_name_str += ">";
+    out_lines.push_back("unique_ptr<" + top_module_name_str + "> top_module = nullptr;\n");
+    out_lines.push_back("\n");
+    
+    out_lines.push_back("void simulation_init() {\n");
+    out_lines.push_back(CodeTab + top_module_name_str + "::ConstructorParams cparams;\n");
+    out_lines.push_back(CodeTab + "cparams.__parent_module = nullptr;\n");
+    out_lines.push_back(CodeTab + "cparams.__instance_name = \"top_module\";\n");
+    out_lines.push_back(CodeTab + "cparams.__stall = nullptr;\n");
+    out_lines.push_back(CodeTab + "top_module = make_unique<" + top_module_name_str + ">(cparams);\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("void simulation_tick() {\n");
+    out_lines.push_back(CodeTab + "top_module->" + TickFunctionName + "();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("void simulation_apply_tick() {\n");
+    out_lines.push_back(CodeTab + "top_module->" + ApplyTickFunctionName + "();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+    return "";
+}
+
 
 
 } // namespace simgen

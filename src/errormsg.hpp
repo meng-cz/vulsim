@@ -408,3 +408,13 @@ constexpr uint32_t EOPModPipe = 31800;
 constexpr uint32_t EOPModPipeNotFound = 31801;
 constexpr uint32_t EOPModPipeNameInvalid = 31802;
 constexpr uint32_t EOPModPipeNameDup = 31803;
+
+
+constexpr uint32_t EGEN = 40000;
+constexpr uint32_t EGENCancel = 40001;
+constexpr uint32_t EGENTopNotFound = 40002;
+constexpr uint32_t EGENModuleNotFound = 40003;
+constexpr uint32_t EGENWriteFileFailed = 40004;
+constexpr uint32_t EGENAlreadyRunning = 40005;
+constexpr uint32_t EGENStepInvalid = 40006;
+constexpr uint32_t EGENInvalidLibrary = 40007;

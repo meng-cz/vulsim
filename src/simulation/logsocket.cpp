@@ -23,6 +23,7 @@
 #include "logsocket.h"
 
 #include "platform/tcpsocket.hpp"
+#include "platform/time.hpp"
 #include "tui/tui.h"
 
 #include "json.hpp"
@@ -34,10 +35,6 @@ using nlohmann::json;
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
-#include <ctime>
-#include <sstream>
-#include <iomanip>
-
 
 using std::unique_ptr;
 using std::thread;
@@ -167,14 +164,8 @@ void logThreadFunction() {
         // construct log message
         string log_msg;
         if (levelEnabled(line.level) && ((error_echo_function && (line.level == LogSocketLevel::Error || line.level == LogSocketLevel::Critical)) || echo_function)) {
-            std::time_t t = line.timestampus / 1000000;
-            std::tm *tm_info = std::localtime(&t);
-            char time_buffer[26];
-            std::strftime(time_buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
-            uint64_t ms = (line.timestampus % 1000000) / 1000;
-
             std::ostringstream oss;
-            oss << "[" << time_buffer << "." << std::setfill('0') << std::setw(3) << ms << "] ";
+            oss << "[" << timeusToString(line.timestampus) << "] ";
             oss << "[" << level_str << "] ";
             oss << "[" << category_str << "] ";
             oss << line.message;
@@ -249,6 +240,8 @@ void logSocketClearBuffer() {
     // no-op, as the log queue does not support clearing
 }
 
+std::atomic_flag log_spinlock = ATOMIC_FLAG_INIT;
+
 void logSocketMessage(const LogSocketLevel level, const LogSocketCategory category, const string &message, const bool newline) {
     if (!log_queue || !log_thread_running.load(std::memory_order_acquire)) {
         return;
@@ -257,14 +250,14 @@ void logSocketMessage(const LogSocketLevel level, const LogSocketCategory catego
     line.level = level;
     line.category = category;
     line.message = message;
-    if (newline) {
+    if (newline && (line.message.empty() || line.message.back() != '\n')) {
         line.message += "\n";
     }
     // get current timestamp in microseconds
-    line.timestampus = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
+    line.timestampus = getCurrentTimeUs();
+    while(log_spinlock.test_and_set(std::memory_order_acquire));
     log_queue->push(line);
+    log_spinlock.clear(std::memory_order_release);
 }
 
 

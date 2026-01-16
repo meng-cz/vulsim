@@ -275,7 +275,7 @@ bool __is_stalled = false;
 FORCE_INLINE bool is_stalled() const { return __is_stalled; }
 FORCE_INLINE void __stall_propagate_out() {
     __is_stalled = true;
-    __params.__stall(__params.__parent_module);
+    if (__params.__stall) __params.__stall(__params.__parent_module);
 }
 
 // <Member Field>

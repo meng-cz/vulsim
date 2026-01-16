@@ -56,5 +56,13 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
  */
 ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulConfigLib> configlib, shared_ptr<VulModuleLib> modulelib);
 
+/**
+ * @brief Generate simulation.cpp C++ code for the top-level module.
+ * @param top_module_name The name of the top-level module.
+ * @param local_configs The vector of local config values for the top-level module.
+ * @param out_lines Output vector of strings to hold the generated C++ code lines. With \\n in each line.
+ * @return An ErrorMsg indicating failure, empty if success.
+ */
+ErrorMsg genTopSimCpp(const ModuleName &top_module_name, const vector<ConfigValue> &local_configs, vector<string> &out_lines);
 
 } // namespace simgen

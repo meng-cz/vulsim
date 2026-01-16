@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "project.h"
+#include "platform/env.hpp"
 
 #include <filesystem>
 
@@ -36,9 +37,9 @@ void VulProject::initEnvs() {
 #endif
 
     // load project local path
-    const char *pv = std::getenv("VUL_PROJECT_PATH");
-    if (pv && *pv) {
-        std::string s(pv);
+    auto pv = getEnvVar(std::string(EnvVulProjectPath));
+    if (pv.has_value()) {
+        const std::string &s = pv.value();
         try {
             project_local_path = std::filesystem::absolute(s).string();
         } catch (...) {
@@ -48,9 +49,9 @@ void VulProject::initEnvs() {
 
     // load import paths
     import_paths.clear();
-    const char *pi = std::getenv("VUL_IMPORT_PATH");
-    if (!pi || !*pi) return;
-    std::string raw(pi);
+    auto pi = getEnvVar(std::string(EnvVulImportPath));
+    if (!pi.has_value()) return;
+    const std::string &raw = pi.value();
 
     auto is_delim = [](char c) { return c == ';' || c == ':' || c == ','; };
 

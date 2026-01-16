@@ -137,6 +137,24 @@ public:
         modulelib = std::make_shared<VulModuleLib>();
         initEnvs();
     };
+    // allow deep-copy constructor
+    VulProject(const VulProject &other) {
+        name = other.name;
+        dirpath = other.dirpath;
+        import_paths = other.import_paths;
+        project_local_path = other.project_local_path;
+
+        configlib = std::make_shared<VulConfigLib>(*other.configlib);
+        bundlelib = std::make_shared<VulBundleLib>(*other.bundlelib);
+        modulelib = std::make_shared<VulModuleLib>(*other.modulelib);
+
+        imports = other.imports;
+
+        operation_undo_history.clear();
+        operation_redo_history.clear();
+
+        initEnvs();
+    }
 
     ProjectName                 name;
     ProjectPath                 dirpath;
