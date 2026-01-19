@@ -58,11 +58,11 @@ struct SimulationStepInfo {
 };
 
 struct GenerationConfig {
-    uint32_t thread_num = 1;
+    uint32_t __pad = 0;
 };
 
 struct CompilationConfig {
-    uint32_t thread_num = 1;
+    uint32_t __pad = 0;
 };
 
 struct SimulationConfig {
@@ -81,9 +81,9 @@ struct SimStateInfo {
     bool process_simulation = false;
     bool running = false;
     bool errored = false;
-    ProjectName project_name;
+    string project_name;
     string vullib_path;
-    string generation_dir;
+    string run_id;
     uint64_t starttime_us = 0;
 };
 
@@ -96,8 +96,9 @@ public:
     }
 
     ErrorMsg startTask(
-        shared_ptr<VulProject> project,
-        const string &generation_dir,
+        const string &project_name,
+        const string &run_id,
+        const string &vullib_path,
         std::optional<GenerationConfig> generation_config,
         std::optional<CompilationConfig> compilation_config,
         std::optional<SimulationConfig> simulation_config
@@ -116,11 +117,8 @@ public:
 
     ~SimulationManager() {
         cancelTask();
-        if (gen_ctrl_thread.joinable()) {
-            gen_ctrl_thread.join();
-        }
-        if (comp_ctrl_thread.joinable()) {
-            comp_ctrl_thread.join();
+        if (sim_thread.joinable()) {
+            sim_thread.join();
         }
     }
 
@@ -136,68 +134,12 @@ protected:
 
     std::atomic<bool> all_cancel_flag = false;
 
-    template<typename T>
-    struct WorkDispather {
-        vector<T> tasks;
-        uint64_t next_task = 0;
-        std::mutex mtx;
+    std::thread sim_thread;
+    void simulationThreadFunc();
 
-        void addTask(const T &task) {
-            std::lock_guard<std::mutex> lk(mtx);
-            tasks.push_back(task);
-        }
-        void addTasks(const vector<T> &new_tasks) {
-            std::lock_guard<std::mutex> lk(mtx);
-            tasks.insert(tasks.end(), new_tasks.begin(), new_tasks.end());
-        }
-        bool getNextTask(T &task) {
-            std::lock_guard<std::mutex> lk(mtx);
-            if (next_task >= tasks.size()) {
-                return false;
-            }
-            task = tasks[next_task++];
-            return true;
-        }
-        void clear() {
-            std::lock_guard<std::mutex> lk(mtx);
-            tasks.clear();
-            next_task = 0;
-        }
-    };
-
-    
-    struct GenThreadWork {
-        enum class WorkType {
-            GenerateModule,
-            GenerateConfig,
-            GenerateBundle,
-            GenerateTop
-        } type;
-        ModuleName module_name;
-    };
-    
-    std::thread gen_ctrl_thread;
-    vector<unique_ptr<std::thread>> gen_worker_threads;
-    WorkDispather<GenThreadWork> gen_work_dispather;
-    void generationCtrlThreadFunc();
-    void generationWorkerThreadFunc(uint32_t thread_id);
-
-    struct CompInfo {
-        vector<string> include_paths;
-        vector<string> cxx_flags;
-        vector<string> ld_flags;
-    } compile_information;
-
-    struct CompThreadWork {
-        string source_file_path;
-        string object_file_path;
-    };
-
-    std::thread comp_ctrl_thread;
-    vector<unique_ptr<std::thread>> comp_worker_threads;
-    WorkDispather<CompThreadWork> comp_work_dispather;
-    void compilationCtrlThreadFunc();
-    void compilationWorkerThreadFunc(uint32_t thread_id);
+    void _generation();
+    void _compilation();
+    void _simulation();
 
 };
 

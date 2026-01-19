@@ -20,46 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "project.h"
-#include "serialize.h"
 
-#include <filesystem>
+#pragma once
 
-namespace operation_save {
+#include <string>
+#include <optional>
+#include <string_view>
+#include <unordered_map>
 
-using namespace std::filesystem;
-using namespace serialize;
+using std::string;
+using std::optional;
+using std::string_view;
+using std::unordered_map;
 
-class SaveOperation : public VulProjectOperation {
-public:
-    using VulProjectOperation::VulProjectOperation;
+inline constexpr string_view EnvVulProjectPath = "VUL_PROJECT_PATH";
+inline constexpr string_view EnvVulImportPath = "VUL_IMPORT_PATH";
+inline constexpr string_view EnvVulLibraryPath = "VUL_LIBRARY_PATH";
 
-    virtual VulOperationResponse execute(VulProject &project) override;
+void initConfiguration(const string &ini_path, const unordered_map<string, string> &overrides);
 
-    virtual vector<string> help() const override {
-        return {
-            "Save Operation:",
-            "Save the currently opened project to disk, including its modules, configs, and bundles.",
-            "If no project is opened, return an error.",
-            "",
-            "Arguments: None.",
-        };
+optional<string> getConfigValue(const string &key);
+
+inline string getConfigValue(const string &key, const string &default_value) {
+    auto val = getConfigValue(key);
+    if (val.has_value()) {
+        return val.value();
     }
-};
-
-VulOperationResponse SaveOperation::execute(VulProject &project) {
-    
-    return project.save(); // Success
+    return default_value;
 }
 
-OperationFactory saveOperationFactory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {
-    return std::make_unique<SaveOperation>(op);
-};
-
-struct RegisterSaveOperation {
-    RegisterSaveOperation() {
-        VulProject::registerOperation("save", saveOperationFactory);
-    }
-} registerSaveOperationInstance;
-
-} // namespace operation_save

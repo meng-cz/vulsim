@@ -26,10 +26,6 @@
 #include <optional>
 #include <string_view>
 
-inline constexpr std::string_view EnvVulProjectPath = "VUL_PROJECT_PATH";
-inline constexpr std::string_view EnvVulImportPath = "VUL_IMPORT_PATH";
-inline constexpr std::string_view EnvVulLibraryPath = "VUL_LIBRARY_PATH";
-
 std::optional<std::string> getEnvVar(const std::string &key) {
     const char *val = std::getenv(key.c_str());
     if (val == nullptr) {

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "project.h"
+#include "projman.h"
 #include "serialize.h"
 
 #include <filesystem>
@@ -40,21 +41,19 @@ public:
     
     virtual VulOperationResponse execute(VulProject &project) override {
         
-        const ProjectPath &dirpath = project.dirpath;
-
         vector<string> project_names;
         vector<string> project_paths;
         vector<string> project_modtimes;
 
-        path base(dirpath);
+        auto all_projects = VulProjectPathManager::getInstance()->getAllProjects();
+        string root_path = VulProjectPathManager::getInstance()->getLibRootPath();
 
-        for (const auto &entry : std::filesystem::recursive_directory_iterator(base, std::filesystem::directory_options::skip_permission_denied)) {
+        for (const auto &entry : all_projects) {
+            const string &projname = entry.first;
+            const string &dirpath = entry.second;
             try {                
-                if (!entry.is_regular_file()) continue;
-                path p = entry.path();
-                if (p.extension() != ".vul") continue;
-
-                path parent = p.parent_path();
+                path parent(dirpath);
+                path p = parent / (projname + ".vul");
                 path config = parent / "configlib.xml";
                 path bundle = parent / "bundlelib.xml";
                 path modules = parent / "modules";
@@ -95,14 +94,8 @@ public:
                 std::ostringstream oss;
                 oss << std::put_time(ptm, "%Y-%m-%d %H:%M:%S");
 
-                project_names.push_back(p.stem().string());
-                path rel;
-                try {
-                    rel = p.lexically_relative(base);
-                } catch (...) {
-                    rel = p;
-                }
-                project_paths.push_back(rel.string());
+                project_names.push_back(parent.stem().string());
+                project_paths.push_back("");
                 project_modtimes.push_back(oss.str());
             } catch (const std::exception &) {
                 // ignore traversal errors
@@ -110,7 +103,7 @@ public:
         }
 
         VulOperationResponse ret;
-        ret.results["rootpath"] = dirpath;
+        ret.results["rootpath"] = root_path;
         ret.list_results["project_names"] = std::move(project_names);
         ret.list_results["project_paths"] = std::move(project_paths);
         ret.list_results["project_modtimes"] = std::move(project_modtimes);

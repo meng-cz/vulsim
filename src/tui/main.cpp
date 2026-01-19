@@ -90,7 +90,7 @@ int main(int argc, char *argv[]) {
     g_port_main_socket = parser.get<int>("-p");
     g_listening_public_address = parser.get<bool>("-l");
 
-    g_vul_project = std::make_unique<VulProject>(vector<ProjectPath>{});
+    g_vul_project = std::make_unique<VulProject>();
 
     logStdoutLine("Initializing log socket on port " + std::to_string(g_port_main_socket + 1) + "..." );
 

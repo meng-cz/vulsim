@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "project.h"
+#include "projman.h"
 #include "serialize.h"
 
 #include <filesystem>
@@ -53,14 +54,14 @@ public:
                 return EStr(EOPCreateMissArg, "Missing argument: name");
             }
             proj_name = *it;
-
-            string findpath = project.findProjectPathInLocalLibrary(proj_name);
-            if (!findpath.empty()) {
-                return EStr(EOPCreateNameExists, "Project '" + proj_name + "' already exists at: " + findpath);
-            }
         }
 
-        path proj_dir = std::filesystem::absolute(project.project_local_path) / proj_name;
+        auto newpath = VulProjectPathManager::getInstance()->createNewProjectPath(proj_name);
+        if (!newpath) {
+            return EStr(EOPCreateNameExists, "Project '" + proj_name + "' already exists");
+        }
+
+        path proj_dir = std::filesystem::absolute(*newpath);
         path proj_modules_dir = proj_dir / "modules";
         try {
             create_directory(proj_dir);

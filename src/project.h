@@ -131,33 +131,17 @@ public:
     static bool registerOperation(const OperationName &op_name, const OperationFactory &factory);
     static vector<OperationName> listAllRegisteredOperations();
 
-    VulProject(const vector<ProjectPath> &import_paths) : import_paths(import_paths) {
+    VulProject() {
         configlib = std::make_shared<VulConfigLib>();
         bundlelib = std::make_shared<VulBundleLib>();
         modulelib = std::make_shared<VulModuleLib>();
-        initEnvs();
     };
-    // allow deep-copy constructor
-    VulProject(const VulProject &other) {
-        name = other.name;
-        dirpath = other.dirpath;
-        import_paths = other.import_paths;
-        project_local_path = other.project_local_path;
-
-        configlib = std::make_shared<VulConfigLib>(*other.configlib);
-        bundlelib = std::make_shared<VulBundleLib>(*other.bundlelib);
-        modulelib = std::make_shared<VulModuleLib>(*other.modulelib);
-
-        imports = other.imports;
-
-        operation_undo_history.clear();
-        operation_redo_history.clear();
-
-        initEnvs();
-    }
 
     ProjectName                 name;
     ProjectPath                 dirpath;
+
+    ErrorMsg load(const ProjectPath &path);
+    ErrorMsg save() const;
 
     ModuleName                  top_module;
 
@@ -179,10 +163,6 @@ public:
     shared_ptr<VulModuleLib> modulelib;
 
     unordered_map<ModuleName, VulImport>   imports;
-    vector<ProjectPath>     import_paths;
-    ProjectPath             project_local_path;
-    void initEnvs();
-    string findProjectPathInLocalLibrary(const ProjectName &name);
 
     std::deque<unique_ptr<VulProjectOperation>>   operation_undo_history;
     std::deque<unique_ptr<VulProjectOperation>>   operation_redo_history;
