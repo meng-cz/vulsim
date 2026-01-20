@@ -192,3 +192,7 @@ Payload 使用 JSON 格式编码。日志消息的 JSON 结构如下：
 | module.pipe.set | Y | Y | 设置模块内部的管道子实例定义 |
 | module.storage.get | N | N | 获取模块内部存储实例 |
 | module.storage.set | Y | Y | 设置模块内部存储实例 |
+| simulation.start | Y | N | 启动当前项目的仿真任务 |
+| simulation.list | N | N | 列出当前项目的所有仿真任务历史 |
+| simulation.cancel | Y | N | 取消当前项目的正在运行的仿真任务 |
+| simulation.state | N | N | 获取当前项目的正在运行的仿真任务状态 |

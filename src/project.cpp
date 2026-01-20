@@ -217,7 +217,7 @@ ErrorMsg loadModule(VulProject &project, const string &module_path, shared_ptr<V
     return ErrorMsg(); // Success
 }
 
-ErrorMsg VulProject::load(const ProjectPath &path) {
+ErrorMsg VulProject::load(const ProjectPath &path, const ProjectName &project_name) {
 
     namespace fs = std::filesystem;
     using namespace serialize;
@@ -227,7 +227,7 @@ ErrorMsg VulProject::load(const ProjectPath &path) {
     }
 
     fs::path project_dir = fs::absolute(path);
-    string projname = project_dir.stem().string();
+    string projname = project_name;
     fs::path project_xml_abs_path = project_dir / (projname + ".vul");
 
     VulProjectRaw project_raw;

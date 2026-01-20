@@ -76,7 +76,7 @@ VulOperationResponse LoadOperation::execute(VulProject &project) {
         return EStr(EOPLoadInvalidPath, "Project '" + proj_name + "' does not exist.");
     }
 
-    ErrorMsg resp = project.load(_proj_path.value());
+    ErrorMsg resp = project.load(_proj_path.value(), proj_name);
 
     return resp; // Success
 }

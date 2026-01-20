@@ -36,6 +36,7 @@ using std::unordered_map;
 inline constexpr string_view EnvVulProjectPath = "VUL_PROJECT_PATH";
 inline constexpr string_view EnvVulImportPath = "VUL_IMPORT_PATH";
 inline constexpr string_view EnvVulLibraryPath = "VUL_LIBRARY_PATH";
+inline constexpr string_view EnvCXXPath = "CXX";
 
 void initConfiguration(const string &ini_path, const unordered_map<string, string> &overrides);
 

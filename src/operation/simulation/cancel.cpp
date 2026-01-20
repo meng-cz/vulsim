@@ -20,27 +20,40 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include "project.h"
 
-#include <stdint.h>
-#include <chrono>
-#include <sstream>
-#include <iomanip>
-#include <string>
+#include "simulation/simman.h"
 
-inline uint64_t getCurrentTimeUs() {
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
-}
+namespace operation_simulation_cancel {
 
-inline std::string timeusToString(const uint64_t timestampus) {
-    std::time_t t = timestampus / 1000000;
-    std::tm *tm_info = std::localtime(&t);
-    char time_buffer[26];
-    std::strftime(time_buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
-    uint64_t ms = (timestampus % 1000000) / 1000;
-    std::ostringstream oss;
-    oss << time_buffer << "." << std::setfill('0') << std::setw(3) << ms;
-    return oss.str();
-}
+class SimulationCancelOperation : public VulProjectOperation {
+public:
+    using VulProjectOperation::VulProjectOperation;
+
+    virtual VulOperationResponse execute(VulProject &project) override {
+        auto simman = SimulationManager::getInstance();
+        return simman->cancelTask();
+    }
+
+    virtual bool is_modify() const override { return true; }
+
+    virtual vector<string> help() const override {
+        return {
+            "Simulation Cancel Operation:",
+            "Cancel the currently running simulation task for the opened project.",
+            "Arguments: None.",
+            "Results: None."
+        };
+    }
+};
+
+auto factory = [](const VulOperationPackage &op) -> unique_ptr<VulProjectOperation> {
+    return std::make_unique<SimulationCancelOperation>(op);
+};
+struct RegisterSimulationCancelOperation {
+    RegisterSimulationCancelOperation() {
+        VulProject::registerOperation("simulation.cancel", factory);
+    }
+} registerSimulationCancelOperationInstance;
+
+} // namespace operation_simulation_cancel

@@ -23,6 +23,7 @@
 #pragma once
 
 #include "project.h"
+#include "logsocket.h"
 
 #include "platform/childproc.hpp"
 
@@ -62,6 +63,7 @@ struct GenerationConfig {
 };
 
 struct CompilationConfig {
+    bool release_mode = false;
     uint32_t __pad = 0;
 };
 
@@ -90,6 +92,8 @@ struct SimStateInfo {
 class SimulationManager {
 public:
 
+    static shared_ptr<SimulationManager> getInstance();
+
     SimStateInfo getState() {
         std::lock_guard<std::mutex> lk(state_mtx);
         return state;
@@ -104,16 +108,7 @@ public:
         std::optional<SimulationConfig> simulation_config
     );
 
-    ErrorMsg cancelTask() {
-        all_cancel_flag.store(true, std::memory_order_release);
-        {
-            std::lock_guard<std::mutex> lk(subprocesses_mtx);
-            for (auto &pair : subprocesses) {
-                pair.second->terminate();
-            }
-        }
-        return ErrorMsg();
-    }
+    ErrorMsg cancelTask();
 
     ~SimulationManager() {
         cancelTask();
@@ -124,13 +119,15 @@ public:
 
 protected:
 
+    SimulationManager() {};
+
     shared_ptr<VulProject> project_snapshot;
 
-    SimStateInfo state;
     std::mutex state_mtx;
-
-    unordered_map<uint64_t, ChildProcessRunner *> subprocesses;
-    std::mutex subprocesses_mtx;
+    SimStateInfo state;
+    unique_ptr<ChildProcessRunner> subprocess;
+    uint64_t _startChildProcess(const string &exe, const vector<string> &args, LogSocketCategory log_category);
+    int32_t _waitChildProcess(uint64_t id);
 
     std::atomic<bool> all_cancel_flag = false;
 

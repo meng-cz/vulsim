@@ -26,7 +26,7 @@
 #include <optional>
 #include <string_view>
 
-std::optional<std::string> getEnvVar(const std::string &key) {
+inline std::optional<std::string> getEnvVar(const std::string &key) {
     const char *val = std::getenv(key.c_str());
     if (val == nullptr) {
         return std::nullopt;

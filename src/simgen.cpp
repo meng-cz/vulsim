@@ -438,7 +438,7 @@ inline string _genReqServFuncArgsList(const VulReqServ &item) {
  * @param out_lines Output vector of strings to hold the generated header code lines. With \\n in each line.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulModuleLib> modulelib) {
+ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulConfigLib> configlib, shared_ptr<VulModuleLib> modulelib) {
 
     vector<string> constructor_param_field;
     vector<string> tick_field;

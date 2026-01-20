@@ -140,7 +140,7 @@ public:
     ProjectName                 name;
     ProjectPath                 dirpath;
 
-    ErrorMsg load(const ProjectPath &path);
+    ErrorMsg load(const ProjectPath &path, const ProjectName &project_name);
     ErrorMsg save() const;
 
     ModuleName                  top_module;
