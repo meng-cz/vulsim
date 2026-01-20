@@ -62,10 +62,17 @@ public:
     
 private:
     ChildProcessConfig config;
-    
-    std::atomic<bool> running {false};
-    std::atomic<bool> force_killed {false};
 
+    enum class State {
+        NotStarted,
+        Forking,
+        Forking_Terminated,
+        Running,
+        Terminated, // terminated but not waited yet
+        Finished    // has been waited
+    } state = State::NotStarted;
+    std::mutex state_mtx;
+    
     std::thread stdout_thread;
     std::thread stderr_thread;
 

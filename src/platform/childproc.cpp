@@ -28,9 +28,13 @@
 #include <unistd.h>
 
 bool ChildProcessRunner::start() {
-    if (running.load()) {
-        // already running
-        return false;
+    {
+        std::lock_guard<std::mutex> lk(state_mtx);
+        if (state != State::NotStarted) {
+            // already started
+            return false;
+        }
+        state = State::Forking;
     }
 
     int outpipe[2];
@@ -43,7 +47,8 @@ bool ChildProcessRunner::start() {
     pid_t pid = fork();
     if (pid < 0) {
         // fork failed
-        return false;
+        std::lock_guard<std::mutex> lk(state_mtx);
+        state = State::NotStarted;
     } else if (pid == 0) {
         // child process
         setsid();
@@ -81,19 +86,37 @@ bool ChildProcessRunner::start() {
     close(outpipe[1]);
     close(errpipe[1]);
 
-    running.store(true, std::memory_order_release);
-    force_killed.store(false, std::memory_order_release);
+    bool double_check_terminate = false;
+    {
+        std::lock_guard<std::mutex> lk(state_mtx);
+        if (state != State::Forking) {
+            // terminated while forking
+            double_check_terminate = true;
+        } else {
+            state = State::Running;
+        }
+    }
+
+    if (double_check_terminate) {
+        terminate();
+    }
+
     stdout_thread = std::thread(&ChildProcessRunner::thread_function_stdout, this);
     stderr_thread = std::thread(&ChildProcessRunner::thread_function_stderr, this);
     return true;
 }
 
 void ChildProcessRunner::terminate() {
-    if (!running.exchange(false, std::memory_order_acq_rel)) {
-        // not running
+    std::lock_guard<std::mutex> lk(state_mtx);
+    if (state == State::NotStarted || state == State::Terminated || state == State::Finished) {
         return;
     }
-    force_killed.store(true, std::memory_order_release);
+    if (state == State::Forking) {
+        // mark as terminated, actual termination will be handled after forking
+        state = State::Forking_Terminated;
+        return;
+    }
+    state = State::Terminated;
     // send SIGKILL to the process group
     if (pgid != -1) {
         kill(-pgid, SIGKILL);
@@ -101,10 +124,20 @@ void ChildProcessRunner::terminate() {
 }
 
 int32_t ChildProcessRunner::wait() {
+    {
+        std::lock_guard<std::mutex> lk(state_mtx);
+        if (state == State::NotStarted || state == State::Forking || state == State::Finished) {
+            return -1;
+        }
+    }
+
     int status = 0;
     waitpid(child_pid, &status, 0);
 
-    running.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lk(state_mtx);
+        state = State::Finished;
+    }
 
     if (stdout_thread.joinable()) {
         stdout_thread.join();
@@ -123,7 +156,13 @@ void ChildProcessRunner::thread_function_stdout() {
     string buf;
     char tmp[4096];
 
-    while (running.load(std::memory_order_acquire)) {
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lk(state_mtx);
+            if (state != State::Running && state != State::Terminated) {
+                break;
+            }
+        }
         ssize_t n = read(stdout_fd, tmp, sizeof(tmp));
         if (n > 0) {
             buf.append(tmp, n);
@@ -161,7 +200,13 @@ void ChildProcessRunner::thread_function_stderr() {
     string buf;
     char tmp[4096];
 
-    while (running.load(std::memory_order_acquire)) {
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lk(state_mtx);
+            if (state != State::Running && state != State::Terminated) {
+                break;
+            }
+        }
         ssize_t n = read(stderr_fd, tmp, sizeof(tmp));
         if (n <= 0) {
             break;
