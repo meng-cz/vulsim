@@ -43,12 +43,9 @@ public:
             "  - [2] service (optional): Service port name to generate code for, if provided.",
             "  - [3] instance (optional): Child instance name to generate code for, if provided.",
             "  - [4] request (optional): Child instance request name to generate code for, if provided.",
-            "  - [5] full_helper (optional): If set to 'true', generate full helper code including headers. Otherwise, only provide symbol table.",
             "Results:",
             "  - signature: Function signature string for the generated code.",
             "  - code_lines: List of lines of generated C++ code.",
-            "  - symbols: JSON string of the valid symbols in the module.",
-            "  - helper_code_lines: List of lines of full helper C++ code, if requested.",
         };
     }
 };
@@ -167,13 +164,6 @@ VulOperationResponse CodeGetOperation::execute(VulProject &project) {
                 response.list_results["code_lines"] = req_code_iter->second;
             }
         }
-    }
-
-    auto symbols = simgen::getValidSymbols(project, module_name);
-    response.results["symbols"] = serialize::serializeSymbolsToJSON(symbols);
-
-    if (full_helper) {
-        response.list_results["helper_code_lines"] = simgen::getHelperCodeLines(project, module_name);
     }
 
     return response;

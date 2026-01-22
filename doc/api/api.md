@@ -196,5 +196,6 @@ Payload 使用 JSON 格式编码。日志消息的 JSON 结构如下：
 | simulation.list | N | N | 列出当前项目的所有仿真任务历史 |
 | simulation.cancel | Y | N | 取消当前项目的正在运行的仿真任务 |
 | simulation.state | N | N | 获取当前项目的正在运行的仿真任务状态 |
-| code.get | N | N | 获取模块中指定代码块或接口的代码行及其符号表信息 |
+| code.get | N | N | 获取模块中指定代码块或接口的代码行 |
+| code.getsymbol | N | N | 获取模块内代码块可用的符号表信息 |
 | code.update | Y | Y | 更新或删除模块中指定代码块或接口的代码行 |
