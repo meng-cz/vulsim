@@ -208,6 +208,343 @@ vector<string> genCppHeaderPrelude() {
     return out;
 }
 
+vector<string> genHelperCodeHeader() {
+    vector<CCodeLine> code_lines = genCppHeaderPrelude();
+    code_lines.push_back("");
+    code_lines.push_back("using int64 = long long;");
+    code_lines.push_back("using int32 = int;");
+    code_lines.push_back("using int16 = short;");
+    code_lines.push_back("using int8  = char;");
+    code_lines.push_back("using uint64 = unsigned long long;");
+    code_lines.push_back("using uint32 = unsigned int;");
+    code_lines.push_back("using uint16 = unsigned short;");
+    code_lines.push_back("using uint8  = unsigned char;");
+    code_lines.push_back("");
+    return code_lines;
+}
+
+vector<CCodeLine> getHelperCodeLines(VulProject &project, const ModuleName &module_name) {
+    ValidSymbols symbols = getValidSymbols(project, module_name);
+    vector<CCodeLine> code_lines = genHelperCodeHeader();
+
+    for (const auto &def : symbols.constexpr_defs) {
+        code_lines.push_back("/* " + def.comment + " */");
+        code_lines.push_back("constexpr int64 " + def.name + " = " + replaceLog2CeilChar(def.value) + ";");
+        code_lines.push_back("");
+    }
+    code_lines.push_back("");
+
+    for (const auto &def : symbols.struct_defs) {
+        code_lines.push_back("/* " + def.comment + " */");
+        if (def.is_alias) {
+            code_lines.push_back("using " + def.name + " = " + def.aliased_type + ";");
+        } else if (def.is_enum) {
+            code_lines.push_back("enum class " + def.name + " {");
+            for (const auto &mem : def.members) {
+                if (!mem.second.empty())
+                    code_lines.push_back(CodeTab + mem.first + " = " + mem.second + ",");
+                else 
+                    code_lines.push_back(CodeTab + mem.first + ",");
+            }
+            code_lines.push_back("};");
+        } else {
+            code_lines.push_back("struct " + def.name + " {");
+            for (const auto &mem : def.members) {
+                code_lines.push_back(CodeTab + mem.first + " " + mem.second + ";");
+            }
+            code_lines.push_back("};");
+        }
+        code_lines.push_back("");
+    }
+    code_lines.push_back("");
+
+    for (const auto &def : symbols.function_defs) {
+        code_lines.push_back("/* " + def.comment + " */");
+        string func_decl = (def.handshake ? "bool " : "void ");
+        func_decl += def.name + "(";
+        for (size_t i = 0; i < def.parameter_types.size(); ++i) {
+            func_decl += def.parameter_types[i];
+            if (i + 1 < def.parameter_types.size()) {
+                func_decl += ", ";
+            }
+        }
+        func_decl += ");";
+        code_lines.push_back(func_decl);
+    }
+    code_lines.push_back("");
+
+    for (const auto &def : symbols.variable_defs) {
+        code_lines.push_back("/* " + def.comment + " */");
+        code_lines.push_back(def.type + " " + def.name + ";");
+        code_lines.push_back("");
+    }
+    code_lines.push_back("");
+
+    return code_lines;
+}
+
+ValidSymbols getValidSymbols(VulProject &project, const ModuleName &module_name) {
+    ValidSymbols symbols;
+
+    auto mod_iter = project.modulelib->modules.find(module_name);
+    if (mod_iter == project.modulelib->modules.end()) {
+        return symbols;
+    }
+    shared_ptr<VulModule> mod_ptr = std::dynamic_pointer_cast<VulModule>(mod_iter->second);
+    if (!mod_ptr) {
+        // external module, no local symbols
+        return symbols;
+    }
+
+    auto pushStructDefs = [&](const VulBundleItem & bund) {
+        StructDefinition def;
+        def.comment = bund.comment;
+        def.name = bund.name;
+        if (bund.is_alias) {
+            def.aliased_type = bund.members[0].typeString();
+            def.is_alias = true;
+        } else if (!bund.enum_members.empty()) {
+            // enum
+            for (const auto &emem : bund.enum_members) {
+                def.members.push_back({emem.name, emem.value});
+            }
+            def.is_enum = true;
+        } else {
+            for (const auto &mem : bund.members) {
+                def.members.push_back({mem.typeString(), mem.name});
+            }
+        }
+        symbols.struct_defs.push_back(def);
+    };
+
+    {
+        // global configs
+        vector<ConfigName> topo_sorted_configs;
+        ErrorMsg err = project.configlib->getAllConfigItemsTopoSort(topo_sorted_configs);
+        if (!err.error()) {
+            for (const auto &cfg_name : topo_sorted_configs) {
+                VulConfigItem item;
+                err = project.configlib->getConfigItem(cfg_name, item);
+                if (err.error()) continue;
+                ConstexprDefinition def;
+                def.comment = item.comment;
+                def.name = item.name;
+                def.value = item.value;
+                symbols.constexpr_defs.push_back(def);
+            }
+        }
+    }
+    {
+        // global bundles
+        vector<BundleName> topo_sorted_bundles;
+        ErrorMsg err = project.bundlelib->getAllBundlesTopoSort(topo_sorted_bundles);
+        if (!err.error()) {
+            for (const auto &bund_name : topo_sorted_bundles) {
+                VulBundleItem bund;
+                unordered_set<BundleTag> tags;
+                err = project.bundlelib->getBundleDefinition(bund_name, bund, tags);
+                if (err.error()) continue;
+                pushStructDefs(bund);
+            }
+        }
+    }
+    {
+        // local configs
+        for (const auto & [cfg_name, loc_cfg] : mod_ptr->local_configs) {
+            ConstexprDefinition def;
+            def.comment = loc_cfg.comment;
+            def.name = loc_cfg.name;
+            def.value = loc_cfg.value;
+            symbols.constexpr_defs.push_back(def);
+        }
+        // local bundles
+        for (const auto & [bund_name, loc_bund] : mod_ptr->local_bundles) {
+            pushStructDefs(loc_bund);
+        }
+    }
+
+    auto pushFunctionDef = [&](const VulReqServ &rs) {
+        FunctionDefinition def;
+        def.comment = rs.comment;
+        def.name = rs.name;
+        for (const auto &param : rs.args) {
+            if (isBasicVulType(param.type)) {
+                def.parameter_types.push_back(param.type + " " + param.name);
+            } else {
+                def.parameter_types.push_back(param.type + " & " + param.name);
+            }
+        }
+        for (const auto &ret : rs.rets) {
+            def.parameter_types.push_back(ret.type + " * " + ret.name);
+        }
+        def.relavent_instance = rs.name;
+        def.handshake = rs.has_handshake;
+        symbols.function_defs.push_back(def);
+    };
+    auto pushFunctionDef2 = [&](const VulReqServ &rs, const ReqServName &funcname, const InstanceName &inst_name) {
+        FunctionDefinition def;
+        def.comment = rs.comment;
+        def.name = funcname;
+        for (const auto &param : rs.args) {
+            if (isBasicVulType(param.type)) {
+                def.parameter_types.push_back(param.type + " " + param.name);
+            } else {
+                def.parameter_types.push_back(param.type + " & " + param.name);
+            }
+        }
+        for (const auto &ret : rs.rets) {
+            def.parameter_types.push_back(ret.type + " * " + ret.name);
+        }
+        def.relavent_instance = inst_name;
+        def.handshake = rs.has_handshake;
+        symbols.function_defs.push_back(def);
+    };
+
+    {
+        // requests
+        for (const auto & [req_name, req] : mod_ptr->requests) {
+            pushFunctionDef(req);
+        }
+        // services
+        for (const auto & [serv_name, serv] : mod_ptr->services) {
+            pushFunctionDef(serv);
+        }
+    }
+    auto pushPipeInput = [&](const PipePortName &port_name, const string &type) {
+        FunctionDefinition def_can_pop {
+            .comment = "",
+            .name = port_name + "_can_pop",
+            .parameter_types = {},
+            .relavent_instance = port_name,
+            .handshake = true
+        };
+        symbols.function_defs.push_back(def_can_pop);
+        FunctionDefinition def_pop {
+            .comment = "",
+            .name = port_name + "_pop",
+            .parameter_types = {type + " * data"},
+            .relavent_instance = port_name,
+            .handshake = false
+        };
+        symbols.function_defs.push_back(def_pop);
+        FunctionDefinition def_top {
+            .comment = "",
+            .name = port_name + "_top",
+            .parameter_types = {type + " * data"},
+            .relavent_instance = port_name,
+            .handshake = false
+        };
+        symbols.function_defs.push_back(def_top);
+    };
+    auto pushPipeOutput = [&](const PipePortName &port_name, const string &type) {
+        FunctionDefinition def_can_push {
+            .comment = "",
+            .name = port_name + "_can_push",
+            .parameter_types = {},
+            .relavent_instance = port_name,
+            .handshake = true
+        };
+        symbols.function_defs.push_back(def_can_push);
+        FunctionDefinition def_push {
+            .comment = "",
+            .name = port_name + "_push",
+            .parameter_types = {"const " + type + " & data"},
+            .relavent_instance = port_name,
+            .handshake = false
+        };
+        symbols.function_defs.push_back(def_push);
+    };
+    {
+        // pipe inputs
+        for (const auto & [port_name, port] : mod_ptr->pipe_inputs) {
+            pushPipeInput(port_name, port.type);
+        }
+        // pipe outputs
+        for (const auto & [port_name, port] : mod_ptr->pipe_outputs) {
+            pushPipeOutput(port_name, port.type);
+        }
+    }
+    {
+        // storages
+        for (const auto & [stor_name, stor] : mod_ptr->storages) {
+            VariableDefinition var_def {
+                .comment = stor.comment,
+                .name = stor_name,
+                .type = stor.typeString(),
+                .relavent_instance = stor_name
+            };
+            symbols.variable_defs.push_back(var_def);
+        }
+        // storagetmps
+        for (const auto & [stor_name, stor] : mod_ptr->storagetmp) {
+            VariableDefinition var_def {
+                .comment = stor.comment,
+                .name = stor_name,
+                .type = stor.typeString(),
+                .relavent_instance = stor_name
+            };
+            symbols.variable_defs.push_back(var_def);
+        }
+        // storagenexts
+        for (const auto & [stor_name, stor] : mod_ptr->storagenexts) {
+            FunctionDefinition def_get {
+                .comment = "",
+                .name = stor_name + "_get",
+                .parameter_types = {},
+                .relavent_instance = stor_name,
+                .handshake = false
+            };
+            symbols.function_defs.push_back(def_get);
+            FunctionDefinition def_setnext {
+                .comment = "",
+                .name = stor_name + "_setnext",
+                .parameter_types = {"const " + stor.type + " & value", "uint8 priority"},
+                .relavent_instance = stor_name,
+                .handshake = false
+            };
+            symbols.function_defs.push_back(def_setnext);
+        }
+    }
+    {
+        // child services
+        for (const auto & [inst_name, inst] : mod_ptr->instances) {
+            auto child_mod_iter = project.modulelib->modules.find(inst.module_name);
+            if (child_mod_iter == project.modulelib->modules.end()) {
+                continue;
+            }
+            for (const auto & [serv_name, serv] : child_mod_iter->second->services) {
+                ReqServName funcname = inst_name + "_" + serv_name;
+                pushFunctionDef2(serv, funcname, inst_name);
+            }
+        }
+    }
+    {
+        // pipe instances
+        for (const auto & [pipe_inst_name, pipe_inst] : mod_ptr->pipe_instances) {
+            pushPipeInput(pipe_inst_name, pipe_inst.type);
+            pushPipeOutput(pipe_inst_name, pipe_inst.type);
+        }
+    }
+    {
+        // child local bundles
+        for (const auto & [inst_name, inst] : mod_ptr->instances) {
+            auto child_mod_iter = project.modulelib->modules.find(inst.module_name);
+            if (child_mod_iter == project.modulelib->modules.end()) {
+                continue;
+            }
+            for (const auto & [bund_name, bund] : child_mod_iter->second->local_bundles) {
+                VulBundleItem new_bund = bund;
+                new_bund.name = inst_name + "_" + bund.name;
+                pushStructDefs(new_bund);
+            }
+        }
+    }
+
+    return symbols;
+}
+
+
+
 ErrorMsg genConfigHeaderCode(const VulConfigLib &config_lib, vector<string> &out_lines) {
     out_lines = genHeaderPrelude();
 

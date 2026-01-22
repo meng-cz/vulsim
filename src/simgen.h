@@ -28,8 +28,46 @@
 #include "bundlelib.h"
 #include "configlib.h"
 #include "module.h"
+#include "project.h"
 
 namespace simgen {
+
+struct ConstexprDefinition {
+    Comment         comment;
+    ConfigName      name;
+    ConfigValue     value;
+};
+struct FunctionDefinition {
+    Comment         comment;
+    ReqServName     name;
+    vector<string>  parameter_types;
+    InstanceName    relavent_instance;
+    bool            handshake;
+};
+struct StructDefinition {
+    Comment         comment;
+    BundleName      name;
+    vector<pair<string, string>> members; // pair<type, name> or pair<name, value> for enum
+    string          aliased_type;
+    bool            is_enum = false;
+    bool            is_alias = false;
+};
+struct VariableDefinition {
+    Comment         comment;
+    string          name;
+    string          type;
+    InstanceName    relavent_instance;
+};
+struct ValidSymbols {
+    vector<ConstexprDefinition>     constexpr_defs;
+    vector<FunctionDefinition>      function_defs;
+    vector<StructDefinition>        struct_defs;
+    vector<VariableDefinition>      variable_defs;
+};
+
+vector<CCodeLine> getHelperCodeLines(VulProject &project, const ModuleName &module_name);
+
+ValidSymbols getValidSymbols(VulProject &project, const ModuleName &module_name);
 
 /**
  * @brief Generate config.h C++ header code for configuration items.

@@ -26,6 +26,7 @@
 #include "bundlelib.h"
 #include "module.h"
 #include "project.h"
+#include "simgen.h"
 
 namespace serialize {
 
@@ -50,5 +51,7 @@ void parseStorageFromJSON(const string &json_str, VulStorage &out_storage);
 string serializeModuleInfoToJSON(const VulModule &mod_info, shared_ptr<VulModuleLib> modulelib);
 
 string serializeModuleBaseInfoToJSON(const VulModuleBase &mod_info);
+
+string serializeSymbolsToJSON(const simgen::ValidSymbols &symbols);
 
 } // namespace serialize

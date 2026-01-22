@@ -687,4 +687,97 @@ string serializeModuleBaseInfoToJSON(const VulModuleBase &mod_info) {
     return j.dump();
 }
 
+/**
+ * json format for simgen symbols:
+ * {
+ *   "constexpr_defs": [ {
+ *      "comment": "...",
+ *      "name": "...",
+ *      "value": "..."   
+ *   }, ... ],
+ *   "function_defs": [ {
+ *      "comment": "...",
+ *      "name": "...",
+ *      "handshake": true/false, 
+ *      "args": [ "...", "...", ... ],
+ *      "relavent_instance": "..."
+ *   }, ... ],
+ *   "struct_defs": [ {
+ *      "comment": "...",
+ *      "name": "...",
+ *      "members": [ { "type": "...", "name": "...", "value": "..." }, ...
+ *      "aliased_type": "...",
+ *      "is_enum": true/false,
+ *      "is_alias": true/false
+ *   }, ... ],
+ *   "variable_defs": [ {
+ *      "comment": "...",
+ *      "type": "...",
+ *      "name": "...",
+ *      "relavent_instance": "..."
+ *   }, ... ]
+ * }
+ */
+
+string serializeSymbolsToJSON(const simgen::ValidSymbols &symbols) {
+    json j;
+    // constexpr_defs
+    j["constexpr_defs"] = json::array();
+    for (const auto & def : symbols.constexpr_defs) {
+        json jdef;
+        jdef["comment"] = def.comment;
+        jdef["name"] = def.name;
+        jdef["value"] = def.value;
+        j["constexpr_defs"].push_back(jdef);
+    }
+    // function_defs
+    j["function_defs"] = json::array();
+    for (const auto & def : symbols.function_defs) {
+        json jdef;
+        jdef["comment"] = def.comment;
+        jdef["name"] = def.name;
+        jdef["handshake"] = def.handshake;
+        jdef["args"] = json::array();
+        for (const auto & arg : def.parameter_types) {
+            jdef["args"].push_back(arg);
+        }
+        jdef["relavent_instance"] = def.relavent_instance;
+        j["function_defs"].push_back(jdef);
+    }
+    // struct_defs
+    j["struct_defs"] = json::array();
+    for (const auto & def : symbols.struct_defs) {
+        json jdef;
+        jdef["comment"] = def.comment;
+        jdef["name"] = def.name;
+        jdef["members"] = json::array();
+        for (const auto & mem : def.members) {
+            json jmem;
+            if (def.is_enum) {
+                jmem["name"] = mem.first;
+                jmem["value"] = mem.second;
+            } else {
+                jmem["type"] = mem.first;
+                jmem["name"] = mem.second;
+            }
+            jdef["members"].push_back(jmem);
+        }
+        jdef["aliased_type"] = def.aliased_type;
+        jdef["is_enum"] = def.is_enum;
+        jdef["is_alias"] = def.is_alias;
+        j["struct_defs"].push_back(jdef);
+    }
+    // variable_defs
+    j["variable_defs"] = json::array();
+    for (const auto & def : symbols.variable_defs) {
+        json jdef;
+        jdef["comment"] = def.comment;
+        jdef["type"] = def.type;
+        jdef["name"] = def.name;
+        jdef["relavent_instance"] = def.relavent_instance;
+        j["variable_defs"].push_back(jdef);
+    }
+    return j.dump();
+}
+
 } // namespace serialize

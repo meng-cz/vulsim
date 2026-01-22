@@ -409,6 +409,9 @@ constexpr uint32_t EOPModPipeNotFound = 31801;
 constexpr uint32_t EOPModPipeNameInvalid = 31802;
 constexpr uint32_t EOPModPipeNameDup = 31803;
 
+constexpr uint32_t EOPCodeGet = 33000;
+constexpr uint32_t EOPCodeGetInvalidArg = 33001;
+constexpr uint32_t EOPCodeGetNotFound = 33002;
 
 constexpr uint32_t EGEN = 40000;
 constexpr uint32_t EGENCancel = 40001;
