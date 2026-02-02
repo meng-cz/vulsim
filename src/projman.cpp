@@ -29,6 +29,9 @@ namespace fs = std::filesystem;
 
 VulProjectPathManager::VulProjectPathManager() {
     lib_root_path = getConfigValue(string(EnvVulProjectPath), "projects");
+    if (!fs::exists(lib_root_path)) {
+        fs::create_directories(lib_root_path);
+    }
     string import_path_str = getConfigValue(string(EnvVulImportPath), "import");
     size_t start = 0;
     while (start < import_path_str.size()) {
