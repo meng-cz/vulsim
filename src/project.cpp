@@ -30,9 +30,14 @@
 #include <stdexcept>
 #include <filesystem>
 
-static unordered_map<OperationName, OperationFactory> operationFactories;
+
+unordered_map<OperationName, OperationFactory> & getOperationFactories() {
+    static unordered_map<OperationName, OperationFactory> operationFactories;
+    return operationFactories;
+}
 
 bool VulProject::registerOperation(const OperationName &op_name, const OperationFactory &factory) {
+    auto &operationFactories = getOperationFactories();
     auto iter = operationFactories.find(op_name);
     if (iter != operationFactories.end()) {
         return false;
@@ -42,6 +47,7 @@ bool VulProject::registerOperation(const OperationName &op_name, const Operation
 }
 
 vector<OperationName> VulProject::listAllRegisteredOperations() {
+    auto &operationFactories = getOperationFactories();
     vector<OperationName> op_names;
     for (const auto& [name, factory] : operationFactories) {
         op_names.push_back(name);
@@ -50,6 +56,7 @@ vector<OperationName> VulProject::listAllRegisteredOperations() {
 }
 
 VulOperationResponse VulProject::doOperation(const VulOperationPackage &op) {
+    auto &operationFactories = getOperationFactories();
     auto iter = operationFactories.find(op.name);
     if (iter == operationFactories.end()) {
         return EStr(EItemOPInvalid, string("Unsupported operation: ") + op.name);
@@ -112,6 +119,7 @@ string VulProject::redoLastOperation() {
 }
 
 vector<string> VulProject::listHelpForOperation(const OperationName &op_name) const {
+    auto &operationFactories = getOperationFactories();
     auto iter = operationFactories.find(op_name);
     if (iter == operationFactories.end()) {
         vector<string> ret;
