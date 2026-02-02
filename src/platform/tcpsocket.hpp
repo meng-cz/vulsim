@@ -66,6 +66,9 @@ public:
                 }
                 bytes_read += ret;
             }
+            if (bytes_read >= size) {
+                return true;
+            }
             if (ret < 0) {
                 println_log("Socket receive failed on port " + std::to_string(port) + ", closing connection.");
                 close(socketfd);
