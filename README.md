@@ -9,6 +9,12 @@
 3. 内置调试工具和性能统计工具
 4. 自动化生成RTL代码框架
 
+本项目为Vul的后端命令行，通过Socket与前端GUI通信。
+
+前端GUI项目：[VulSimGUI (https://github.com/meng-cz/VulSimGUI)](https://github.com/meng-cz/VulSimGUI)
+
+通讯API文档：[VulSimAPI (./doc/api)](./doc/api/api.md)
+
 ## 开发状态
 
 Working in progress.
@@ -17,12 +23,9 @@ Working in progress.
 
 v1.0开发中：
 
-1. 重构配置参数库和结构体库 （2025/11完成）
-2. 为Vul模型支持模块化设计和预制件导入 （正在进行）
-3. 构建VulDesigner GUI v1.0 （预计2025/02）
-4. 实现Vul模型到RTL框架的代码自动生成（预计2025/03）
-5. 研究基于HLS的从Vul模型到可综合RTL的生成（预计2025/04）
-6. 构建VulDesigner v1.1，添加对波形调试、性能统计、快照保存和恢复的支持（预计2025/04）
+1. 基于HLS的从Vul模型到可综合RTL的生成（预计2025/05）
+2. 构建VulDesigner GUI v1.0 （预计2025/06）
+3. 构建VulDesigner v1.1，添加对波形调试、性能统计、快照保存和恢复的支持（预计2025/08）
 
 前期工作：
 1. [nullrvsim](https://github.com/meng-cz/nullrvsim): 验证VUL模型生成的模拟器框架的正确性和并行效率
@@ -37,6 +40,7 @@ v0.1版本的Vul模型文档：[vularch.md](https://github.com/meng-cz/vulsim/bl
 TODO: user guide.
 
 ## 构建
+
 
 TODO：详细构建方式
 
