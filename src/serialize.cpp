@@ -472,6 +472,14 @@ ErrorMsg _parseBundleNode(pugi::xml_node &bundle_node, VulBundleItem &bundle, co
                 member.dims.push_back(dim_str);
             }
 
+            // comment (optional)
+            pugi::xml_node member_comment_node = member_node.child("comment");
+            if (member_comment_node) {
+                member.comment = member_comment_node.text().as_string();
+            } else {
+                member.comment = "";
+            }
+
             bundle.members.push_back(member);
         }
     }
@@ -577,6 +585,12 @@ ErrorMsg _writeBundleNode(pugi::xml_node &bundle_node, const VulBundleItem &bund
             for (const auto &dim : member.dims) {
                 pugi::xml_node dim_node = member_node.append_child("dim");
                 dim_node.append_child(pugi::node_pcdata).set_value(dim.c_str());
+            }
+
+            // comment (optional)
+            if (!member.comment.empty()) {
+                pugi::xml_node member_comment_node = member_node.append_child("comment");
+                member_comment_node.append_child(pugi::node_pcdata).set_value(member.comment.c_str());
             }
         }
     } else {

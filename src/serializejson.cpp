@@ -87,9 +87,9 @@ string serializeBundleItemToJSON(const VulBundleItem &bundle) {
     json j;
     j["is_alias"] = bundle.is_alias;
     j["members"] = json::array();
-    if (!bundle.comment.empty()) {
-        j["comment"] = bundle.comment;
-    }
+    // if (!bundle.comment.empty()) {
+    //     j["comment"] = bundle.comment;
+    // }
     for (const auto &mem : bundle.members) {
         json jm;
         jm["name"] = mem.name;
@@ -145,11 +145,11 @@ void parseBundleItemFromJSON(const string &json_str, VulBundleItem &out_bundle) 
     } else {
         out_bundle.is_alias = false;
     }
-    if (j.contains("comment")) {
-        out_bundle.comment = j.at("comment").get<Comment>();
-    } else {
-        out_bundle.comment = "";
-    }
+    // if (j.contains("comment")) {
+    //     out_bundle.comment = j.at("comment").get<Comment>();
+    // } else {
+    //     out_bundle.comment = "";
+    // }
     if (j.contains("members")) {
         for (const auto &jm : j.at("members")) {
             VulBundleMember mem;

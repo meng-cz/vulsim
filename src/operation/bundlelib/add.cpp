@@ -59,11 +59,11 @@ VulOperationResponse BundleLibAddOperation::execute(VulProject &project) {
             return EStr(EOPBundAddMissArg, "Missing argument: name");
         }
         name = *arg0;
-        auto arg1 = op.getArg("comment", 0);
+        auto arg1 = op.getArg("comment", 1);
         if (arg1) {
             comment = *arg1;
         }
-        auto arg2 = op.getArg("definition", 0);
+        auto arg2 = op.getArg("definition", 2);
         if (arg2) {
             definition = *arg2;
         }
