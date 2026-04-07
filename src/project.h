@@ -29,6 +29,10 @@
 #include "configlib.h"
 #include "bundlelib.h"
 
+#include <functional>
+#include <algorithm>
+#include <queue>
+
 /**
  * 项目操作保证以下内容的一致性：
  * - 配置库（VulConfigLib）
