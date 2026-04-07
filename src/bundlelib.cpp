@@ -189,3 +189,63 @@ ErrorMsg VulBundleLib::getAllBundlesTopoSort(vector<BundleName> &out_sorted_bund
     out_sorted_bundles.swap(*topo_sorted_names);
     return "";
 }
+
+
+ErrorMsg VulBundleLib::insertMultiBundles(const vector<VulBundleItem> &bundles, const unordered_set<BundleTag> & tags) {
+    struct BundleWithRefs {
+        VulBundleItem item;
+        unordered_set<BundleName> bundle_refs;
+        unordered_set<ConfigName> config_refs; 
+    };
+    
+    unordered_set<BundleName> new_names;
+    unordered_map<BundleName, BundleWithRefs> new_items;
+    for (const auto &item : bundles) {
+        BundleWithRefs item_with_refs;
+        item_with_refs.item = item;
+        string err = item.checkAndExtractReferences(item_with_refs.bundle_refs, item_with_refs.config_refs);
+        if (!err.empty()) {
+            return EStr(EOPBundAddDefinitionInvalid, string("Invalid bundle definition for bundle '") + item.name + string(": ") + err);
+        }
+        if (checkNameConflict(item.name)) {
+            return EStr(EOPBundAddDefinitionInvalid, string("Bundle name conflict: ") + item.name);
+        }
+        if (new_names.find(item.name) != new_names.end()) {
+            return EStr(EOPBundAddDefinitionInvalid, string("Duplicate bundle name in input: ") + item.name);
+        }
+        new_names.insert(item.name);
+        new_items[item.name] = std::move(item_with_refs);
+    }
+    unordered_map<BundleName, unordered_set<BundleName>> new_bundle_rev_refs;
+    for (const auto &kv : new_items) {
+        const auto &item = kv.second;
+        for (const auto &ref_name : item.bundle_refs) {
+            if (!checkNameConflict(ref_name) && new_names.find(ref_name) == new_names.end()) {
+                return EStr(EOPBundAddDefinitionInvalid, string("Referenced bundle '") + ref_name + string("' in definition of bundle '") + item.item.name + string("' does not exist in bundle library"));
+            }
+            new_bundle_rev_refs[ref_name].insert(item.item.name);
+        }
+    }
+    vector<BundleName> looped_bundles;
+    auto sorted_names_ptr = topologicalSort(new_names, new_bundle_rev_refs, looped_bundles);
+    if (!sorted_names_ptr) {
+        string looped_str;
+        for (const auto &bname : looped_bundles) {
+            if (!looped_str.empty()) looped_str += ", ";
+            looped_str += bname;
+        }
+        return EStr(EOPBundAddDefinitionInvalid, string("Bundle reference loop detected among new bundles: ") + looped_str);
+    }
+    for (const auto &name : *sorted_names_ptr) {
+        const auto &item_with_refs = new_items[name];
+        const auto &item = item_with_refs.item;
+        BundleEntry bunde;
+        bunde.item = item;
+        bunde.tags = tags;
+        bunde.references = item_with_refs.bundle_refs;
+        bunde.confs = item_with_refs.config_refs;
+        this->bundles[name] = std::move(bunde);
+    }
+    return "";
+}
+

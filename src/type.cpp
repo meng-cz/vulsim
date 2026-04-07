@@ -42,7 +42,8 @@ bool isValidIdentifier(const string &name) {
         "register","reinterpret_cast","return","short","signed","sizeof","static","static_assert","static_cast",
         "struct","switch","template","this","thread_local","throw","true","try","typedef","typeid","typename",
         "union","unsigned","using","virtual","void","volatile","wchar_t","while","xor","xor_eq",
-        "uint8", "uint16", "uint32", "uint64", "uint128", "int8", "int16", "int32", "int64", "int128", "UInt"
+        "uint8", "uint16", "uint32", "uint64", "uint128", "int8", "int16", "int32", "int64", "int128", "UInt",
+        "uint8_t", "uint16_t", "uint32_t", "uint64_t", "uint128_t", "int8_t", "int16_t", "int32_t", "int64_t", "int128_t",
     };
     if (name.empty()) return false;
     // first char: letter or underscore
@@ -105,6 +106,8 @@ bool isBasicVulType(const string &type) {
     static const vector<string> validTypes = {
         "uint8", "uint16", "uint32", "uint64", "uint128",
         "int8", "int16", "int32", "int64", "int128",
+        "uint8_t", "uint16_t", "uint32_t", "uint64_t", "uint128_t",
+        "int8_t", "int16_t", "int32_t", "int64_t", "int128_t",
         "bool"
     };
     return std::find(validTypes.begin(), validTypes.end(), type) != validTypes.end();

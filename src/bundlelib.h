@@ -136,6 +136,12 @@ public:
      */
     ErrorMsg getAllBundlesTopoSort(vector<BundleName> &out_sorted_bundles) const;
 
+    ErrorMsg insertMultiBundles(const vector<VulBundleItem> &bundles, const unordered_set<BundleTag> & tags);
+
+    ErrorMsg insertMultiBundles(const vector<VulBundleItem> &bundles) {
+        return insertMultiBundles(bundles, {DefaultTag});
+    }
+
     typedef struct {
         VulBundleItem               item;
         unordered_set<BundleTag>    tags;

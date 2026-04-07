@@ -841,12 +841,58 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         // find user-defined service body if any
         auto user_serv_iter = module.serv_codelines.find(serv_entry.first);
         if (user_serv_iter != module.serv_codelines.end()) {
-            for (const auto &line : user_serv_iter->second) {
-                service_field.push_back(line);
+            // for (const auto &line : user_serv_iter->second) {
+            //     service_field.push_back(line);
+            // }
+            if (serv_entry.second.has_handshake) {
+                service_field.push_back(CodeTab + "bool cond = _serv_" + serv_entry.first + "_cond(" + argnames + ");\n");
+                service_field.push_back(CodeTab + "if (cond) _serv_" + serv_entry.first + "_impl(" + argnames + ");\n");
+                service_field.push_back(CodeTab + "return cond;\n");
+            } else {
+                service_field.push_back(CodeTab + "_serv_" + serv_entry.first + "_impl(" + argnames + ");\n");
             }
         }
         service_field.push_back("}\n");
         service_field.push_back("\n");
+    }
+    // generate service function
+    for (const auto &scode_entry : module.serv_codelines) {
+        const auto &serv_name = scode_entry.first;
+        const auto &code_lines = scode_entry.second;
+        // find the service declaration to get argument list
+        auto serv_iter = module.services.find(serv_name);
+        if (serv_iter != module.services.end()) {
+            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            member_field.push_back("inline void _serv_" + serv_name + "_impl(" + arglists + ") {\n");
+        } else {
+            member_field.push_back("inline void _serv_" + serv_name + "_impl() {\n");
+        }
+        for (const auto &line : code_lines) {
+            if (line.ends_with("\n")) {
+                member_field.push_back(line);
+            } else {
+                member_field.push_back(line + "\n");
+            }
+        }
+        member_field.push_back("}\n");
+    }
+    for (const auto &scode_entry : module.serv_cond_codelines) {
+        const auto &serv_name = scode_entry.first;
+        const auto &code_lines = scode_entry.second;
+        // find the service declaration to get argument list
+        auto serv_iter = module.services.find(serv_name);
+        if (serv_iter != module.services.end() && serv_iter->second.has_handshake) {
+            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            member_field.push_back("inline bool _serv_" + serv_name + "_cond(" + arglists + ") {\n");
+            for (const auto &line : code_lines) {
+                if (line.ends_with("\n")) {
+                    member_field.push_back(line);
+                } else {
+                    member_field.push_back(line + "\n");
+                }
+            }
+            member_field.push_back("}\n");
+        }
     }
 
     // generate pipe inputs

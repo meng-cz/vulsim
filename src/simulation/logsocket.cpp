@@ -24,7 +24,6 @@
 
 #include "platform/tcpsocket.hpp"
 #include "platform/time.hpp"
-#include "tui/tui.h"
 
 #include "json.hpp"
 
@@ -183,12 +182,16 @@ void logThreadFunction() {
     }
 }
 
+void _logStdoutLine(const string &message) {
+    std::cout << message << std::endl;
+}
+
 void logSocketInit(const uint32_t port, const bool listen_global) {
     if (log_socket) {
         // already initialized
         return;
     }
-    log_socket = std::make_unique<TCPSocket>(port, listen_global, logStdoutLine);
+    log_socket = std::make_unique<TCPSocket>(port, listen_global, _logStdoutLine);
     log_queue = std::make_unique<LogSocketQueue>(4096);
     log_thread_running.store(true, std::memory_order_release);
     std::atomic_thread_fence(std::memory_order_acq_rel);

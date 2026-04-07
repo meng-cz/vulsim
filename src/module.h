@@ -364,6 +364,7 @@ public:
 
     unordered_map<InstanceName, VulTickCodeBlock>   user_tick_codeblocks;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines; // un-connected service function body codelines
+    unordered_map<ReqServName, vector<CCodeLine>>   serv_cond_codelines; // conditional service function body codelines
     unordered_map<InstanceName, unordered_map<ReqServName, vector<CCodeLine>>> req_codelines; // un-connected child request function body codelines
 
     unordered_map<StorageName, VulStorage>  storages;

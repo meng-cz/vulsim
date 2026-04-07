@@ -111,3 +111,62 @@ ErrorMsg VulConfigLib::calculateConfigExpression(
     return "";
 }
 
+ErrorMsg VulConfigLib::insertMultiConfigItems(const vector<VulConfigItem> &items, const GroupName &group) {
+    unordered_set<ConfigName> new_names;
+    unordered_map<ConfigName, VulConfigItem> new_items;
+    for (const auto &item : items) {
+        if (checkNameConflict(item.name)) {
+            return EStr(EItemConfNameInvalid, string("Config item name conflict: ") + item.name);
+        }
+        if (new_names.find(item.name) != new_names.end()) {
+            return EStr(EItemConfNameInvalid, string("Duplicate config item name in input: ") + item.name);
+        }
+        new_names.insert(item.name);
+        new_items[item.name] = item;
+    }
+    unordered_map<ConfigName, unordered_set<ConfigName>> new_conf_rev_refs;
+    for (const auto &item : items) {
+        string err;
+        uint32_t errpos = 0;
+        auto conf_refs = config_parser::parseReferencedIdentifier(item.value, errpos, err);
+        if (!err.empty()) {
+            return EStr(EItemConfValueGrammerInvalid, string("Invalid config expression for item '") + item.name + "' at position " + std::to_string(errpos) + ": " + err + string(": ") + item.value);
+        }
+        for (const auto &cn : *conf_refs) {
+            if (cn == item.name) {
+                return EStr(EItemConfRefLooped, string("Config item '") + item.name + "' references itself.");
+            }
+            if (config_items.find(cn) == config_items.end() && new_names.find(cn) == new_names.end()) {
+                return EStr(EItemConfRefNotFound, string("Config item '") + item.name + "' references undefined config '" + cn + "'.");
+            }
+            new_conf_rev_refs[cn].insert(item.name);
+        }
+    }
+    vector<ConfigName> looped;
+    auto sorted_names_ptr = topologicalSort(new_names, new_conf_rev_refs, looped);
+    if (!sorted_names_ptr) {
+        string looped_str;
+        for (const auto &cn : looped) {
+            if (!looped_str.empty()) looped_str += ", ";
+            looped_str += cn;
+        }
+        return EStr(EItemConfRefLooped, string("Config items have circular references: ") + looped_str);
+    }
+    for (const auto &name : *sorted_names_ptr) {
+        const auto &item = new_items[name];
+        ConfigRealValue real_value;
+        unordered_set<ConfigName> referenced;
+        ErrorMsg err = calculateConfigExpression(item.value, real_value, referenced);
+        if (!err.empty()) {
+            return EStr(EItemConfValueGrammerInvalid, string("Error calculating value for config item '") + item.name + "': " + err.msg);
+        }
+        ConfigEntry confe;
+        confe.item = item;
+        confe.group = group;
+        confe.real_value = real_value;
+        confe.references = referenced;
+        confe.reverse_references = new_conf_rev_refs[name];
+        config_items[name] = std::move(confe);
+    }
+    return "";
+}

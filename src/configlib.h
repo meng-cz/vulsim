@@ -128,6 +128,12 @@ public:
         return calculateConfigExpression(value, dummy_overrides, out_real_value, seen_configs);
     }
 
+    ErrorMsg insertMultiConfigItems(const vector<VulConfigItem> &items, const GroupName &group);
+
+    ErrorMsg insertMultiConfigItems(const vector<VulConfigItem> &items) {
+        return insertMultiConfigItems(items, DefaultGroupName);
+    }
+
     typedef struct {
         VulConfigItem       item;
         GroupName           group;
