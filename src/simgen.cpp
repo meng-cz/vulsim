@@ -863,9 +863,9 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         auto serv_iter = module.services.find(serv_name);
         if (serv_iter != module.services.end()) {
             string arglists = _genReqServFuncArgsList(serv_iter->second);
-            member_field.push_back("inline void _serv_" + serv_name + "_impl(" + arglists + ") {\n");
+            member_field.push_back("FORCE_INLINE void _serv_" + serv_name + "_impl(" + arglists + ") {\n");
         } else {
-            member_field.push_back("inline void _serv_" + serv_name + "_impl() {\n");
+            member_field.push_back("FORCE_INLINE void _serv_" + serv_name + "_impl() {\n");
         }
         for (const auto &line : code_lines) {
             if (line.ends_with("\n")) {
@@ -883,7 +883,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         auto serv_iter = module.services.find(serv_name);
         if (serv_iter != module.services.end() && serv_iter->second.has_handshake) {
             string arglists = _genReqServFuncArgsList(serv_iter->second);
-            member_field.push_back("inline bool _serv_" + serv_name + "_cond(" + arglists + ") {\n");
+            member_field.push_back("FORCE_INLINE bool _serv_" + serv_name + "_cond(" + arglists + ") {\n");
             for (const auto &line : code_lines) {
                 if (line.ends_with("\n")) {
                     member_field.push_back(line);
@@ -1088,6 +1088,9 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         }
         string line = _genStoTypeNext(sto) + " " + sto_entry.first + ";\n";
         member_field.push_back(line);
+        member_field.push_back("void " + sto_entry.first + "_setnext(const " + sto.type + " & value, uint8 priority = 0) {\n");
+        member_field.push_back(CodeTab + sto_entry.first + ".setnext(value, priority);\n");
+        member_field.push_back("}\n");
         member_field.push_back("\n");
         apply_tick_field.push_back(CodeTab + sto_entry.first + "." + ApplyTickFunctionName + "();\n");
     }

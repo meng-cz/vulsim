@@ -1035,3 +1035,137 @@ unique_ptr<vector<InstanceName>> VulModule::getInstanceUpdateOrder(const vector<
     return topologicalSort(update_seq_instances, update_seq_graph, looped_inst);
 }
 
+vector<string> VulModule::debugPrintModule() const {
+    vector<string> lines;
+    lines.push_back("Module: " + name);
+    // local_configs
+    lines.push_back("  Local Configs:");
+    for (const auto &lc_entry : local_configs) {
+        const VulLocalConfigItem &lc = lc_entry.second;
+        lines.push_back("    " + lc.name + " = " + lc.value);
+    }
+    // local_bundles
+    lines.push_back("  Local Bundles:");
+    for (const auto &lb_entry : local_bundles) {
+        const VulBundleItem &lb = lb_entry.second;
+        lines.push_back("    " + lb.name + (lb.is_alias ? " (alias)" : "") + (lb.enum_members.empty() ? "" : " (enum)"));
+        for (const auto &member : lb.members) {
+            string member_line = "      " + member.typeString() + " " + member.name;
+            lines.push_back(member_line);
+        }
+        for (const auto &enum_member : lb.enum_members) {
+            string enum_member_line = "      " + enum_member.name;
+            if (!enum_member.value.empty()) {
+                enum_member_line += " = " + enum_member.value;
+            }
+            lines.push_back(enum_member_line);
+        }
+    }
+    // requests
+    lines.push_back("  Requests:");
+    for (const auto &req_entry : requests) {
+        const VulReqServ &req = req_entry.second;
+        lines.push_back("    " + req.signatureFull());
+    }
+    // services
+    lines.push_back("  Services:");
+    for (const auto &serv_entry : services) {
+        const VulReqServ &serv = serv_entry.second;
+        lines.push_back("    " + serv.signatureFull());
+    }
+    // pipe_inputs
+    lines.push_back("  Pipe Inputs:");
+    for (const auto &pi_entry : pipe_inputs) {
+        const VulPipePort &pi = pi_entry.second;
+        lines.push_back("    " + pi.type + " " + pi.name);
+    }
+    // pipe_outputs
+    lines.push_back("  Pipe Outputs:");
+    for (const auto &po_entry : pipe_outputs) {
+        const VulPipePort &po = po_entry.second;
+        lines.push_back("    " + po.type + " " + po.name);
+    }
+    // user_tick_codeblocks
+    lines.push_back("  User Tick Codeblocks:");
+    for (const auto &utick_entry : user_tick_codeblocks) {
+        const auto &utick = utick_entry.second;
+        lines.push_back("    " + utick.name);
+    }
+    // serv_codelines
+    lines.push_back("  Service Codelines:");
+    for (const auto &sc_entry : serv_codelines) {
+        lines.push_back("    " + sc_entry.first);
+    }
+    // serv_cond_codelines
+    lines.push_back("  Service Conditional Codelines:");
+    for (const auto &scc_entry : serv_cond_codelines) {
+        lines.push_back("    " + scc_entry.first);
+    }
+    // req_codelines
+    lines.push_back("  Request Codelines:");
+    for (const auto &rc_entry : req_codelines) {
+        for (const auto &reqcode : rc_entry.second) {
+            lines.push_back("    " + rc_entry.first + " - " + reqcode.first);
+        }
+    }
+    // storages
+    lines.push_back("  Storages:");
+    for (const auto &st_entry : storages) {
+        const VulStorage &st = st_entry.second;
+        lines.push_back("    " + st.typeString() + " " + st.name + (st.value.empty() ? "" : (" = " + st.value)));
+    }
+    // storagenexts
+    lines.push_back("  Storagenexts:");
+    for (const auto &stn_entry : storagenexts) {
+        const VulStorage &stn = stn_entry.second;
+        lines.push_back("    " + stn.typeString() + " " + stn.name + (stn.value.empty() ? "" : (" = " + stn.value)));
+    }
+    // storagetmps
+    lines.push_back("  Storagetmps:");
+    for (const auto &stt_entry : storagetmp) {
+        const VulStorage &stt = stt_entry.second;
+        lines.push_back("    " + stt.typeString() + " " + stt.name + (stt.value.empty() ? "" : (" = " + stt.value)));
+    }
+    // instances
+    lines.push_back("  Instances:");
+    for (const auto &inst_entry : instances) {
+        const VulInstance &inst = inst_entry.second;
+        lines.push_back("    " + inst.name + " : " + inst.module_name);
+        for (const auto &lc_override : inst.local_config_overrides) {
+            lines.push_back("      Local Config Override: " + lc_override.first + " = " + lc_override.second);
+        }
+    }
+    // pipe_instances
+    lines.push_back("  Pipe Instances:");
+    for (const auto &pipe_inst_entry : pipe_instances) {
+        const auto &pipe_inst = pipe_inst_entry.second;
+        lines.push_back("    " + pipe_inst.name + " : " + pipe_inst.type);
+    }
+    // req_connections
+    lines.push_back("  Req-Serv Connections:");
+    for (const auto &rconn_entry : req_connections) {
+        const auto &rconns = rconn_entry.second;
+        for (const auto &conn : rconns) {
+            lines.push_back("    " + conn.toString());
+        }
+    }
+    // mod_pipe_connections
+    lines.push_back("  Module-Pipe Connections:");
+    for (const auto &pconn_entry : mod_pipe_connections) {
+        const auto &pconns = pconn_entry.second;
+        for (const auto &conn : pconns) {
+            lines.push_back("    " + conn.toString());
+        }
+    }
+    // stalled_connections
+    lines.push_back("  Stall Connections:");
+    for (const auto &conn : stalled_connections) {
+        lines.push_back("    " + conn.toString());
+    }
+    // update_constraints
+    lines.push_back("  Update Sequence Constraints:");
+    for (const auto &conn : update_constraints) {
+        lines.push_back("    " + conn.toString());
+    }
+    return lines;
+}

@@ -24,3 +24,4 @@
 
 #include "uint.hpp"
 #include "pipe.hpp"
+#include "storage.hpp"

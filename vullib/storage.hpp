@@ -49,6 +49,10 @@ public:
         return data_;
     }
 
+    operator const T&() const {
+        return data_;
+    }
+
     void apply_next_tick() {
         next_buffer_[WRPortNum] = data_;  // default value
         write_enable_mask_ |= (uint64_t(1) << WRPortNum);
@@ -78,12 +82,16 @@ public:
         data_ = next_buffer_;
     }
 
+    operator const T&() const {
+        return data_;
+    }
+
 protected:
     T next_buffer_;
     T data_;
 };
 
-template<typename T, uint32_t WRPortNum>
+template<typename T, uint32_t WRPortNum = 1>
 class VulStorageNext {
 
     using ImplType = std::conditional_t<WRPortNum == 1,
@@ -98,10 +106,17 @@ public:
     void setnext(const T &value, uint32_t priority) {
         impl_.setnext(value, priority);
     }
+    void setnext(const T &value) {
+        impl_.setnext(value, 0);
+    }
     void apply_next_tick() {
         impl_.apply_next_tick();
     }
+    operator const T&() const {
+        return impl_;
+    }
 };
+
 
 constexpr uint32_t VulStorageNextArrayBlockSize = 1024;
 

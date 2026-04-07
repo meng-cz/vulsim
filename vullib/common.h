@@ -78,6 +78,20 @@ static_assert(sizeof(int16_t) == 2, "sizeof(int16) == 2");
 static_assert(sizeof(uint8_t) == 1, "sizeof(uint8) == 1");
 static_assert(sizeof(int8_t) == 1, "sizeof(int8) == 1");
 
+using int128_t = __int128_t;
+using uint128_t = __uint128_t;
+
+using int8 = int8_t;
+using uint8 = uint8_t;
+using int16 = int16_t;
+using uint16 = uint16_t;
+using int32 = int32_t;
+using uint32 = uint32_t;
+using int64 = int64_t;
+using uint64 = uint64_t;
+using int128 = __int128_t;
+using uint128 = __uint128_t;
+
 constexpr uint32_t log2ceil(uint32_t n) {
     return (n <= 1) ? 0 : 32u - std::countl_zero(n - 1);
 }

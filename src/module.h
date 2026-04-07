@@ -98,11 +98,11 @@ public:
         string sig;
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) sig += ", ";
-            sig += args[i].type + " " + (isBasicVulType(args[i].type) ? "" : "&");
+            sig += string("const ") + args[i].type + " & ";
         }
         for (size_t i = 0; i < rets.size(); ++i) {
             if (i > 0 || args.size() > 0) sig += ", ";
-            sig += rets[i].type + " *";
+            sig += rets[i].type + " & ";
         }
         return sig;
     }
@@ -111,11 +111,11 @@ public:
         string sig;
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) sig += ", ";
-            sig += (args[i].type + " " + (isBasicVulType(args[i].type) ? "" : "& ") + args[i].name);
+            sig += (string("const ") + args[i].type + " & ") + args[i].name;
         }
         for (size_t i = 0; i < rets.size(); ++i) {
             if (i > 0 || args.size() > 0) sig += ", ";
-            sig += (rets[i].type + " * " + rets[i].name);
+            sig += (rets[i].type + " & " + rets[i].name);
         }
         return sig;
     }
@@ -508,6 +508,6 @@ public:
      */
     ErrorMsg _6_validateStallSequenceConnections(shared_ptr<VulConfigLib> config_lib, shared_ptr<VulBundleLib> bundle_lib, shared_ptr<VulModuleLib> module_lib) const;
 
-
+    vector<string> debugPrintModule() const;
 };
 
