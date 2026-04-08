@@ -64,7 +64,9 @@
 
 #define CHILD_INSTANCE(module, name, ...) void * name = nullptr;
 
-#define USE_CHILD_SERVICE_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
+#define CHILD_INSTANCE_PRIO(module, name, order, ...) void * name = nullptr;
+
+#define USE_CHILD_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
 
 #define CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv) ;
 

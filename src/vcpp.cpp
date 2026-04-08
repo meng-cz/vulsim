@@ -806,6 +806,7 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             module.serv_codelines[serv_name] = split(block.content, '\n');
         }
     }
+    const string tick_func_name = "tick_impl";
     {
         // parse TICK_IMPL
         auto matches = _matchMacros(code, "TICK_IMPL()");
@@ -817,13 +818,37 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             }
             VulTickCodeBlock tick_block;
             tick_block.codelines = split(block.content, '\n');
-            tick_block.name = "tick";
+            tick_block.name = tick_func_name;
+            module.user_tick_codeblocks[tick_block.name] = tick_block;
+        } else {
+            // 没有提供 TICK_IMPL，使用默认空实现
+            VulTickCodeBlock tick_block;
+            tick_block.codelines = {};
+            tick_block.name = tick_func_name;
             module.user_tick_codeblocks[tick_block.name] = tick_block;
         }
     }
     {
         // parse CHILD_INSTANCE(module, instance, param1=value1, param2=value2, ...)
         auto matches = _matchMacros(code, "CHILD_INSTANCE()");
+        auto matches2 = _matchMacros(code, "CHILD_INSTANCE_PRIO()");
+        std::map<int32_t, vector<InstanceName>> prio_map; // 优先级 -> 实例列表
+        for (const auto& item : matches2) {
+            if (item.args.size() < 3) {
+                std::cerr << "Error: CHILD_INSTANCE_PRIO requires at least three arguments (module name, instance name, priority)" << std::endl;
+                assert(0);
+            }
+            vector<string> remove_arg2;
+            remove_arg2.push_back(item.args[0]);
+            remove_arg2.push_back(item.args[1]);
+            for (size_t i = 3; i < item.args.size(); ++i) {
+                remove_arg2.push_back(item.args[i]);
+            }
+            matches.push_back({item.pos, remove_arg2});
+            // 将实例添加到对应优先级的列表中
+            int32_t prio = std::stoi(item.args[2]);
+            prio_map[prio].push_back(item.args[1]);
+        }
         for (const auto& item : matches) {
             if (item.args.size() < 2) {
                 std::cerr << "Error: CHILD_INSTANCE requires at least two arguments (module name and instance name)" << std::endl;
@@ -849,6 +874,20 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             }
             module.instances[instance.name] = instance;
             included_modules.insert(child_module);
+        }
+        // 根据优先级添加 update_constraints
+        // 优先级越大越靠前更新，本模块的tick位于0优先级，负优先级表示后于tick更新，正优先级表示先于tick更新
+        prio_map[0].push_back(tick_func_name); // 本模块的时钟也加入优先级0
+        vector<InstanceName> sorted_instances; // 按优先级排序的实例列表
+        for (const auto& [prio, instances] : prio_map) {
+            sorted_instances.insert(sorted_instances.end(), instances.begin(), instances.end());
+        }
+        // 建立约束：sorted_instances[n] -> sorted_instances[n-1]
+        for (size_t i = 1; i < sorted_instances.size(); ++i) {
+            VulSequenceConnection conn;
+            conn.former_instance = sorted_instances[i];
+            conn.latter_instance = sorted_instances[i - 1];
+            module.update_constraints.insert(conn);
         }
     }
     {
@@ -1005,6 +1044,17 @@ VulTestHarnessModule _parseTestHarnessModule(const vector<string>& code, const M
         auto bundles = _parseBundles(code);
         for (const auto& item : bundles) {
             module.local_bundles[item.name] = item;
+        }
+    }
+    {
+        // parse PARAMETER(name, value)
+        auto matches = _matchMacros(code, "PARAMETER($,$)");
+        for (const auto& item : matches) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: PARAMETER requires at least two arguments (name and value)" << std::endl;
+                assert(0);
+            }
+            module.top_config_overrides[item.args[0]] = item.args[1];
         }
     }
 
