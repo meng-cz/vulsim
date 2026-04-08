@@ -9,7 +9,7 @@
 3. 内置调试工具和性能统计工具
 4. 自动化生成RTL代码框架
 
-本项目为Vul的后端命令行，通过Socket与前端GUI通信。
+本项目为Vul的命令行工具和Vul GUI的后端命令行程序。
 
 前端GUI项目：[VulSimGUI (https://github.com/meng-cz/VulSimGUI)](https://github.com/meng-cz/VulSimGUI)
 
@@ -31,18 +31,53 @@ v1.0开发中：
 1. [nullrvsim](https://github.com/meng-cz/nullrvsim): 验证VUL模型生成的模拟器框架的正确性和并行效率
 2. [FASE](https://github.com/meng-cz/fase-rv64)：对RTL实现的处理器实现系统调用模拟（SE模式），为VUL模型上的SE模式做准备
 
+## 构建
+
+基于 CMake 构建系统，除 CMake 和 C++20 编译器外无其他依赖（但仅支持 Linux 平台，Windows 下仍需测试），构建命令如下：
+
+```bash
+mkdir build
+cd build
+cmake ..
+make -j8
+```
+
+构建完成后会在 `build` 目录下生成如下可执行文件：
+- `vulsimgen`：VulCPP 仿真代码生成工具，用于将 VulCPP 项目转换为可执行的仿真代码
+- `vulrtlgen`：VulCPP RTL代码生成工具，用于将 VulCPP 项目转换为可综合的RTL代码（整理中）
+- `vulconsole`：VulSim GUI 的后端命令行工具，无法独立使用
+
+运行示例：
+
+```bash
+# 生成仿真代码
+./vulsimgen -t ../example/prodcon/TopModule.hpp -m ../example/prodcon/Main.hpp -l ../vullib/ -o sim_out
+# -t: 指定顶层硬件设计模块的头文件路径
+# -m: 指定 Main 模块的头文件路径
+# -l: 指定 VulCPP 库文件的路径
+# -o: 指定生成的仿真代码输出目录
+
+# 编译生成的仿真代码 (build.sh 默认使用 g++)
+cd sim_out
+source build.sh
+# 运行仿真
+./prodcon
+```
+
 ## 文档
+
+User Guide for vulsimgen/vulrtlgen：
+
+- [1. VulCPP 简介](./doc/vulcpp/1-intro.md)
+- [2. VulCPP header 常量与数据结构定义](./doc/vulcpp/2-header.md)
+- [3. VulCPP 模块定义](./doc/vulcpp/3-module.md)
+- [4. VulCPP Main 模块定义](./doc/vulcpp/4-Main.md)
+
+开发文档：
 
 v1.0版本的Vul模型Module文档：[module.md](./doc/module.md) 
 
 v0.1版本的Vul模型文档：[vularch.md](https://github.com/meng-cz/vulsim/blob/legacy_0_0_1_demo/doc/vularch.md)
-
-TODO: user guide.
-
-## 构建
-
-
-TODO：详细构建方式
 
 ## “泺源”简介
 
