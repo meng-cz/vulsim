@@ -160,6 +160,7 @@ public:
     ModuleName                  name;
     Comment                     comment;
     map<ConfigName, VulLocalConfigItem>         local_configs; // configs private to instance, must be ordered by name
+    unordered_map<ConfigName, VulConfigItem>    local_consts; // consts private to this module
     unordered_map<BundleName, VulBundleItem>    local_bundles; // bundles private to this module
     unordered_map<ReqServName, VulReqServ>      requests;
     unordered_map<ReqServName, VulReqServ>      services;
@@ -511,12 +512,22 @@ public:
     vector<string> debugPrintModule() const;
 };
 
+using VarName = string;
+
+struct VulVar {
+    DataType type;
+    VarName name;
+    ConfigValue value;
+};
+
 class VulTestHarnessModule : public VulModule {
 public:
 
     virtual bool isExternalModule() const override { return false; }
 
     unordered_map<ConfigName, LocalConfigValue> top_config_overrides;
+
+    unordered_map<VarName, VulVar> vars;
 
     unordered_map<InstanceName, VulPipe>        pipe_instances;
 

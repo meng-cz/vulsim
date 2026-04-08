@@ -1243,6 +1243,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
                     member_field.push_back(CodeTab + return_prefix + parent_ptr_cast + "->__childreq_" + inst_name + "_" + req_entry.first + "(" + argname + ");\n");
                 }
             }
+            member_field.push_back("}\n");
         }
 
         member_field.push_back("static void __childstall_" + inst_name + "_wrapper(void * __parent_module) {\n");
@@ -1494,6 +1495,7 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
     vector<string> init_field;
     vector<string> member_field;
     vector<string> simulation_field;
+    vector<string> const_field;
 
     string child_instptr_name = "__instptr_" + top_module.name;
     string child_class_name = top_module.name;
@@ -1615,6 +1617,23 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
             member_field.push_back("}\n");
         }
     }
+    for (const auto &vare : test_module.vars) {
+        const auto &var = vare.second;
+        if (var.value.empty()) {
+            member_field.push_back(var.type + " " + vare.first + ";\n");
+        } else {
+            member_field.push_back(var.type + " " + vare.first + " = " + replaceLog2CeilChar(var.value) + ";\n");
+        }
+    }
+    for (const auto &conste : test_module.local_consts) {
+        const auto &constvar = conste.second;
+        const_field.push_back("constexpr int64_t " + conste.first + " = " + replaceLog2CeilChar(constvar.value) + ";\n");
+    }
+    for (const auto &bundle_entry : test_module.local_bundles) {
+        _genBundleContent(bundle_entry.second, const_field);
+        const_field.push_back("\n");
+    }
+
     simulation_field = test_module.test_codelines;
 
     out_lines = genHeaderPrelude();
@@ -1628,6 +1647,10 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
     out_lines.push_back("\n");
 
     out_lines.push_back("class VulTestMain {\n");
+    out_lines.push_back("protected:\n");
+    for (const auto &line : const_field) {
+        out_lines.push_back(line);
+    }
     out_lines.push_back("public:\n");
     out_lines.push_back("VulTestMain() {\n");
     for (const auto &line : init_field) {

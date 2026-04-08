@@ -4,6 +4,12 @@
 #include "simgen.h"
 #include "argparse.hpp"
 
+#include <filesystem>
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+
 inline static void writeLinesToFile(const std::vector<std::string> &lines, const std::string &filepath) {
     std::ofstream file(filepath);
     if (!file.is_open()) {
@@ -106,25 +112,28 @@ int main(int argc, char * argv[]) {
     }
     writeLinesToFile(code_lines, (out_path / "bundle.h").string());
 
-    // gen top module
+    // gen module
+    for (const auto &mod_entry : project.modulelib->modules) {
+        shared_ptr<VulModule> mod_ptr = dynamic_pointer_cast<VulModule>(mod_entry.second);
+        if (!mod_ptr) {
+            std::cerr << "Error: Module is not a VulModule: " << mod_entry.first << std::endl;
+            return 1;
+        }
+        err = simgen::genModuleCodeHpp(*mod_ptr, code_lines, project.configlib, project.modulelib);
+        if (err.error()) {
+            std::cerr << "Error generating module code for module " << mod_entry.first << ": " << err.msg << std::endl;
+            return 1;
+        }
+        writeLinesToFile(code_lines, (out_path / (mod_entry.first + ".hpp")).string());
+    }
+
+    // gen test harness module
     auto iter = project.modulelib->modules.find(project.top_module);
     if (iter == project.modulelib->modules.end()) {
         std::cerr << "Error: Top module not found in module library: " << project.top_module << std::endl;
         return 1;
     }
     shared_ptr<VulModule> top_module_ptr = dynamic_pointer_cast<VulModule>(iter->second);
-    if (!top_module_ptr) {
-        std::cerr << "Error: Top module is not a VulModule: " << project.top_module << std::endl;
-        return 1;
-    }
-    err = simgen::genModuleCodeHpp(*top_module_ptr, code_lines, project.configlib, project.modulelib);
-    if (err.error()) {
-        std::cerr << "Error generating top module code: " << err.msg << std::endl;
-        return 1;
-    }
-    writeLinesToFile(code_lines, (out_path / (top_module_ptr->name + ".hpp")).string());
-
-    // gen test harness module
     if (!project.test_module.empty()) {
         auto test_iter = project.test_harness.find(project.test_module);
         if (test_iter == project.test_harness.end()) {

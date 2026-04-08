@@ -61,3 +61,17 @@
 #define SERVICE_LOGIC_IMPL(name, ...) void _##name##_impl (__VA_ARGS__)
 
 #define TICK_IMPL() void tick()
+
+#define CHILD_INSTANCE(module, name, ...) void * name = nullptr;
+
+#define USE_CHILD_SERVICE_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
+
+#define CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv) ;
+
+#define CONNECT_CR_S(srcmod, srcreq, dstserv) ;
+
+#define CONNECT_CR_R(srcmod, srcreq, dstreq) ;
+
+#define CONNECT_S_CS(srcserv, dstmod, dstserv) ;
+
+

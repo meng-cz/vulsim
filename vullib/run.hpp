@@ -13,3 +13,7 @@ void sim_commit();
 
 #define SIMULATION() void sim_main()
 
+#define VAR(type, name) type name;
+
+#define VAR_INIT(type, name, init) type name = init;
+

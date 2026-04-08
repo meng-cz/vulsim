@@ -21,8 +21,7 @@
 // SOFTWARE.
 
 
-#pragma once
-
+#include "vcpp.hpp"
 #include "project.h"
 #include "configexpr.hpp"
 
@@ -333,6 +332,9 @@ std::vector<MatchMacroResult> _matchMacros(const std::vector<std::string>& code,
         // 参数个数匹配才记录
         if (static_cast<int>(args.size()) == argc || argc == 0) {
             results.push_back({pos, args});
+        } else {
+            std::cerr << "Found macro call with wrong number of arguments : expected " << argc << ", got " << args.size() << ", line: " << code[pos.line] << std::endl;
+            assert(0);
         }
 
         // 防止死循环，向后推进
@@ -540,7 +542,7 @@ MemberDecl parse_member_decl(const std::string& line) {
 }
 
 
-vector<VulConfigItem> _parseConfigs(const std::vector<std::string>& code) {
+vector<VulConfigItem> _parseConsts(const std::vector<std::string>& code) {
     vector<VulConfigItem> configs;
 
     auto matches = _matchMacros(code, "CONST($,$)");
@@ -643,7 +645,7 @@ vector<VulBundleItem> _parseBundles(const std::vector<std::string>& code) {
 
 void _parseHeader(const std::vector<std::string>& code, shared_ptr<VulConfigLib> configlib, shared_ptr<VulBundleLib> bundlelib) {
     
-    auto configs = _parseConfigs(code);
+    auto configs = _parseConsts(code);
     auto bundles = _parseBundles(code);
 
     printf("Parsed %zu config items and %zu bundle items from header\n", configs.size(), bundles.size());
@@ -691,11 +693,12 @@ VulReqServ _parseReqServPort(const vector<string> & macro_args) {
     return reqserv;
 }
 
-VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & name) {
+VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & name, unordered_set<ModuleName>& included_modules) {
 
     VulModule module;
     module.name = name;
     module.comment = "";
+    included_modules.clear();
 
     {
         // parse params
@@ -818,6 +821,79 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             module.user_tick_codeblocks[tick_block.name] = tick_block;
         }
     }
+    {
+        // parse CHILD_INSTANCE(module, instance, param1=value1, param2=value2, ...)
+        auto matches = _matchMacros(code, "CHILD_INSTANCE()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: CHILD_INSTANCE requires at least two arguments (module name and instance name)" << std::endl;
+                assert(0);
+            }
+            ModuleName child_module = item.args[0];
+            std::string instance_name = item.args[1];
+            unordered_map<std::string, std::string> param_values;
+            VulInstance instance;
+            instance.module_name = child_module;
+            instance.name = instance_name;
+            instance.comment = "";
+            for (size_t i = 2; i < item.args.size(); ++i) {
+                const std::string& arg = item.args[i];
+                size_t eq_pos = arg.find('=');
+                if (eq_pos == std::string::npos) {
+                    std::cerr << "Error: Invalid parameter assignment in CHILD_INSTANCE: " << arg << std::endl;
+                    assert(0);
+                }
+                std::string param_name = trim(arg.substr(0, eq_pos));
+                std::string param_value = trim(arg.substr(eq_pos + 1));
+                instance.local_config_overrides[param_name] = param_value;
+            }
+            module.instances[instance.name] = instance;
+            included_modules.insert(child_module);
+        }
+    }
+    {
+        // parse CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv)
+        auto matches = _matchMacros(code, "CONNECT_CR_CS($,$,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = item.args[0];
+            conn.req_name = item.args[1];
+            conn.serv_instance = item.args[2];
+            conn.serv_name = item.args[3];
+            module.req_connections[conn.req_instance].insert(conn);
+        }
+        // parse CONNECT_CR_S(srcmod, srcreq, dstserv)
+        matches = _matchMacros(code, "CONNECT_CR_S($,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = item.args[0];
+            conn.req_name = item.args[1];
+            conn.serv_instance = module.TopInterface; // 连接到顶层接口
+            conn.serv_name = item.args[2];
+            module.req_connections[conn.req_instance].insert(conn);
+        }
+        // parse CONNECT_CR_R(srcmod, srcreq, dstreq)
+        matches = _matchMacros(code, "CONNECT_CR_R($,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = item.args[0];
+            conn.req_name = item.args[1];
+            conn.serv_instance = module.TopInterface; // 连接到顶层接口
+            conn.serv_name = item.args[2];
+            module.req_connections[conn.req_instance].insert(conn);
+        }
+        // parse CONNECT_S_CS(srcserv, dstmod, dstserv)
+        matches = _matchMacros(code, "CONNECT_S_CS($,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = module.TopInterface; // 连接到顶层接口
+            conn.req_name = item.args[0];
+            conn.serv_instance = item.args[1];
+            conn.serv_name = item.args[2];
+            module.req_connections[conn.req_instance].insert(conn);
+        }
+
+    }
 
     printf("Parsed module %s\n", name.c_str());
 
@@ -888,6 +964,49 @@ VulTestHarnessModule _parseTestHarnessModule(const vector<string>& code, const M
             module.serv_codelines[serv_name] = split(block.content, '\n');
         }
     }
+    {
+        // parse VAR and VAR_INIT
+        auto matches = _matchMacros(code, "VAR($,$)");
+        for (const auto& item : matches) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: VAR requires at least two arguments (type and name)" << std::endl;
+                assert(0);
+            }
+            VulVar var;
+            var.type = item.args[0];
+            var.name = item.args[1];
+            var.value = "";
+            module.vars[var.name] = var;
+        }
+
+        matches = _matchMacros(code, "VAR_INIT($,$,$)");
+        for (const auto& item : matches) {
+            if (item.args.size() < 3) {
+                std::cerr << "Error: VAR_INIT requires at least three arguments (type, name, and initializer)" << std::endl;
+                assert(0);
+            }
+            VulVar var;
+            var.type = item.args[0];
+            var.name = item.args[1];
+            var.value = item.args[2];
+            module.vars[var.name] = var;
+        }
+    }
+    {
+        // parse consts and bundles
+        auto consts = _parseConsts(code);
+        for (const auto& item : consts) {
+            VulConfigItem config;
+            config.name = item.name;
+            config.value = item.value;
+            config.comment = item.comment;
+            module.local_consts[config.name] = config;
+        }
+        auto bundles = _parseBundles(code);
+        for (const auto& item : bundles) {
+            module.local_bundles[item.name] = item;
+        }
+    }
 
     printf("Parsed test harness module %s\n", name.c_str());
 
@@ -937,17 +1056,46 @@ VulProject parseVcppProject(
         _parseHeader(header_strip.lines, project.configlib, project.bundlelib);
     }
 
-    // parse top module
-    auto top_lines = _readFileLines(top_path.string());
-    auto top_strip = _stripComments(top_lines);
-    VulModule top_module = _parseModule(top_strip.lines, project.top_module);
-    bool self_contained = top_module.requests.empty() && top_module.services.empty() && top_module.pipe_inputs.empty() && top_module.pipe_outputs.empty();
+    // parse modules
+    unordered_set<ModuleName> processed_modules;
+    std::queue<ModuleName> module_queue;
+    module_queue.push(project.top_module);
+    while (!module_queue.empty()) {
+        ModuleName current = module_queue.front();
+        module_queue.pop();
+        if (processed_modules.count(current)) {
+            continue;
+        }
+        processed_modules.insert(current);
 
-    project.modulelib->modules[project.top_module] = std::make_shared<VulModule>(std::move(top_module));
+        string target_file = current + ".hpp";
+        // find this file in project directory recursively
+        path module_path;
+        bool module_found = false;
+        for (auto& p : recursive_directory_iterator(proj_dir)) {
+            if (p.is_regular_file() && p.path().filename() == target_file) {
+                module_path = p.path();
+                module_found = true;
+                break;
+            }
+        }
+        if (!module_found) {
+            std::cerr << "Error: Module file not found for module " << current << ": expected " << target_file << std::endl;
+            assert(0);
+        }
 
-    if (!self_contained && main_file.empty()) {
-        std::cerr << "Error: Main file is required for non-self-contained top module" << std::endl;
-        assert(0);
+        printf("Parsing module %s: %s\n", current.c_str(), module_path.string().c_str());
+
+        auto lines = _readFileLines(module_path.string());
+        auto striped = _stripComments(lines);
+        unordered_set<ModuleName> included_modules;
+        VulModule module = _parseModule(striped.lines, current, included_modules);
+        project.modulelib->modules[current] = std::make_shared<VulModule>(std::move(module));
+        for (const auto& mod : included_modules) {
+            if (!processed_modules.count(mod)) {
+                module_queue.push(mod);
+            }
+        }
     }
 
     if (!main_file.empty()) {
@@ -967,7 +1115,6 @@ VulProject parseVcppProject(
         project.test_harness[test_module.name] = std::move(test_module);
         project.test_module = test_module_name;
     }
-
 
     return project;
 }
