@@ -1489,6 +1489,189 @@ ErrorMsg genTopSimCpp(const ModuleName &top_module_name, const vector<ConfigValu
     return "";
 }
 
+ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulModule & top_module, vector<string> &out_lines) {
+    
+    vector<string> init_field;
+    vector<string> member_field;
+    vector<string> simulation_field;
+
+    string child_instptr_name = "__instptr_" + top_module.name;
+    string child_class_name = top_module.name;
+    if (!top_module.local_configs.empty()) {
+        child_class_name += "<";
+        bool first_cfg = true;
+        for (const auto &cfg_entry : top_module.local_configs) {
+            if (!first_cfg) {
+                child_class_name += ", ";
+            }
+            first_cfg = false;
+            auto iter = test_module.top_config_overrides.find(cfg_entry.first);
+            if (iter == test_module.top_config_overrides.end()) {
+                child_class_name += replaceLog2CeilChar(cfg_entry.second.value);
+            } else {
+                child_class_name += replaceLog2CeilChar(iter->second);
+            }
+        }
+        child_class_name += ">";
+    }
+
+    member_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instptr_name + ";\n");
+
+    init_field.push_back(CodeTab + child_class_name + "::ConstructorParams cparams;\n");
+    init_field.push_back(CodeTab + "cparams.__parent_module = this;\n");
+    init_field.push_back(CodeTab + "cparams.__instance_name = \"top\";\n");
+    init_field.push_back(CodeTab + "cparams.__stall = &__childstall_wrapper;\n");
+
+    for (const auto &req_entry : top_module.requests) {
+        string wrapper_name = "__topreq_" + req_entry.first + "_wrapper";
+        init_field.push_back(CodeTab + "cparams." + req_entry.first + " = &" + wrapper_name + ";\n");
+    }
+    init_field.push_back(CodeTab + child_instptr_name + " = std::make_unique<" + child_class_name + ">(cparams);\n");
+
+    for (const auto &reqe : test_module.requests) {
+        // no wrapper, directly call the top module's service function with the same name
+        const auto &req = reqe.second;
+        string rettype = _genReqServFuncReturnType(req);
+        string argtypes = _genReqServFuncArgsTypes(req);
+        string argnames = _genReqServFuncArgsNames(req);
+        string arglists = _genReqServFuncArgsList(req);
+        if (req.comment.size() > 0) {
+            for (const string &line : _genUnpackMultilineNoNext(req.comment)) {
+                member_field.push_back("// " + line + "\n");
+            }
+        }
+        member_field.push_back("FORCE_INLINE " + rettype + " " + reqe.first + "(" + arglists + ") {\n");
+        string return_prefix = (rettype == "void" ? "" : "return ");
+        member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + reqe.first + "(" + argnames + ");\n");
+        member_field.push_back("}\n");
+        member_field.push_back("\n");
+    }
+    for (const auto &serve : test_module.services) {
+        const auto &serv = serve.second;
+        string rettype = _genReqServFuncReturnType(serv);
+        string argtypes = _genReqServFuncArgsTypes(serv);
+        string argnames = _genReqServFuncArgsNames(serv);
+        string arglists = _genReqServFuncArgsList(serv);
+        if (serv.comment.size() > 0) {
+            for (const string &line : _genUnpackMultilineNoNext(serv.comment)) {
+                member_field.push_back("// " + line + "\n");
+            }
+        }
+        // use wrapper
+        string wrapper_name = "__topreq_" + serve.first + "_wrapper";
+        string wrapper_arglist = "void * __parent_module" + (arglists.empty() ? "" : (", " + arglists));
+        member_field.push_back("static " + rettype + " " + wrapper_name + "(" + wrapper_arglist + ") {\n");
+        string return_prefix = (rettype == "void" ? "" : "return ");
+        member_field.push_back(CodeTab + return_prefix + "static_cast<VulTestMain*>(__parent_module)->" + serve.first + "(" + argnames + ");\n");
+        member_field.push_back("}\n");
+        member_field.push_back("\n");
+        member_field.push_back("FORCE_INLINE " + rettype + " " + serve.first + "(" + arglists + ") {\n");
+        if (serv.has_handshake) {
+            member_field.push_back(CodeTab + "bool cond = _serv_" + serve.first + "_cond(" + argnames + ");\n");
+            member_field.push_back(CodeTab + "if (cond) _serv_" + serve.first + "_impl(" + argnames + ");\n");
+            member_field.push_back(CodeTab + "return cond;\n");
+        } else {
+            member_field.push_back(CodeTab + "_serv_" + serve.first + "_impl(" + argnames + ");\n");
+        }
+        member_field.push_back("}\n");
+        member_field.push_back("\n");
+    }
+    // generate service function
+    for (const auto &scode_entry : test_module.serv_codelines) {
+        const auto &serv_name = scode_entry.first;
+        const auto &code_lines = scode_entry.second;
+        // find the service declaration to get argument list
+        auto serv_iter = test_module.services.find(serv_name);
+        if (serv_iter != test_module.services.end()) {
+            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            member_field.push_back("FORCE_INLINE void _serv_" + serv_name + "_impl(" + arglists + ") {\n");
+        } else {
+            member_field.push_back("FORCE_INLINE void _serv_" + serv_name + "_impl() {\n");
+        }
+        for (const auto &line : code_lines) {
+            if (line.ends_with("\n")) {
+                member_field.push_back(line);
+            } else {
+                member_field.push_back(line + "\n");
+            }
+        }
+        member_field.push_back("}\n");
+    }
+    for (const auto &scode_entry : test_module.serv_cond_codelines) {
+        const auto &serv_name = scode_entry.first;
+        const auto &code_lines = scode_entry.second;
+        // find the service declaration to get argument list
+        auto serv_iter = test_module.services.find(serv_name);
+        if (serv_iter != test_module.services.end() && serv_iter->second.has_handshake) {
+            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            member_field.push_back("FORCE_INLINE bool _serv_" + serv_name + "_cond(" + arglists + ") {\n");
+            for (const auto &line : code_lines) {
+                if (line.ends_with("\n")) {
+                    member_field.push_back(line);
+                } else {
+                    member_field.push_back(line + "\n");
+                }
+            }
+            member_field.push_back("}\n");
+        }
+    }
+    simulation_field = test_module.test_codelines;
+
+    out_lines = genHeaderPrelude();
+    out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("#include \"config.h\"\n");
+    out_lines.push_back("#include \"bundle.h\"\n");
+    out_lines.push_back("#include \"vullib.h\"\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("#include \"" + top_module.name + ".hpp\"\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("class VulTestMain {\n");
+    out_lines.push_back("public:\n");
+    out_lines.push_back("VulTestMain() {\n");
+    for (const auto &line : init_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("FORCE_INLINE void simulation() {\n");
+    for (const auto &line : simulation_field) {
+        if (line.ends_with("\n")) {
+            out_lines.push_back(line);
+        } else {
+            out_lines.push_back(line + "\n");
+        }
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("protected:\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("static void __childstall_wrapper(void *ctx) {}\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("void sim_execute() {\n");
+    out_lines.push_back(CodeTab + child_instptr_name + "->" + TickFunctionName + "();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("void sim_commit() {\n");
+    out_lines.push_back(CodeTab + child_instptr_name + "->" + ApplyTickFunctionName + "();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    for (const auto &line : member_field) {
+        out_lines.push_back(line);
+    }
+
+    out_lines.push_back("};\n");
+    out_lines.push_back("\n");
+
+    return "";
+}
+
 
 
 } // namespace simgen

@@ -31,6 +31,9 @@ int main(int argc, char * argv[]) {
     parser.add_argument("-o", "--out")
         .help("sets the output directory for generated code (default: ./simout)")
         .default_value(std::string("./simout"));
+    parser.add_argument("-l", "--lib")
+        .help("sets the directory for runtime library files (default: ./vullib)")
+        .default_value(std::string("./vullib"));
     
     try {
         parser.parse_args(argc, argv);
@@ -43,7 +46,7 @@ int main(int argc, char * argv[]) {
     string top_file = parser.get<std::string>("--top");
     string main_file = parser.get<std::string>("--main");
     string out_dir = parser.get<std::string>("--out");
-
+    string lib_dir = parser.get<std::string>("--lib");
     std::filesystem::path top_path(top_file);
     if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
         std::cerr << "Error: Top module file does not exist: " << top_file << std::endl;
@@ -120,6 +123,55 @@ int main(int argc, char * argv[]) {
         return 1;
     }
     writeLinesToFile(code_lines, (out_path / (top_module_ptr->name + ".hpp")).string());
+
+    // gen test harness module
+    if (!project.test_module.empty()) {
+        auto test_iter = project.test_harness.find(project.test_module);
+        if (test_iter == project.test_harness.end()) {
+            std::cerr << "Error: Test module not found: " << project.test_module << std::endl;
+            return 1;
+        }
+        err = simgen::genTestHarnessHpp(test_iter->second, *top_module_ptr, code_lines);
+        if (err.error()) {
+            std::cerr << "Error generating test module code: " << err.msg << std::endl;
+            return 1;
+        }
+        writeLinesToFile(code_lines, (out_path / ("VulTestMain.hpp")).string());
+    }
+
+    // copy vullib runtime files to output directory
+    vector<std::string> runtime_files = {
+        "common.h",
+        "vullib.h",
+        "main.cpp",
+        "pipe.hpp",
+        "storage.hpp",
+        "uint.hpp",
+    };
+    std::filesystem::path lib_path(lib_dir);
+    if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
+        std::cerr << "Error: Library directory does not exist: " << lib_dir << std::endl;
+        return 1;
+    }
+    for (const auto &filename : runtime_files) {
+        std::filesystem::path src_file = lib_path / filename;
+        if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
+            std::cerr << "Error: Runtime library file does not exist: " << src_file << std::endl;
+            return 1;
+        }
+        std::filesystem::path dst_file = out_path / filename;
+        std::filesystem::copy_file(src_file, dst_file);
+    }
+
+    // generate build script
+    string build_cmd = "g++ -std=c++20 -O2 main.cpp -o " + project.name;
+    std::ofstream build_script((out_path / "build.sh").string());
+    if (!build_script.is_open()) {
+        std::cerr << "Error: Failed to create build script." << std::endl;
+        return 1;
+    }
+    build_script << "#!/bin/bash\necho \"Building " << project.name << "\"\n" << build_cmd << "\n";
+    build_script.close();
 
     return 0;
 }

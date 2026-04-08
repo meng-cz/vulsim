@@ -32,10 +32,10 @@ public:
     static_assert(WRPortNum >= 1, "WRPortNum must be at least 1");
     static_assert(WRPortNum < 64, "WRPortNum must be less than 64");
 
-    VulStorageNext() : data_() {
+    VulStorageNextImpl() : data_() {
         next_buffer_.fill(T{});
     }
-    VulStorageNext(const T &initial_value) : data_(initial_value) {
+    VulStorageNextImpl(const T &initial_value) : data_(initial_value) {
         next_buffer_.fill(initial_value);
     }
 
@@ -118,142 +118,142 @@ public:
 };
 
 
-constexpr uint32_t VulStorageNextArrayBlockSize = 1024;
+// constexpr uint32_t VulStorageNextArrayBlockSize = 1024;
 
-template<typename T, uint32_t Size>
-class VulStorageNextArray1DimImplAllCopy {
+// template<typename T, uint32_t Size>
+// class VulStorageNextArray1DimImplAllCopy {
     
-    static_assert(Size >= 1, "Size must be at least 1");
+//     static_assert(Size >= 1, "Size must be at least 1");
 
-public:
-    VulStorageNextArray1DimImplAllCopy() {
-        next_buffer_.fill(T{});
-        data_.fill(T{});
-    }
-    VulStorageNextArray1DimImplAllCopy(const T &initial_value) {
-        next_buffer_.fill(initial_value);
-        data_.fill(initial_value);
-    }
+// public:
+//     VulStorageNextArray1DimImplAllCopy() {
+//         next_buffer_.fill(T{});
+//         data_.fill(T{});
+//     }
+//     VulStorageNextArray1DimImplAllCopy(const T &initial_value) {
+//         next_buffer_.fill(initial_value);
+//         data_.fill(initial_value);
+//     }
 
-    void setnext(const T &value, uint32_t index) {
-        next_buffer_[index] = value;
-    }
-    T get(uint32_t index) const {
-        return data_[index];
-    }
-    void apply_next_tick() {
-        data_ = next_buffer_;
-    }
+//     void setnext(const T &value, uint32_t index) {
+//         next_buffer_[index] = value;
+//     }
+//     T get(uint32_t index) const {
+//         return data_[index];
+//     }
+//     void apply_next_tick() {
+//         data_ = next_buffer_;
+//     }
 
-protected:
-    std::array<T, Size> next_buffer_;
-    std::array<T, Size> data_;
-};
+// protected:
+//     std::array<T, Size> next_buffer_;
+//     std::array<T, Size> data_;
+// };
 
-template<typename T, uint32_t Size>
-class VulStorageNextArray1DimImplBlockCopy {
+// template<typename T, uint32_t Size>
+// class VulStorageNextArray1DimImplBlockCopy {
 
-    static_assert(Size >= 1, "Size must be at least 1");
+//     static_assert(Size >= 1, "Size must be at least 1");
 
-public:
+// public:
 
-    VulStorageNextArray1DimImplBlockCopy() {
-        for (auto &block : blocks_) {
-            block = VulStorageNextArray1DimImplAllCopy<T, VulStorageNextArrayBlockSize>();
-        }
-    }
-    VulStorageNextArray1DimImplBlockCopy(const T &initial_value) {
-        for (auto &block : blocks_) {
-            block = VulStorageNextArray1DimImplAllCopy<T, VulStorageNextArrayBlockSize>(initial_value);
-        }
-    }
+//     VulStorageNextArray1DimImplBlockCopy() {
+//         for (auto &block : blocks_) {
+//             block = VulStorageNextArray1DimImplAllCopy<T, VulStorageNextArrayBlockSize>();
+//         }
+//     }
+//     VulStorageNextArray1DimImplBlockCopy(const T &initial_value) {
+//         for (auto &block : blocks_) {
+//             block = VulStorageNextArray1DimImplAllCopy<T, VulStorageNextArrayBlockSize>(initial_value);
+//         }
+//     }
 
-    void setnext(const T &value, uint32_t index) {
-        uint32_t block_index = index / VulStorageNextArrayBlockSize;
-        uint32_t within_block_index = index % VulStorageNextArrayBlockSize;
-        blocks_[block_index].setnext(value, within_block_index);
-        block_updated_[block_index] = true;
-    }
-    T get(uint32_t index) const {
-        uint32_t block_index = index / VulStorageNextArrayBlockSize;
-        uint32_t within_block_index = index % VulStorageNextArrayBlockSize;
-        return blocks_[block_index].get(within_block_index);
-    }
-    void apply_next_tick() {
-        for (uint32_t i = 0; i < num_blocks_; i++) {
-            if (block_updated_[i]) {
-                blocks_[i].apply_next_tick();
-                block_updated_[i] = false;
-            }
-        }
-    }
+//     void setnext(const T &value, uint32_t index) {
+//         uint32_t block_index = index / VulStorageNextArrayBlockSize;
+//         uint32_t within_block_index = index % VulStorageNextArrayBlockSize;
+//         blocks_[block_index].setnext(value, within_block_index);
+//         block_updated_[block_index] = true;
+//     }
+//     T get(uint32_t index) const {
+//         uint32_t block_index = index / VulStorageNextArrayBlockSize;
+//         uint32_t within_block_index = index % VulStorageNextArrayBlockSize;
+//         return blocks_[block_index].get(within_block_index);
+//     }
+//     void apply_next_tick() {
+//         for (uint32_t i = 0; i < num_blocks_; i++) {
+//             if (block_updated_[i]) {
+//                 blocks_[i].apply_next_tick();
+//                 block_updated_[i] = false;
+//             }
+//         }
+//     }
 
-protected:
-    constexpr static uint32_t num_blocks_ = (Size + VulStorageNextArrayBlockSize - 1) / VulStorageNextArrayBlockSize;
-    std::array<VulStorageNextArray1DimImplAllCopy<T, VulStorageNextArrayBlockSize>, num_blocks_> blocks_;
-    std::array<bool, num_blocks_> block_updated_ = {false};
-};
+// protected:
+//     constexpr static uint32_t num_blocks_ = (Size + VulStorageNextArrayBlockSize - 1) / VulStorageNextArrayBlockSize;
+//     std::array<VulStorageNextArray1DimImplAllCopy<T, VulStorageNextArrayBlockSize>, num_blocks_> blocks_;
+//     std::array<bool, num_blocks_> block_updated_ = {false};
+// };
 
-template<typename T, uint32_t Size>
-class VulStorageNextArray1DimImpl {
-    static_assert(Size >= 1, "Size must be at least 1");
+// template<typename T, uint32_t Size>
+// class VulStorageNextArray1DimImpl {
+//     static_assert(Size >= 1, "Size must be at least 1");
 
-    using ImplType = std::conditional_t<Size <= VulStorageNextArrayBlockSize,
-                                        VulStorageNextArray1DimImplAllCopy<T, Size>,
-                                        VulStorageNextArray1DimImplBlockCopy<T, Size>>;
-    ImplType impl_;
+//     using ImplType = std::conditional_t<Size <= VulStorageNextArrayBlockSize,
+//                                         VulStorageNextArray1DimImplAllCopy<T, Size>,
+//                                         VulStorageNextArray1DimImplBlockCopy<T, Size>>;
+//     ImplType impl_;
 
-public:
-    VulStorageNextArray1DimImpl() : impl_() {}
-    VulStorageNextArray1DimImpl(const T &initial_value) : impl_(initial_value) {}
-    void setnext(const T &value, uint32_t index) {
-        impl_.setnext(value, index);
-    }
-    T get(uint32_t index) const {
-        return impl_.get(index);
-    }
-    void apply_next_tick() {
-        impl_.apply_next_tick();
-    }
-};
+// public:
+//     VulStorageNextArray1DimImpl() : impl_() {}
+//     VulStorageNextArray1DimImpl(const T &initial_value) : impl_(initial_value) {}
+//     void setnext(const T &value, uint32_t index) {
+//         impl_.setnext(value, index);
+//     }
+//     T get(uint32_t index) const {
+//         return impl_.get(index);
+//     }
+//     void apply_next_tick() {
+//         impl_.apply_next_tick();
+//     }
+// };
 
 
-template<typename T, uint32_t ... Dims>
-class VulStorageNextArray {
-    static_assert(sizeof...(Dims) >= 1, "At least one dimension is required");
-    constexpr static uint32_t total_size_ = (Dims * ...);
-    constexpr uint32_t get_flat_index_(const uint32_t ... indices) const {
-        std::array<uint32_t, sizeof...(Dims)> idx_array = {indices...};
-        uint32_t flat_index = 0;
-        uint32_t stride = 1;
-        for (int32_t i = sizeof...(Dims) - 1; i >= 0; --i) {
-            flat_index += idx_array[i] * stride;
-            stride *= std::get<i>(std::tuple<uint32_t, Dims...>{Dims...});
-        }
-        return flat_index;
-    }
+// template<typename T, uint32_t ... Dims>
+// class VulStorageNextArray {
+//     static_assert(sizeof...(Dims) >= 1, "At least one dimension is required");
+//     constexpr static uint32_t total_size_ = (Dims * ...);
+//     constexpr uint32_t get_flat_index_(const uint32_t ... indices) const {
+//         std::array<uint32_t, sizeof...(Dims)> idx_array = {indices...};
+//         uint32_t flat_index = 0;
+//         uint32_t stride = 1;
+//         for (int32_t i = sizeof...(Dims) - 1; i >= 0; --i) {
+//             flat_index += idx_array[i] * stride;
+//             stride *= std::get<i>(std::tuple<uint32_t, Dims...>{Dims...});
+//         }
+//         return flat_index;
+//     }
 
-public:
-    VulStorageNextArray() : impl_() {}
-    VulStorageNextArray(const T &initial_value) : impl_(initial_value) {}
-    void setnext(const T &value, const uint32_t ... indices) {
-        uint32_t flat_index = get_flat_index_(indices...);
-        impl_.setnext(value, flat_index);
-    }
-    T get(const uint32_t ... indices) const {
-        uint32_t flat_index = get_flat_index_(indices...);
-        return impl_.get(flat_index);
-    }
-    void apply_next_tick() {
-        impl_.apply_next_tick();
-    }
+// public:
+//     VulStorageNextArray() : impl_() {}
+//     VulStorageNextArray(const T &initial_value) : impl_(initial_value) {}
+//     void setnext(const T &value, const uint32_t ... indices) {
+//         uint32_t flat_index = get_flat_index_(indices...);
+//         impl_.setnext(value, flat_index);
+//     }
+//     T get(const uint32_t ... indices) const {
+//         uint32_t flat_index = get_flat_index_(indices...);
+//         return impl_.get(flat_index);
+//     }
+//     void apply_next_tick() {
+//         impl_.apply_next_tick();
+//     }
 
-protected:
-    VulStorageNextArray1DimImpl<T, total_size_> impl_;
-};
+// protected:
+//     VulStorageNextArray1DimImpl<T, total_size_> impl_;
+// };
 
 } // namespace vulstorage
 
 using vulstorage::VulStorageNext;
-using vulstorage::VulStorageNextArray;
+// using vulstorage::VulStorageNextArray;
 

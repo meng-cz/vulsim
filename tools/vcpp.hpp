@@ -824,7 +824,75 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
     return module;
 }
 
+VulTestHarnessModule _parseTestHarnessModule(const vector<string>& code, const ModuleName& name) {
+    VulTestHarnessModule module;
+    module.name = name;
+    module.comment = "";
 
+    {
+        // parse test codelines
+        auto matches = _matchMacros(code, "SIMULATION()");
+        if (!matches.empty()) {
+            auto block = _findNextBraceBlock(code, matches[0].pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SIMULATION has no body" << std::endl;
+                assert(0);
+            }
+            module.test_codelines = split(block.content, '\n');
+        }
+    }
+    {
+        // parse req/serv ports
+        auto matches = _matchMacros(code, "REQUEST_PORT()");
+        for (const auto& item : matches) {
+            VulReqServ req = _parseReqServPort(item.args);
+            module.requests[req.name] = req;
+        }
+        matches = _matchMacros(code, "SERVICE_PORT()");
+        for (const auto& item : matches) {
+            VulReqServ serv = _parseReqServPort(item.args);
+            module.services[serv.name] = serv;
+        }
+    }
+    {
+        // parse SERVICE_COND_IMPL
+        auto matches = _matchMacros(code, "SERVICE_COND_IMPL()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 1) {
+                std::cerr << "Error: SERVICE_COND_IMPL requires at least one argument (service name)" << std::endl;
+                assert(0);
+            }
+            const std::string& serv_name = item.args[0];
+            auto block = _findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SERVICE_COND_IMPL for service " << serv_name << " has no body" << std::endl;
+                assert(0);
+            }
+            module.serv_cond_codelines[serv_name] = split(block.content, '\n');
+        }
+    }
+    {
+        // parse SERVICE_LOGIC_IMPL
+        auto matches = _matchMacros(code, "SERVICE_LOGIC_IMPL()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 1) {
+                std::cerr << "Error: SERVICE_LOGIC_IMPL requires at least one argument (service name)" << std::endl;
+                assert(0);
+            }
+            const std::string& serv_name = item.args[0];
+            auto block = _findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SERVICE_LOGIC_IMPL for service " << serv_name << " has no body" << std::endl;
+                assert(0);
+            }
+            module.serv_codelines[serv_name] = split(block.content, '\n');
+        }
+    }
+
+    printf("Parsed test harness module %s\n", name.c_str());
+
+    return module;
+}
 
 VulProject parseVcppProject(
     const string &dirpath,
@@ -873,7 +941,33 @@ VulProject parseVcppProject(
     auto top_lines = _readFileLines(top_path.string());
     auto top_strip = _stripComments(top_lines);
     VulModule top_module = _parseModule(top_strip.lines, project.top_module);
+    bool self_contained = top_module.requests.empty() && top_module.services.empty() && top_module.pipe_inputs.empty() && top_module.pipe_outputs.empty();
+
     project.modulelib->modules[project.top_module] = std::make_shared<VulModule>(std::move(top_module));
+
+    if (!self_contained && main_file.empty()) {
+        std::cerr << "Error: Main file is required for non-self-contained top module" << std::endl;
+        assert(0);
+    }
+
+    if (!main_file.empty()) {
+        path main_path = proj_dir / main_file;
+        if (!exists(main_path) || !is_regular_file(main_path)) {
+            std::cerr << "Error: Main file does not exist: " << main_path << std::endl;
+            assert(0);
+        }
+        auto main_lines = _readFileLines(main_path.string());
+        auto main_strip = _stripComments(main_lines);
+        string test_module_name = main_path.stem().string();
+        if (test_module_name == project.top_module) {
+            std::cerr << "Error: Main file name must be different from top module name to avoid conflict: " << test_module_name << std::endl;
+            assert(0);
+        }
+        VulTestHarnessModule test_module = _parseTestHarnessModule(main_strip.lines, test_module_name);
+        project.test_harness[test_module.name] = std::move(test_module);
+        project.test_module = test_module_name;
+    }
+
 
     return project;
 }

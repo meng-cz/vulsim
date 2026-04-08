@@ -511,3 +511,17 @@ public:
     vector<string> debugPrintModule() const;
 };
 
+class VulTestHarnessModule : public VulModule {
+public:
+
+    virtual bool isExternalModule() const override { return false; }
+
+    unordered_map<ConfigName, LocalConfigValue> top_config_overrides;
+
+    unordered_map<InstanceName, VulPipe>        pipe_instances;
+
+    vector<CCodeLine> test_codelines;
+    unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines;
+    unordered_map<ReqServName, vector<CCodeLine>>   serv_cond_codelines;
+};
+

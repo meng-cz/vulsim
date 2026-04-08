@@ -103,4 +103,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
  */
 ErrorMsg genTopSimCpp(const ModuleName &top_module_name, const vector<ConfigValue> &local_configs, vector<string> &out_lines);
 
+
+ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulModule & top_module, vector<string> &out_lines);
+
 } // namespace simgen

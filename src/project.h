@@ -148,6 +148,7 @@ public:
     ErrorMsg save() const;
 
     ModuleName                  top_module;
+    ModuleName                  test_module;
 
     bool is_opened = false;
     bool is_modified = false;
@@ -165,6 +166,7 @@ public:
     shared_ptr<VulConfigLib> configlib;
     shared_ptr<VulBundleLib> bundlelib;
     shared_ptr<VulModuleLib> modulelib;
+    unordered_map<ModuleName, VulTestHarnessModule> test_harness;
 
     unordered_map<ModuleName, VulImport>   imports;
 
