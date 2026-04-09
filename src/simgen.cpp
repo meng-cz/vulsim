@@ -711,62 +711,15 @@ inline string _genReqServFuncReturnType(const VulReqServ &item) {
 }
 
 inline string _genReqServFuncArgsTypes(const VulReqServ &item) {
-    string args_str;
-    for (const auto &arg : item.args) {
-        if (!args_str.empty()) {
-            args_str += ", ";
-        }
-        if (isBasicVulType(arg.type)) {
-            args_str += "const " + arg.type;
-        } else {
-            args_str += "const " + arg.type + " &";
-        }
-    }
-    for (const auto &ret : item.rets) {
-        if (!args_str.empty()) {
-            args_str += ", ";
-        }
-        args_str += ret.type + " *";
-    }
-    return args_str;
+    return item.signatureArgTypeOnly();
 }
 
 inline string _genReqServFuncArgsNames(const VulReqServ &item) {
-    string args_str;
-    for (const auto &arg : item.args) {
-        if (!args_str.empty()) {
-            args_str += ", ";
-        }
-        args_str += arg.name;
-    }
-    for (const auto &ret : item.rets) {
-        if (!args_str.empty()) {
-            args_str += ", ";
-        }
-        args_str += ret.name;
-    }
-    return args_str;
+    return item.signatureArgNameList();
 }
 
 inline string _genReqServFuncArgsList(const VulReqServ &item) {
-    string args_str;
-    for (const auto &arg : item.args) {
-        if (!args_str.empty()) {
-            args_str += ", ";
-        }
-        if (isBasicVulType(arg.type)) {
-            args_str += "const " + arg.type + " " + arg.name;
-        } else {
-            args_str += "const " + arg.type + " & " + arg.name;
-        }
-    }
-    for (const auto &ret : item.rets) {
-        if (!args_str.empty()) {
-            args_str += ", ";
-        }
-        args_str += ret.type + " * " + ret.name;
-    }
-    return args_str;
+    return item.signatureArgOnly();
 }
 
 /**

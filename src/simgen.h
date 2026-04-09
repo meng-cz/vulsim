@@ -65,6 +65,8 @@ struct ValidSymbols {
     vector<VariableDefinition>      variable_defs;
 };
 
+string replaceLog2CeilChar(const ConfigValue &v);
+
 vector<CCodeLine> getHelperCodeLines(VulProject &project, const ModuleName &module_name);
 
 ValidSymbols getValidSymbols(VulProject &project, const ModuleName &module_name);

@@ -120,6 +120,10 @@ public:
         return sig;
     }
 
+    inline string returnType() const {
+        return (has_handshake ? "bool" : "void");
+    }
+
     inline string signatureNoRetType(const string name_prefix = "") const {
         return  name_prefix + name + "(" + signatureArgOnly() + ")";
     }
@@ -366,6 +370,7 @@ public:
     unordered_map<InstanceName, VulTickCodeBlock>   user_tick_codeblocks;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines; // un-connected service function body codelines
     unordered_map<ReqServName, vector<CCodeLine>>   serv_cond_codelines; // conditional service function body codelines
+    unordered_map<ReqServName, int32_t> serv_priority; // service priority, smaller value means higher priority, default 0
     unordered_map<InstanceName, unordered_map<ReqServName, vector<CCodeLine>>> req_codelines; // un-connected child request function body codelines
 
     unordered_map<StorageName, VulStorage>  storages;
