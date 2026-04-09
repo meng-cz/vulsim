@@ -22,41 +22,9 @@
 
 #pragma once
 
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <set>
-#include <array>
-#include <deque>
-#include <list>
-#include <map>
 #include <memory>
-#include <filesystem>
-#include <unordered_map>
-#include <unordered_set>
 
-#include <cstdio>
-#include <cstdint>
-
-using std::array;
-using std::vector;
-using std::list;
-using std::deque;
-using std::map;
-using std::unordered_map;
-using std::unordered_multimap;
-using std::set;
-using std::unordered_set;
-using std::make_pair;
-using std::move;
-using std::string;
-using std::to_string;
-using std::unique_ptr;
-using std::shared_ptr;
-using std::make_shared;
-using std::make_unique;
-using std::make_pair;
+#include <stdint.h>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define FORCE_INLINE inline __attribute__((always_inline))
@@ -98,23 +66,4 @@ constexpr uint32_t log2ceil(uint32_t n) {
 constexpr uint64_t log2ceil(uint64_t n) {
     return (n <= 1) ? 0 : 64u - std::countl_zero(n - 1UL);
 }
-
-void stopSimulation(const string &msg);
-void stopSimulation();
-
-#define sim_assert(cond) \
-    do { \
-        if (!(cond)) [[unlikely]] { \
-            printf("Assert failed '%s' in file %s, line %d: %s\n", #cond, __FILE__, __LINE__, #cond); \
-            stopSimulation("Stopped by assert"); \
-        } \
-    } while (0)
-
-#define sim_assertf(cond, fmt, ...) \
-    do { \
-        if (!(cond)) [[unlikely]] { \
-            printf("Assert failed '%s' in file %s, line %d: " fmt, #cond, __FILE__, __LINE__, ##__VA_ARGS__); \
-            stopSimulation("Stopped by assert"); \
-        } \
-    } while (0)
 

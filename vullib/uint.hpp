@@ -22,6 +22,37 @@
 
 #include "common.h"
 
+#include <string>
+#include <vector>
+#include <set>
+#include <array>
+#include <deque>
+#include <list>
+#include <map>
+#include <memory>
+#include <filesystem>
+#include <unordered_map>
+#include <unordered_set>
+
+using std::array;
+using std::vector;
+using std::list;
+using std::deque;
+using std::map;
+using std::unordered_map;
+using std::unordered_multimap;
+using std::set;
+using std::unordered_set;
+using std::make_pair;
+using std::move;
+using std::string;
+using std::to_string;
+using std::unique_ptr;
+using std::shared_ptr;
+using std::make_shared;
+using std::make_unique;
+using std::make_pair;
+
 #include <type_traits>
 
 template <uint32_t BitWidth>
