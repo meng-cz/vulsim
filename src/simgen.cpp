@@ -1049,11 +1049,14 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         }
         return type_str;
     };
-    auto _genStoTypeNext = [&](const VulStorage &sto) -> string {
+    auto _genStoTypeNext = [&](const VulStorage &sto, uint32_t port_num) -> string {
         string type_str;
         string base_type = sto.type;
         if (!sto.uint_length.empty()) {
             base_type = UIntClassName + "<" + replaceLog2CeilChar(sto.uint_length) + ">";
+        }
+        if (port_num > 1) {
+            base_type = base_type + ", " + std::to_string(port_num);
         }
         if (!sto.dims.empty()) {
             type_str += StorageNextArrayClassName + "<" + base_type;
@@ -1086,7 +1089,12 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         for (const string &line : _genUnpackMultilineNoNext(sto.comment)) {
             member_field.push_back("// " + line + "\n");
         }
-        string line = _genStoTypeNext(sto) + " " + sto_entry.first + ";\n";
+        auto port_num_iter = module.storagenext_ports.find(sto_entry.first);
+        uint32_t port_num = 1;
+        if (port_num_iter != module.storagenext_ports.end()) {
+            port_num = port_num_iter->second;
+        }
+        string line = _genStoTypeNext(sto, port_num) + " " + sto_entry.first + ";\n";
         member_field.push_back(line);
         member_field.push_back("void " + sto_entry.first + "_setnext(const " + sto.type + " & value, uint8 priority = 0) {\n");
         member_field.push_back(CodeTab + sto_entry.first + ".setnext(value, priority);\n");

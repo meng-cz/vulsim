@@ -746,6 +746,18 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             storage.value = item.args[2];
             module.storagenexts[storage.name] = storage;
         }
+        matches = _matchMacros(code, "REGISTER_MUL($,$,$)");
+        for (const auto& item : matches) {
+            VulStorage storage;
+            storage.name = item.args[0];
+            storage.comment = "";
+            storage.type = item.args[1];
+            uint32_t mul = std::stoul(item.args[2]);
+            module.storagenexts[storage.name] = storage;
+            if (mul > 1) {
+                module.storagenext_ports[storage.name] = mul;
+            }
+        }
     }
     {
         // parse wire

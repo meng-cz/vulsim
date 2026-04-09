@@ -55,7 +55,18 @@ void name_setnext(type value); // 延迟赋值寄存器，在下个周期生效
 
 ## REGISTER_MUL(name, type, portnum)
 
-**未来实现。** 带有多个写端口和优先级仲裁器的寄存器定义
+带有多个写端口和优先级仲裁器的寄存器定义:
+- `name`：寄存器的名称
+- `type`：寄存器的数据类型，可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
+- `portnum`：寄存器的写端口数量，整数类型，必须大于0
+
+展开后提供以下等价声明供行为代码调用：
+```cpp
+const type name; // 当前周期寄存器的值，只读
+void name_setnext(type value, uint8_t priority = 0); // 延迟赋值寄存器，在下个周期生效，priority 参数用于仲裁多个写端口
+```
+
+当多个写端口在同一周期写入时，具有更低 priority 值的写入会覆盖具有更高 priority 值的写入。priority 的默认值为0，表示最高优先级。
 
 ## WIRE(name, type, init)
 

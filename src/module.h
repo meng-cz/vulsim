@@ -370,6 +370,7 @@ public:
 
     unordered_map<StorageName, VulStorage>  storages;
     unordered_map<StorageName, VulStorage>  storagenexts;
+    unordered_map<StorageName, uint32_t> storagenext_ports; // only for storagenexts, indicates the port number of the next storage value (for multiple next values)
     unordered_map<StorageName, VulStorage>  storagetmp; // reset each tick
 
     unordered_map<InstanceName, VulInstance>    instances;
