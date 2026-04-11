@@ -656,6 +656,10 @@ void _genBundleContent(const VulBundleItem &item, vector<string> &out_lines) {
 
 }
 
+void genBundleContent(const VulBundleItem &item, vector<string> &out_lines) {
+    _genBundleContent(item, out_lines);
+}
+
 /**
  * @brief Generate bundle.h C++ header code for bundle definitions.
  * @param bundle_lib The VulBundleLib instance containing bundle definitions.

@@ -71,6 +71,8 @@ vector<CCodeLine> getHelperCodeLines(VulProject &project, const ModuleName &modu
 
 ValidSymbols getValidSymbols(VulProject &project, const ModuleName &module_name);
 
+void genBundleContent(const VulBundleItem &item, vector<string> &out_lines);
+
 /**
  * @brief Generate config.h C++ header code for configuration items.
  * @param config_lib The VulConfigLib instance containing configuration items.

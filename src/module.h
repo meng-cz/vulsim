@@ -265,6 +265,7 @@ typedef struct {
     InstanceName        name;
     ModuleName          module_name;
     Comment             comment;
+    unordered_set<ReqServName> referenced_services;
     unordered_map<ConfigName, LocalConfigValue> local_config_overrides; // local config overrides for this instance
 } VulInstance;
 

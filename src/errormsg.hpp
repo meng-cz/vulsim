@@ -427,3 +427,5 @@ constexpr uint32_t EGENNoTaskSpecified = 40010;
 constexpr uint32_t EGENInvalidCXX = 40011;
 constexpr uint32_t EGENCompilationFailed = 40012;
 constexpr uint32_t EGENSimulationFailed = 40013;
+
+constexpr uint32_t ERTL = 41000;

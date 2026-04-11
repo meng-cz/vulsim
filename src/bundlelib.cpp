@@ -35,6 +35,56 @@ using std::make_shared;
 #include "json.hpp"
 using nlohmann::json;
 
+ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides) {
+    // 计算 bundle 中所有成员的 constexpr 值，包括 enumerate, uint 长度，数组维度，初始值 value
+
+    for (auto &member : item.members) {
+        // 计算 uint 长度
+        if (!member.uint_length.empty()) {
+            ConfigRealValue uint_len_value;
+            unordered_set<ConfigName> seen_configs;
+            auto err = config_lib.calculateConfigExpression(member.uint_length, overrides, uint_len_value, seen_configs);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate uint length expression '") + member.uint_length + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            member.uint_length = std::to_string(uint_len_value);
+        }
+        // 计算数组维度
+        for (auto &dim_expr : member.dims) {
+            ConfigRealValue dim_value;
+            unordered_set<ConfigName> seen_configs;
+            auto err = config_lib.calculateConfigExpression(dim_expr, overrides, dim_value, seen_configs);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate array dimension expression '") + dim_expr + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            dim_expr = std::to_string(dim_value);
+        }
+        // 计算初始值
+        if (!member.value.empty()) {
+            ConfigRealValue init_value;
+            unordered_set<ConfigName> seen_configs;
+            auto err = config_lib.calculateConfigExpression(member.value, overrides, init_value, seen_configs);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate default value expression '") + member.value + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            member.value = std::to_string(init_value);
+        }
+    }
+    // 计算 enum 成员的初始值
+    for (auto &enum_member : item.enum_members) {
+        if (!enum_member.value.empty()) {
+            ConfigRealValue init_value;
+            unordered_set<ConfigName> seen_configs;
+            auto err = config_lib.calculateConfigExpression(enum_member.value, overrides, init_value, seen_configs);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate enum member value expression '") + enum_member.value + string("' for enum member '") + enum_member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            enum_member.value = std::to_string(init_value);
+        }
+    }
+    return "";
+}
+
 
 string VulBundleItem::checkAndExtractReferences(unordered_set<BundleName> &out_bundle_refs, unordered_set<ConfigName> &out_config_refs) const {
     

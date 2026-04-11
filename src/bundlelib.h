@@ -81,6 +81,12 @@ public:
     string checkAndExtractReferences(unordered_set<BundleName> &out_bundle_refs, unordered_set<ConfigName> &out_config_refs) const;
 };
 
+ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides);
+inline ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib) {
+    unordered_map<ConfigName, ConfigRealValue> dummy_overrides;
+    return calculateBundleConstexprValue(item, config_lib, dummy_overrides);
+}
+
 bool operator==(const VulBundleItem &a, const VulBundleItem &b);
 inline bool operator!=(const VulBundleItem &a, const VulBundleItem &b) {
     return !(a == b);

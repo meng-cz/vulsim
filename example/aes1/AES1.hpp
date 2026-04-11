@@ -27,7 +27,7 @@ REQUEST_PORT(output, void, ARG(AESData) data);
 
 TICK_IMPL() {
 
-    static uint8_t SBOX[256] = {
+    constexpr uint8_t SBOX[256] = {
         0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
         0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
         0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
@@ -45,32 +45,32 @@ TICK_IMPL() {
         0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
         0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16};
 
-    static uint8_t RC[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36};
+    constexpr uint8_t RC[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36};
 
-    auto shift_rows = [](AESData& data) {
-        uint8_t temp = 0;
-        temp        = data[1];
-        data[1]    = data[5];
-        data[5]    = data[9];
-        data[9]    = data[13];
-        data[13]   = temp;
-        temp        = data[2];
-        data[2]    = data[10];
-        data[10]   = temp;
-        temp        = data[6];
-        data[6]    = data[14];
-        data[14]   = temp;
-        temp        = data[3];
-        data[3]    = data[7];
-        data[7]    = data[11];
-        data[11]   = data[15];
-        data[15]   = temp;
-    };
-    auto mul2 = [](uint8_t x) {
-        uint8_t m = -(x >> 7);
-        return (x << 1) ^ (0x1b & m);
-    };
-    auto aes128_round = [&](AESData &data, AESKey &round_key, uint8_t rc, bool final) {
+    auto aes128_round = [](AESData &data, AESKey &round_key, uint8_t rc, bool final) {
+        auto shift_rows = [](AESData& data) {
+            uint8_t temp = 0;
+            temp        = data[1];
+            data[1]    = data[5];
+            data[5]    = data[9];
+            data[9]    = data[13];
+            data[13]   = temp;
+            temp        = data[2];
+            data[2]    = data[10];
+            data[10]   = temp;
+            temp        = data[6];
+            data[6]    = data[14];
+            data[14]   = temp;
+            temp        = data[3];
+            data[3]    = data[7];
+            data[7]    = data[11];
+            data[11]   = data[15];
+            data[15]   = temp;
+        };
+        auto mul2 = [](uint8_t x) {
+            uint8_t m = -(x >> 7);
+            return (x << 1) ^ (0x1b & m);
+        };
         uint8_t t0 = SBOX[round_key[13]] ^ rc;
         uint8_t t1 = SBOX[round_key[14]];
         uint8_t t2 = SBOX[round_key[15]];
@@ -81,18 +81,16 @@ TICK_IMPL() {
         round_key[2] ^= t2;
         round_key[3] ^= t3;
 
-        #pragma unroll
-        for (int i = 4; i < 16; i++)
-        round_key[i] ^= round_key[i-4];
+        for (int i = 4; i < 16; i++) {
+            round_key[i] ^= round_key[i-4];
+        }
         // round
         AESData tmp;
-        #pragma unroll
         for (uint32_t i = 0; i < 16; ++i) {
             tmp[i] = SBOX[data[i]];
         }
         shift_rows(tmp);
         if (!final) {
-            #pragma unroll
             for (uint32_t i = 0; i < 16; i+=4) {
                 uint8_t t = tmp[i] ^ tmp[i+1] ^ tmp[i+2] ^ tmp[i+3];
                 data[i] = mul2(tmp[i]  ^ tmp[i+1]) ^ tmp[i]   ^ t;
@@ -101,25 +99,23 @@ TICK_IMPL() {
                 data[i+3] = mul2(tmp[i+3] ^ tmp[i]  ) ^ tmp[i+3] ^ t;
             }
         }
-        #pragma unroll
         for (uint32_t i = 0; i < 16; ++i) {
             data[i] ^= round_key[i];
         }
     };
 
     uint32_t state_next = 0;
-    if (state > 0 && state < 10) {
+    if (state > 0 && state <= 10) {
         AESData data = d;
         AESKey roundkey = k;
-        aes128_round(data, roundkey, RC[state-1], false);
-        d_setnext(data);
-        k_setnext(roundkey);
-        state_next = state + 1;
-    } else if (state == 10) {
-        AESData data = d;
-        AESKey roundkey = k;
-        aes128_round(data, roundkey, RC[9], true);
-        output(data);
+        aes128_round(data, roundkey, RC[state-1], (state == 10));
+        if (state == 10) {
+            output(data);
+        } else {
+            d_setnext(data);
+            k_setnext(roundkey);
+            state_next = state + 1;
+        }
     }
     if (inputed) {
         state_setnext(1);
@@ -135,7 +131,6 @@ SERVICE_COND_IMPL(input, ARG(AESData) data, ARG(AESKey) key) {
 SERVICE_LOGIC_IMPL(input, ARG(AESData) data, ARG(AESKey) key) {
     k_setnext(key);
     AESData indata;
-    #pragma unroll
     for (uint32_t i = 0; i < 16; i++) {
         indata[i] = data[i] ^ key[i];
     }
