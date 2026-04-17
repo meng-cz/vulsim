@@ -57,6 +57,7 @@ env.bak/
 venv.bak/
 
 .vscode
+.codex
 
 build
 
