@@ -23,6 +23,7 @@
 #pragma once
 
 #include <inttypes.h>
+#include <uint.hpp>
 
 #include <array>
 

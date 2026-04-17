@@ -22,36 +22,10 @@
 
 #include "common.h"
 
-#include <string>
-#include <vector>
-#include <set>
 #include <array>
-#include <deque>
-#include <list>
-#include <map>
-#include <memory>
-#include <filesystem>
-#include <unordered_map>
-#include <unordered_set>
+#include <cassert>
 
 using std::array;
-using std::vector;
-using std::list;
-using std::deque;
-using std::map;
-using std::unordered_map;
-using std::unordered_multimap;
-using std::set;
-using std::unordered_set;
-using std::make_pair;
-using std::move;
-using std::string;
-using std::to_string;
-using std::unique_ptr;
-using std::shared_ptr;
-using std::make_shared;
-using std::make_unique;
-using std::make_pair;
 
 #include <type_traits>
 
@@ -66,12 +40,76 @@ public:
 
     Storage data;
 
-public:
     FORCE_INLINE constexpr void mask_high_bits() {
         if constexpr (BitWidth % WORD_BITS != 0) {
             data.back() &= (uint64_t(1) << EFFECTIVE_BITS) - 1;
         }
     }
+
+    class Slice {
+    private:
+        UInt<BitWidth>& parent;
+        uint32_t hi;
+        uint32_t lo;
+
+    public:
+        Slice(UInt<BitWidth>& p, uint32_t h, uint32_t l)
+            : parent(p), hi(h), lo(l) {
+            assert(h >= l);
+            assert(h < BitWidth);
+        }
+
+        uint32_t width() const {
+            return hi - lo + 1;
+        }
+
+        // ----------- 读取 -----------
+        template <uint32_t ResultBitWidth>
+        operator UInt<ResultBitWidth>() const {
+            return UInt<ResultBitWidth>(parent.get_bits(hi, lo));
+        }
+
+        // ----------- 写入 UInt -----------
+        Slice& operator=(const UInt<BitWidth>& rhs) {
+            parent.set_bits(hi, lo, rhs);
+            return *this;
+        }
+
+        // ----------- 写入整数 -----------
+        Slice& operator=(uint64_t rhs) {
+            parent.set_bits(hi, lo, UInt<BitWidth>(rhs));
+            return *this;
+        }
+    };
+    class Bit {
+    private:
+        UInt<BitWidth>& parent;
+        uint32_t bit;
+    public:
+        Bit(UInt<BitWidth>& p, uint32_t b)
+            : parent(p), bit(b) {
+            assert(bit < BitWidth);
+        }
+
+        // ----------- 读取 -----------
+        operator bool() const {
+            uint32_t word = bit / WORD_BITS;
+            uint32_t b = bit % WORD_BITS;
+            return (parent.data[word] >> b) & 1;
+        }
+
+        // ----------- 写入 -----------
+        Bit& operator=(bool value) {
+            uint32_t word = bit / WORD_BITS;
+            uint32_t b = bit % WORD_BITS;
+            if (value) {
+                parent.data[word] |= (uint64_t(1) << b);
+            } else {
+                parent.data[word] &= ~(uint64_t(1) << b);
+            }
+            return *this;
+        }
+    };
 
 public:
     // Default constructor
@@ -154,23 +192,6 @@ public:
         }
         result.mask_high_bits();
         return result;
-    }
-
-    // Division and modulo
-    FORCE_INLINE constexpr UInt operator/(const UInt& other) const {
-        if (!other) return UInt(0); // division by zero
-        uint64_t dividend = data[0]; // assume BitWidth <= 64 for simplicity
-        uint64_t divisor = other.data[0];
-        uint64_t quotient = dividend / divisor;
-        return UInt(quotient);
-    }
-
-    FORCE_INLINE constexpr UInt operator%(const UInt& other) const {
-        if (!other) return *this; // division by zero
-        uint64_t dividend = data[0];
-        uint64_t divisor = other.data[0];
-        uint64_t remainder = dividend % divisor;
-        return UInt(remainder);
     }
 
     // Shift operators
@@ -271,108 +292,13 @@ public:
         return !(*this < other);
     }
 
-    // Conversion to bool
-    FORCE_INLINE constexpr operator bool() const {
-        for (uint32_t i = 0; i < NUM_WORDS; ++i) {
-            if (data[i] != 0) return true;
-        }
-        return false;
+    FORCE_INLINE constexpr Slice operator()(uint32_t hi, uint32_t lo) {
+        return Slice(*this, hi, lo);
     }
-
-    // Conversion to built-in integer types
-    FORCE_INLINE constexpr operator uint64_t() const {
-        return data[0];
+    
+    FORCE_INLINE constexpr Bit operator()(uint32_t bit) {
+        return Bit(*this, bit);
     }
-
-    FORCE_INLINE constexpr operator uint32_t() const {
-        return static_cast<uint32_t>(data[0]);
-    }
-
-    FORCE_INLINE constexpr operator uint16_t() const {
-        return static_cast<uint16_t>(data[0]);
-    }
-
-    FORCE_INLINE constexpr operator uint8_t() const {
-        return static_cast<uint8_t>(data[0]);
-    }
-
-    // Extract function (template version)
-    template <uint32_t HiBit, uint32_t LoBit>
-    FORCE_INLINE constexpr UInt<HiBit - LoBit + 1> extract() const {
-        static_assert(HiBit >= LoBit && HiBit < BitWidth, "Invalid bit range");
-        constexpr uint32_t ResultWidth = HiBit - LoBit + 1;
-        UInt<ResultWidth> result = {};
-        constexpr uint32_t start_word = LoBit / WORD_BITS;
-        constexpr uint32_t start_bit = LoBit % WORD_BITS;
-        constexpr uint32_t end_word = HiBit / WORD_BITS;
-        constexpr uint32_t end_bit = HiBit % WORD_BITS;
-        ExtractHelper<start_word, end_word, start_bit, end_bit, start_word, 0, UInt<ResultWidth>::NUM_WORDS>::apply(data, result.data);
-        result.mask_high_bits();
-        return result;
-    }
-
-    // Extract function (runtime version)
-    FORCE_INLINE constexpr UInt<BitWidth> extract(uint32_t hi_bit, uint32_t lo_bit) const {
-        UInt<BitWidth> result;
-        uint32_t length = hi_bit - lo_bit + 1;
-        uint32_t start_word = lo_bit / WORD_BITS;
-        uint32_t start_bit = lo_bit % WORD_BITS;
-        uint32_t end_word = hi_bit / WORD_BITS;
-        uint32_t end_bit = hi_bit % WORD_BITS;
-        uint32_t result_word = 0;
-        uint32_t result_bit = 0;
-        for (uint32_t w = start_word; w <= end_word; ++w) {
-            uint64_t word = data[w];
-            uint32_t bit_start = (w == start_word) ? start_bit : 0;
-            uint32_t bit_end = (w == end_word) ? end_bit : WORD_BITS - 1;
-            uint32_t bits = bit_end - bit_start + 1;
-            uint64_t mask = (bits == WORD_BITS) ? ~uint64_t(0) : ((uint64_t(1) << bits) - 1);
-            uint64_t part = (word & (mask << bit_start)) >> bit_start;
-            // add to result
-            if (result_bit + bits <= WORD_BITS) {
-                result.data[result_word] |= part << result_bit;
-                result_bit += bits;
-                if (result_bit == WORD_BITS) {
-                    result_word++;
-                    result_bit = 0;
-                }
-            } else {
-                uint32_t first_bits = WORD_BITS - result_bit;
-                result.data[result_word] |= (part & ((uint64_t(1) << first_bits) - 1)) << result_bit;
-                result_word++;
-                uint32_t remaining_bits = bits - first_bits;
-                result.data[result_word] |= part >> first_bits;
-                result_bit = remaining_bits;
-            }
-        }
-        result.mask_high_bits();
-        return result;
-    }
-
-private:
-    template <uint32_t StartWord, uint32_t EndWord, uint32_t StartBit, uint32_t EndBit, uint32_t CurrentWord, uint32_t ResultBitPos, uint32_t ResultNumWords>
-    struct ExtractHelper {
-        static constexpr void apply(const Storage& data, std::array<uint64_t, ResultNumWords>& result) {
-            if constexpr (CurrentWord <= EndWord) {
-                constexpr uint32_t bit_start = (CurrentWord == StartWord) ? StartBit : 0;
-                constexpr uint32_t bit_end = (CurrentWord == EndWord) ? EndBit : WORD_BITS - 1;
-                constexpr uint32_t bits = bit_end - bit_start + 1;
-                constexpr uint64_t mask = (bits == WORD_BITS) ? ~uint64_t(0) : ((uint64_t(1) << bits) - 1) << bit_start;
-                uint64_t part = (data[CurrentWord] & mask) >> bit_start;
-                constexpr uint32_t result_word = ResultBitPos / WORD_BITS;
-                constexpr uint32_t result_bit = ResultBitPos % WORD_BITS;
-                if constexpr (result_bit + bits <= WORD_BITS) {
-                    result[result_word] |= part << result_bit;
-                    ExtractHelper<StartWord, EndWord, StartBit, EndBit, CurrentWord + 1, ResultBitPos + bits, ResultNumWords>::apply(data, result);
-                } else {
-                    constexpr uint32_t first_bits = WORD_BITS - result_bit;
-                    result[result_word] |= (part & ((uint64_t(1) << first_bits) - 1)) << result_bit;
-                    result[result_word + 1] |= part >> first_bits;
-                    ExtractHelper<StartWord, EndWord, StartBit, EndBit, CurrentWord + 1, ResultBitPos + bits, ResultNumWords>::apply(data, result);
-                }
-            }
-        }
-    };
 
     // Helper to set a bit
     FORCE_INLINE constexpr void set_bit(uint32_t bit, bool value) {
@@ -383,6 +309,32 @@ private:
         } else {
             data[word] &= ~(uint64_t(1) << b);
         }
+    }
+    FORCE_INLINE constexpr void set_bits(uint32_t hibit, uint32_t lobit, const UInt<BitWidth>& value) {
+        assert(hibit >= lobit);
+        assert(hibit < BitWidth);
+
+        const uint32_t width = hibit - lobit + 1;
+        for (uint32_t i = 0; i < width; ++i) {
+            const uint32_t src_word = i / WORD_BITS;
+            const uint32_t src_bit = i % WORD_BITS;
+            const bool bit_value = (value.data[src_word] >> src_bit) & 1;
+            set_bit(lobit + i, bit_value);
+        }
+    }
+    FORCE_INLINE constexpr UInt<BitWidth> get_bits(uint32_t hibit, uint32_t lobit) const {
+        assert(hibit >= lobit);
+        assert(hibit < BitWidth);
+
+        UInt<BitWidth> result;
+        const uint32_t width = hibit - lobit + 1;
+        for (uint32_t i = 0; i < width; ++i) {
+            const uint32_t src_word = (lobit + i) / WORD_BITS;
+            const uint32_t src_bit = (lobit + i) % WORD_BITS;
+            const bool bit_value = (data[src_word] >> src_bit) & 1;
+            result.set_bit(i, bit_value);
+        }
+        return result;
     }
 
     // Access to data for testing
