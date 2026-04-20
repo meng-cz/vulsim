@@ -50,8 +50,8 @@ TICK_IMPL() {
             hit = true;
             read_data = data_array.readdata<0>();
         }
+        readresp_s1(hit, read_data);
     }
-    readresp_s1(hit, read_data);
     if (!read_inputed) {
         ReadStageReg s0;
         s0.valid = false;
