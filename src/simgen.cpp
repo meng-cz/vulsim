@@ -1055,6 +1055,9 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         }
         string line = _genStoTypeNext(sto, port_num) + " " + sto_entry.first + ";\n";
         member_field.push_back(line);
+        member_field.push_back("const " + sto.type + " & " + sto_entry.first + "_get() {\n");
+        member_field.push_back(CodeTab + "return " + sto_entry.first + ".get();\n");
+        member_field.push_back("}\n");
         member_field.push_back("void " + sto_entry.first + "_setnext(const " + sto.type + " & value, uint8 priority = 0) {\n");
         member_field.push_back(CodeTab + sto_entry.first + ".setnext(value, priority);\n");
         member_field.push_back("}\n");

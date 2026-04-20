@@ -41,9 +41,9 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) VulStorageNext<type> name; void name##_setnext(const type& next);
+#define REGISTER(name, type) VulStorageNext<type> name; const type & name##_get(); void name##_setnext(const type& next);
 
-#define REGISTER_INIT(name, type, init) VulStorageNext<type> name(init); void name##_setnext(const type& next);
+#define REGISTER_INIT(name, type, init) VulStorageNext<type> name(init); const type & name##_get(); void name##_setnext(const type& next);
 
 #define REGISTER_ARRAY1(name, type, N) const std::array<type, N> name; void name##_setnext(const uint64_t idx, const type& next);
 

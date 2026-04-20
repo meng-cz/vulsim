@@ -26,10 +26,8 @@ BRAM(tag_array, TAG_WIDTH + 1, INDEX_WIDTH, 1, 1);
 BRAM(data_array, DATA_WIDTH, INDEX_WIDTH, 1, 1);
 
 REGISTER(read_stage, ReadStageReg);
-REGISTER(refill_stage, RefillStageReg);
 
 WIRE(read_inputed, bool, false);
-WIRE(refill_inputed, bool, false);
 
 // Port
 
@@ -43,8 +41,8 @@ REQUEST_PORT(readresp_s1, void, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data);
 TICK_IMPL() {
     bool hit = false;
     UInt<DATA_WIDTH> read_data;
-    if (read_stage.get().valid) {
-        UInt<TAG_WIDTH> tag = read_stage.get().addr(ADDR_WIDTH - 1, INDEX_WIDTH);
+    if (read_stage_get().valid) {
+        UInt<TAG_WIDTH> tag = read_stage_get().addr(ADDR_WIDTH - 1, INDEX_WIDTH);
         UInt<TAG_WIDTH + 1> tag_entry = tag_array.readdata<0>();
         UInt<TAG_WIDTH> read_tag = tag_entry(TAG_WIDTH, 1);
         bool valid = tag_entry(0);
@@ -58,11 +56,6 @@ TICK_IMPL() {
         ReadStageReg s0;
         s0.valid = false;
         read_stage_setnext(s0);
-    }
-    if (!refill_inputed) {
-        RefillStageReg s0;
-        s0.valid = false;
-        refill_stage_setnext(s0);
     }
 }
 
@@ -78,11 +71,6 @@ SERVICE_LOGIC_IMPL(read_s0, ARG(UInt<ADDR_WIDTH>) addr) {
 }
 
 SERVICE_LOGIC_IMPL(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data) {
-    RefillStageReg s0;
-    s0.addr = addr;
-    s0.data = data;
-    s0.valid = true;
-    refill_stage_setnext(s0);
     UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
     UInt<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
     UInt<TAG_WIDTH + 1> tag_entry;
@@ -90,6 +78,5 @@ SERVICE_LOGIC_IMPL(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) 
     tag_entry(0) = 1; // valid bit
     tag_array.write<0>(index, tag_entry);
     data_array.write<0>(index, data);
-    refill_inputed = true;
 }
 

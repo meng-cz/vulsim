@@ -31,7 +31,8 @@
 
 展开后提供以下等价声明供行为代码调用：
 ```cpp
-const type name; // 当前周期寄存器的值，只读
+const type name; // 当前周期寄存器的值，只读，仅对非结构体类型有效
+const type& name_get(); // 获取当前周期寄存器的值的引用，适用于结构体类型
 void name_setnext(type value); // 延迟赋值寄存器，在下个周期生效
 ```
 
@@ -44,7 +45,8 @@ void name_setnext(type value); // 延迟赋值寄存器，在下个周期生效
 
 展开后提供以下等价声明供行为代码调用：
 ```cpp
-const type name; // 当前周期寄存器的值，只读
+const type name; // 当前周期寄存器的值，只读，仅对非结构体类型有效
+const type& name_get(); // 获取当前周期寄存器的值的引用，适用于结构体类型
 void name_setnext(type value); // 延迟赋值寄存器，在下个周期生效
 ```
 并且在模块复位时，寄存器会被设置为 `init` 的值。
