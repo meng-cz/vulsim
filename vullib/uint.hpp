@@ -83,6 +83,28 @@ public:
             return *this;
         }
     };
+    class ConstSlice {
+    private:
+        const UInt<BitWidth>& parent;
+        uint32_t hi;
+        uint32_t lo;
+
+    public:
+        ConstSlice(const UInt<BitWidth>& p, uint32_t h, uint32_t l)
+            : parent(p), hi(h), lo(l) {
+            assert(h >= l);
+            assert(h < BitWidth);
+        }
+
+        uint32_t width() const {
+            return hi - lo + 1;
+        }
+
+        template <uint32_t ResultBitWidth>
+        operator UInt<ResultBitWidth>() const {
+            return UInt<ResultBitWidth>(parent.get_bits(hi, lo));
+        }
+    };
     class Bit {
     private:
         UInt<BitWidth>& parent;
@@ -110,6 +132,22 @@ public:
                 parent.data[word] &= ~(uint64_t(1) << b);
             }
             return *this;
+        }
+    };
+    class ConstBit {
+    private:
+        const UInt<BitWidth>& parent;
+        uint32_t bit;
+    public:
+        ConstBit(const UInt<BitWidth>& p, uint32_t b)
+            : parent(p), bit(b) {
+            assert(bit < BitWidth);
+        }
+
+        operator bool() const {
+            uint32_t word = bit / WORD_BITS;
+            uint32_t b = bit % WORD_BITS;
+            return (parent.data[word] >> b) & 1;
         }
     };
 
@@ -310,9 +348,15 @@ public:
     FORCE_INLINE constexpr Slice operator()(uint32_t hi, uint32_t lo) {
         return Slice(*this, hi, lo);
     }
+    FORCE_INLINE constexpr ConstSlice operator()(uint32_t hi, uint32_t lo) const {
+        return ConstSlice(*this, hi, lo);
+    }
     
     FORCE_INLINE constexpr Bit operator()(uint32_t bit) {
         return Bit(*this, bit);
+    }
+    FORCE_INLINE constexpr ConstBit operator()(uint32_t bit) const {
+        return ConstBit(*this, bit);
     }
 
     // Helper to set a bit

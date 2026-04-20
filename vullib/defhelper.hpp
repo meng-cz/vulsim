@@ -25,6 +25,7 @@
 #include <inttypes.h>
 #include <uint.hpp>
 #include <ram.hpp>
+#include <storage.hpp>
 
 #include <array>
 
@@ -40,9 +41,9 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) const type name; void name##_setnext(const type& next);
+#define REGISTER(name, type) VulStorageNext<type> name; void name##_setnext(const type& next);
 
-#define REGISTER_INIT(name, type, init) const type name = init; void name##_setnext(const type& next);
+#define REGISTER_INIT(name, type, init) VulStorageNext<type> name(init); void name##_setnext(const type& next);
 
 #define REGISTER_ARRAY1(name, type, N) const std::array<type, N> name; void name##_setnext(const uint64_t idx, const type& next);
 

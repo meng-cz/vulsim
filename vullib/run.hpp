@@ -17,3 +17,4 @@ void sim_commit();
 
 #define VAR_INIT(type, name, init) type name = init;
 
+#define GLOBAL() inline namespace global

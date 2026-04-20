@@ -35,7 +35,7 @@ void expect_value(const UInt<BitWidth>& value, u128 expected) {
 template <uint32_t BitWidth>
 void expect_zero_extended(const UInt<BitWidth>& value, uint32_t from_width) {
     for (uint32_t bit = from_width; bit < BitWidth; ++bit) {
-        assert(!static_cast<bool>(const_cast<UInt<BitWidth>&>(value)(bit)));
+        assert(!static_cast<bool>(value(bit)));
     }
 }
 
@@ -168,6 +168,14 @@ void test_slice_and_bit_access() {
     wide(47) = true;
     assert(static_cast<bool>(wide(95)));
     assert(static_cast<bool>(wide(47)));
+
+    const UInt<96>& const_wide = wide;
+    UInt<33> const_middle = const_wide(80, 48);
+    expect_value(const_middle, 0x1ffffafffULL);
+    UInt<4> const_nibble = const_wide(63, 60);
+    expect_value(const_nibble, 0xa);
+    assert(static_cast<bool>(const_wide(95)));
+    assert(static_cast<bool>(const_wide(47)));
 }
 
 void test_shift_boundaries() {

@@ -143,6 +143,9 @@ public:
     void apply_next_tick() {
         impl_.apply_next_tick();
     }
+    const T& get() const {
+        return impl_;
+    }
     operator const T&() const {
         return impl_;
     }
