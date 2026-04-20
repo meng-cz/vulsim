@@ -959,7 +959,7 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             bram.init_hex = false;
             module.bram_instances[bram.name] = bram;
         }
-        matches = _matchMacros(code, "BRAM_INIT_H($,$,$,$,$,$,$)");
+        matches = _matchMacros(code, "BRAM_INIT_H($,$,$,$,$,$)");
         for (const auto& item : matches) {
             VulBlockRAM bram;
             bram.name = item.args[0];
