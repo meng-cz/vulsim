@@ -208,7 +208,7 @@ int main(int argc, char * argv[]) {
     }
 
     // generate build script
-    string build_cmd = "g++ -std=c++20 -O2 main.cpp -o " + project.name;
+    string build_cmd = "g++ -std=c++20 -g -O2 main.cpp -o " + project.name;
     std::ofstream build_script((out_path / "build.sh").string());
     if (!build_script.is_open()) {
         std::cerr << "Error: Failed to create build script." << std::endl;
