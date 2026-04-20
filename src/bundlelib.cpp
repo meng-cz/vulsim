@@ -299,3 +299,114 @@ ErrorMsg VulBundleLib::insertMultiBundles(const vector<VulBundleItem> &bundles, 
     return "";
 }
 
+static inline void trim(string &s) {
+    size_t l = 0;
+    while (l < s.size() && std::isspace(s[l])) l++;
+    size_t r = s.size();
+    while (r > l && std::isspace(s[r - 1])) r--;
+    s = s.substr(l, r - l);
+}
+
+bool VulBundleMember::fromDefinitionString(const string &def_str) {
+    string s = def_str;
+
+    // -----------------------------
+    // 1. 处理注释 //
+    // -----------------------------
+    size_t comment_pos = s.find("//");
+    if (comment_pos != string::npos) {
+        comment = s.substr(comment_pos + 2);
+        trim(comment);
+        s = s.substr(0, comment_pos);
+    } else {
+        comment = "";
+    }
+
+    trim(s);
+
+    // -----------------------------
+    // 2. 去掉结尾分号
+    // -----------------------------
+    if (!s.empty() && s.back() == ';') {
+        s.pop_back();
+    }
+
+    trim(s);
+
+    // -----------------------------
+    // 3. 处理初始化 (= ...)
+    // -----------------------------
+    size_t eq_pos = s.find('=');
+    if (eq_pos != string::npos) {
+        value = s.substr(eq_pos + 1);
+        trim(value);
+        s = s.substr(0, eq_pos);
+    } else {
+        value = "0";
+    }
+
+    trim(s);
+
+    // -----------------------------
+    // 4. 提取数组维度 [xxx]
+    // -----------------------------
+    dims.clear();
+    while (true) {
+        size_t l = s.find('[');
+        if (l == string::npos) break;
+        size_t r = s.find(']', l);
+        if (r == string::npos) return false;
+
+        string dim = s.substr(l + 1, r - l - 1);
+        trim(dim);
+        dims.push_back(dim);
+
+        // 删除这一段
+        s.erase(l, r - l + 1);
+    }
+
+    trim(s);
+
+    // -----------------------------
+    // 5. 分离 type 和 name
+    // -----------------------------
+    // 从后往前找最后一个空格
+    size_t split = string::npos;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        if (std::isspace(s[i])) {
+            split = i;
+            break;
+        }
+    }
+
+    if (split == string::npos) return false;
+
+    type = s.substr(0, split);
+    name = s.substr(split + 1);
+
+    trim(type);
+    trim(name);
+
+    // -----------------------------
+    // 6. 处理 UInt<N>
+    // -----------------------------
+    uint_length = "";
+    if (type.find("UInt<") == 0) {
+        size_t l = type.find('<');
+        size_t r = type.find('>');
+        if (l == string::npos || r == string::npos || r <= l) return false;
+
+        uint_length = type.substr(l + 1, r - l - 1);
+        trim(uint_length);
+
+        type = "UInt";
+    }
+
+    return true;
+}
+
+VulBundleItem VulBundleItem::calculateConsts(const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides) const {
+    
+
+
+}

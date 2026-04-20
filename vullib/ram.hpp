@@ -34,6 +34,7 @@
 #include <cctype>
 
 using std::array;
+using std::string;
 using std::vector;
 
 template <uint32_t DataWidth, uint32_t AddrWidth>
@@ -61,6 +62,28 @@ public:
 
 protected:
     
+    static inline uint8_t hex_val(char c) {
+        if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+        if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+        throw std::runtime_error("Invalid hex digit");
+    }
+
+    static inline std::string trim(const std::string &s) {
+        size_t l = 0, r = s.size();
+        while (l < r && std::isspace((unsigned char)s[l])) l++;
+        while (r > l && std::isspace((unsigned char)s[r - 1])) r--;
+        return s.substr(l, r - l);
+    }
+
+    static inline std::string strip_comment(const std::string &line) {
+        size_t p1 = line.find("//");
+        size_t p2 = line.find('#');
+        size_t p = std::min(p1 == std::string::npos ? line.size() : p1,
+                            p2 == std::string::npos ? line.size() : p2);
+        return line.substr(0, p);
+    }
+
     void init_from_readmemh(const std::string &path, bool strict_width = false) {
         std::ifstream fin(path);
         if (!fin) {
@@ -292,7 +315,7 @@ public:
 
 protected:
 
-    VulBRAMImpl block_;
+    VulBRAMImpl<DataWidth, AddrWidth> block_;
 
     AddrType addr_;
     DataType write_data_;
@@ -316,9 +339,9 @@ public:
 
     void apply_next_tick() {
         if (write_en_) {
-            block_.memory_[addr_] = write_data_;
+            block_.memory_[addr_.get_u64()] = write_data_;
         }
-        read_data_ = block_.memory_[addr_];
+        read_data_ = block_.memory_[addr_.get_u64()];
     }
 };
 
@@ -337,7 +360,7 @@ public:
 
 protected:
 
-    VulBRAMImpl block_;
+    VulBRAMImpl<DataWidth, AddrWidth> block_;
 
     array<AddrType, ReadPorts> read_addresses_;
     array<DataType, ReadPorts> read_data_;
@@ -383,13 +406,13 @@ public:
         if (write_enables_ != 0) {
             unroll_loop<0, WritePorts>([&](auto i) {
                 if (write_enables_ & (1ULL << i)) {
-                    block_.memory_[write_addresses_[i]] = write_data_[i];
+                    block_.memory_[write_addresses_[i].get_u64()] = write_data_[i];
                 }
             });
             write_enables_ = 0;
         }
         unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = block_.memory_[read_addresses_[i]];
+            read_data_[i] = block_.memory_[read_addresses_[i].get_u64()];
         });
     }
 

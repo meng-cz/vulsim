@@ -68,6 +68,8 @@ public:
         }
         return t;
     }
+
+    bool fromDefinitionString(const string &def_str);
 };
 
 class VulBundleItem {
@@ -79,6 +81,8 @@ public:
     bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
 
     string checkAndExtractReferences(unordered_set<BundleName> &out_bundle_refs, unordered_set<ConfigName> &out_config_refs) const;
+
+    VulBundleItem calculateConsts(const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides) const;
 };
 
 ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides);

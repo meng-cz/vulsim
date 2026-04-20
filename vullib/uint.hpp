@@ -157,6 +157,19 @@ public:
         return *this;
     }
 
+    FORCE_INLINE constexpr uint64_t get_u64() const {
+        return data[0];
+    }
+    FORCE_INLINE constexpr uint32_t get_u32() const {
+        return static_cast<uint32_t>(data[0]);
+    }
+    FORCE_INLINE constexpr uint16_t get_u16() const {
+        return static_cast<uint16_t>(data[0]);
+    }
+    FORCE_INLINE constexpr uint8_t get_u8() const {
+        return static_cast<uint8_t>(data[0]);
+    }
+
     // Arithmetic operators
     FORCE_INLINE constexpr UInt operator+(const UInt& other) const {
         UInt result;
