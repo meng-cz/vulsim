@@ -1,0 +1,10 @@
+
+#pragma once
+
+#include <defhelper.hpp>
+
+CONST(ADDR_WIDTH, 32);
+CONST(INDEX_WIDTH, 10);
+CONST(TAG_WIDTH, ADDR_WIDTH - INDEX_WIDTH);
+CONST(DATA_WIDTH, 64);
+
