@@ -1,6 +1,4 @@
 
-#pragma once
-
 #include <defhelper.hpp>
 #include <run.hpp>
 
@@ -28,16 +26,19 @@ SERVICE_LOGIC_IMPL(readresp_s1, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data) {
     if (should_hit) {
         if (!hit) {
             printf("%ld: Error: expected a hit but got a miss.\n", test_tick);
+            exit(1);
         } else if (data != expected_data) {
             printf("%ld: Error: expected data 0x%016lx but got 0x%016lx.\n", test_tick, expected_data.data[0], data.data[0]);
+            exit(1);
         } else {
-            printf("%ld: Hit with correct data: 0x%016lx\n", test_tick, data.data[0]);
+            // printf("%ld: Hit with correct data: 0x%016lx\n", test_tick, data.data[0]);
         }
     } else {
         if (hit) {
             printf("%ld: Error: expected a miss but got a hit.\n", test_tick);
+            exit(1);
         } else {
-            printf("%ld: Miss as expected.\n", test_tick);
+            // printf("%ld: Miss as expected.\n", test_tick);
         }
     }
 }
