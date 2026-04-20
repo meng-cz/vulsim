@@ -1026,6 +1026,68 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
     return module;
 }
 
+vector<string> extractIncludes(const vector<string>& code) {
+    vector<string> result;
+
+    for (const auto& line : code) {
+        size_t i = 0;
+        size_t n = line.size();
+
+        // 1. 跳过行首空白
+        while (i < n && isspace(line[i])) i++;
+
+        // 2. 必须以 # 开头
+        if (i >= n || line[i] != '#') continue;
+        i++;
+
+        // 3. 跳过 # 后空白
+        while (i < n && isspace(line[i])) i++;
+
+        // 4. 匹配 include
+        const string keyword = "include";
+        if (i + keyword.size() > n) continue;
+
+        bool match = true;
+        for (size_t k = 0; k < keyword.size(); k++) {
+            if (line[i + k] != keyword[k]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match) continue;
+
+        i += keyword.size();
+
+        // 5. 跳过 include 后空白
+        while (i < n && isspace(line[i])) i++;
+
+        if (i >= n) continue;
+
+        // 6. 解析 <...> 或 "..."
+        if (line[i] == '<') {
+            i++;
+            size_t start = i;
+
+            while (i < n && line[i] != '>') i++;
+
+            if (i < n) {
+                result.emplace_back(line.substr(start, i - start));
+            }
+        } else if (line[i] == '"') {
+            i++;
+            size_t start = i;
+
+            while (i < n && line[i] != '"') i++;
+
+            if (i < n) {
+                result.emplace_back(line.substr(start, i - start));
+            }
+        }
+    }
+
+    return result;
+}
+
 VulTestHarnessModule _parseTestHarnessModule(const vector<string>& code, const ModuleName& name) {
     VulTestHarnessModule module;
     module.name = name;
@@ -1142,6 +1204,28 @@ VulTestHarnessModule _parseTestHarnessModule(const vector<string>& code, const M
                 assert(0);
             }
             module.top_config_overrides[item.args[0]] = item.args[1];
+        }
+    }
+    {
+        // parse #include "xxx"
+        auto includes = extractIncludes(code);
+        // exclude internal includes (defhelper.hpp, header.hpp, testheader.hpp, run.hpp)
+        includes.erase(std::remove_if(includes.begin(), includes.end(), [](const std::string& s) {
+            return s == "defhelper.hpp" || s == "header.hpp" || s == "testheader.hpp" || s == "run.hpp";
+        }), includes.end());
+        module.includedHeaders = includes;
+    }
+    {
+        // parse GLOBAL() { ...}
+        auto matches = _matchMacros(code, "GLOBAL() {");
+        for (const auto& item : matches) {
+            auto block = _findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: GLOBAL() has no body" << std::endl;
+                assert(0);
+            }
+            auto codelines = split(block.content, '\n');
+            module.globalCodes.insert(module.globalCodes.end(), codelines.begin(), codelines.end());
         }
     }
 

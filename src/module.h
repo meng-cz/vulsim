@@ -553,5 +553,8 @@ public:
     vector<CCodeLine> test_codelines;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_cond_codelines;
+
+    vector<string> includedHeaders;
+    vector<string> globalCodes;
 };
 

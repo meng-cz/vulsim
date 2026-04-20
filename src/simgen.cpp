@@ -1642,9 +1642,17 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
     out_lines.push_back("#include \"" + top_module.name + ".hpp\"\n");
     out_lines.push_back("\n");
 
+    for (const auto &includes : test_module.includedHeaders) {
+        out_lines.push_back("#include \"" + includes + "\"\n");
+    }
+    out_lines.push_back("\n");
+
     out_lines.push_back("class VulTestMain {\n");
     out_lines.push_back("protected:\n");
     for (const auto &line : const_field) {
+        out_lines.push_back(line);
+    }
+    for (const auto &line : test_module.globalCodes) {
         out_lines.push_back(line);
     }
     out_lines.push_back("public:\n");
