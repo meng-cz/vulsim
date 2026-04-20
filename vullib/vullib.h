@@ -25,3 +25,4 @@
 #include "uint.hpp"
 #include "pipe.hpp"
 #include "storage.hpp"
+#include "ram.hpp"

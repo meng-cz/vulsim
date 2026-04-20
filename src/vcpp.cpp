@@ -945,6 +945,45 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
         }
 
     }
+    {
+        // parse BRAM
+        auto matches = _matchMacros(code, "BRAM($,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = item.args[3];
+            bram.write_ports = item.args[4];
+            bram.init_path = "";
+            bram.init_hex = false;
+            module.bram_instances[bram.name] = bram;
+        }
+        matches = _matchMacros(code, "BRAM_INIT_H($,$,$,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = item.args[3];
+            bram.write_ports = item.args[4];
+            bram.init_path = item.args[5];
+            bram.init_hex = true;
+            module.bram_instances[bram.name] = bram;
+        }
+        matches = _matchMacros(code, "BRAM_INIT_B($,$,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = item.args[3];
+            bram.write_ports = item.args[4];
+            bram.init_path = item.args[5];
+            bram.init_hex = false;
+            module.bram_instances[bram.name] = bram;
+        }
+    }
 
     printf("Parsed module %s\n", name.c_str());
 

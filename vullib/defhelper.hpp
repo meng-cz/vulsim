@@ -24,6 +24,7 @@
 
 #include <inttypes.h>
 #include <uint.hpp>
+#include <ram.hpp>
 
 #include <array>
 
@@ -77,4 +78,8 @@
 
 #define CONNECT_S_CS(srcserv, dstmod, dstserv) ;
 
+#define BRAM(name, datawidth, addrwidth, readports, writeports) VulBRAM<datawidth, addrwidth, readports, writeports> name;
 
+#define BRAM_INIT_H(name, datawidth, addrwidth, readports, writeports, path) VulBRAM<datawidth, addrwidth, readports, writeports> name(path, true);
+
+#define BRAM_INIT_B(name, datawidth, addrwidth, readports, writeports, path) VulBRAM<datawidth, addrwidth, readports, writeports> name(path, false);

@@ -41,6 +41,7 @@ const string UIntClassName = "UInt";
 const string StorageNextClassName = "VulStorageNext";
 const string StorageNextArrayClassName = "VulStorageNextArray";
 const string PipeClassName = "VulPipe";
+const string BlockRAMClassName = "VulBRAM";
 
 
 enum class PipeImplType {
@@ -1271,6 +1272,28 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
 
         // tick function has been generated above in tick_update_seq
         apply_tick_field.push_back(CodeTab + child_instptr_name + "->" + ApplyTickFunctionName + "();\n");
+    }
+
+    // brams
+    for (const auto &bram_entry : module.bram_instances) {
+        const VulBlockRAM &bram = bram_entry.second;
+        string bram_class = BlockRAMClassName + "<" +
+            replaceLog2CeilChar(bram.data_width) + ", " +
+            replaceLog2CeilChar(bram.addr_width) + ", " + 
+            replaceLog2CeilChar(bram.read_ports) + ", " +
+            replaceLog2CeilChar(bram.write_ports) +
+        ">";
+        string bram_constr_param = "";
+        if (!bram.init_path.empty()) {
+            // strip " from path if exists
+            string init_path = bram.init_path;
+            if (init_path.size() >= 2 && init_path.front() == '"' && init_path.back() == '"') {
+                init_path = init_path.substr(1, init_path.size() - 2);
+            }
+            bram_constr_param = "\"" + init_path + "\", " + (bram.init_hex ? "true" : "false");
+        }
+        member_field.push_back(bram_class + " " + bram_entry.first + "{" + bram_constr_param + "};\n");
+        apply_tick_field.push_back(CodeTab + bram_entry.first + "." + ApplyTickFunctionName + "();\n");
     }
 
     // preparation done, start generating code lines

@@ -355,6 +355,16 @@ inline bool isCodeLineEmpty(const vector<CCodeLine> &codelines) {
     return true;
 }
 
+struct VulBlockRAM {
+    InstanceName name;
+    ConfigValue data_width;
+    ConfigValue addr_width;
+    ConfigValue read_ports;
+    ConfigValue write_ports;
+    string init_path;
+    bool init_hex;
+};
+
 class VulModule : public VulModuleBase {
 public:
 
@@ -381,6 +391,8 @@ public:
 
     unordered_map<InstanceName, VulInstance>    instances;
     unordered_map<InstanceName, VulPipe>        pipe_instances;
+
+    unordered_map<InstanceName, VulBlockRAM>    bram_instances;
 
     struct ReqServConnHash {
         size_t operator()(const VulReqServConnection &conn) const {

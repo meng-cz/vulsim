@@ -112,6 +112,8 @@ int main(int argc, char * argv[]) {
     }
     writeLinesToFile(code_lines, (out_path / "bundle.h").string());
 
+    vector<string> resource_files;
+
     // gen module
     for (const auto &mod_entry : project.modulelib->modules) {
         shared_ptr<VulModule> mod_ptr = dynamic_pointer_cast<VulModule>(mod_entry.second);
@@ -125,6 +127,24 @@ int main(int argc, char * argv[]) {
             return 1;
         }
         writeLinesToFile(code_lines, (out_path / (mod_entry.first + ".hpp")).string());
+        // find bram init files as resource files
+        for (const auto &bram_entry : mod_ptr->bram_instances) {
+            const VulBlockRAM &bram = bram_entry.second;
+            if (!bram.init_path.empty()) {
+                resource_files.push_back(bram.init_path);
+            }
+        }
+    }
+
+    // copy resource files to output directory
+    for (const auto &res_file : resource_files) {
+        std::filesystem::path src_file = proj_dir / res_file;
+        if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
+            std::cerr << "Error: Resource file does not exist: " << src_file << std::endl;
+            return 1;
+        }
+        std::filesystem::path dst_file = out_path / src_file.filename();
+        std::filesystem::copy_file(src_file, dst_file);
     }
 
     // gen test harness module
@@ -170,6 +190,7 @@ int main(int argc, char * argv[]) {
         "pipe.hpp",
         "storage.hpp",
         "uint.hpp",
+        "ram.hpp",
     };
     std::filesystem::path lib_path(lib_dir);
     if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
