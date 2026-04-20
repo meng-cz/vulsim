@@ -1636,7 +1636,7 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
     out_lines.push_back("#include \"config.h\"\n");
     out_lines.push_back("#include \"bundle.h\"\n");
     out_lines.push_back("#include \"vullib.h\"\n");
-    out_lines.push_back("#include \"testheader.h\"\n");
+    out_lines.push_back("#include \"testheader.hpp\"\n");
     out_lines.push_back("\n");
 
     out_lines.push_back("#include \"" + top_module.name + ".hpp\"\n");
