@@ -148,6 +148,20 @@ int main(int argc, char * argv[]) {
         writeLinesToFile(code_lines, (out_path / ("VulTestMain.hpp")).string());
     }
 
+    // copy or gen testheader.hpp
+    std::filesystem::path src_testheader = proj_dir / "testheader.hpp";
+    std::filesystem::path dst_testheader = out_path / "testheader.hpp";
+    if (std::filesystem::exists(src_testheader) && std::filesystem::is_regular_file(src_testheader)) {
+        std::filesystem::copy_file(src_testheader, dst_testheader);
+    } else {
+        // generate a empty testheader.hpp
+        std::ofstream testheader_file(dst_testheader.string());
+        if (testheader_file.is_open()) {
+            testheader_file << "// Empty test header file\n";
+            testheader_file.close();
+        }
+    }
+
     // copy vullib runtime files to output directory
     vector<std::string> runtime_files = {
         "common.h",
@@ -181,6 +195,15 @@ int main(int argc, char * argv[]) {
     }
     build_script << "#!/bin/bash\necho \"Building " << project.name << "\"\n" << build_cmd << "\n";
     build_script.close();
+
+    string build_cmd_o3 = "g++ -std=c++20 -O3 main.cpp -o " + project.name + "_O3";
+    std::ofstream build_script_o3((out_path / "build_O3.sh").string());
+    if (!build_script_o3.is_open()) {
+        std::cerr << "Error: Failed to create O3 build script." << std::endl;
+        return 1;
+    }
+    build_script_o3 << "#!/bin/bash\necho \"Building " << project.name << " with O3 optimization\"\n" << build_cmd_o3 << "\n";
+    build_script_o3.close();
 
     return 0;
 }
