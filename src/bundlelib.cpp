@@ -404,9 +404,3 @@ bool VulBundleMember::fromDefinitionString(const string &def_str) {
 
     return true;
 }
-
-VulBundleItem VulBundleItem::calculateConsts(const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides) const {
-    
-
-
-}
