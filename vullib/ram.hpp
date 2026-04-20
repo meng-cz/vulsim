@@ -36,85 +36,31 @@
 using std::array;
 using std::vector;
 
-template <uint32_t DataWidth, uint32_t AddrWidth, uint32_t ReadPorts, uint32_t WritePorts>
-class VulBRAM {
+template <uint32_t DataWidth, uint32_t AddrWidth>
+class VulBRAMImpl {
 public:
+
+    VulBRAMImpl() {
+        memory_.fill(DataType(0));
+    }
+    VulBRAMImpl(const std::string &init_path, bool is_hex) {
+        if (is_hex) {
+            init_from_readmemh(init_path);
+        } else {
+            init_from_readmemb(init_path);
+        }
+    }
 
     static_assert(DataWidth > 0, "DataWidth must be greater than 0");
     static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
-    static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
-    static_assert(WritePorts > 0, "WritePorts must be greater than 0");
-    static_assert(WritePorts < 64, "WritePorts must be less than 64");
 
     using DataType = UInt<DataWidth>;
     using AddrType = UInt<AddrWidth>;
 
-protected:
-
     array<DataType, 1ULL << AddrWidth> memory_;
 
-    array<AddrType, ReadPorts> read_addresses_;
-    array<DataType, ReadPorts> read_data_;
-
-    array<AddrType, WritePorts> write_addresses_;
-    array<DataType, WritePorts> write_data_;
-    uint64_t write_enables_; // 每个位对应一个写端口，1表示该端口有效
-
-    template<int I, int N>
-    inline void unroll_loop(auto&& f) {
-        if constexpr (I < N) {
-            f(std::integral_constant<int, I>{});
-            unroll_loop<I + 1, N>(f);
-        }
-    }
-
-public:
-    VulBRAM() : write_enables_(0) {}
-
-    VulBRAM(const string &path, bool hex) : write_enables_(0) {
-        if (hex) {
-            init_from_readmemh(path);
-        } else {
-            init_from_readmemb(path);
-        }
-    }
-
-    template <uint32_t PortIndex>
-    void readreq(const AddrType &addr) {
-        static_assert(PortIndex < ReadPorts, "Read port index out of range");
-        read_addresses_[PortIndex] = addr;
-    }
-
-    template <uint32_t PortIndex>
-    void readdata(DataType &data) const {
-        static_assert(PortIndex < ReadPorts, "Read port index out of range");
-        data = read_data_[PortIndex];
-    }
-
-    template <uint32_t PortIndex>
-    void write(const AddrType &addr, const DataType &data) {
-        static_assert(PortIndex < WritePorts, "Write port index out of range");
-        write_addresses_[PortIndex] = addr;
-        write_data_[PortIndex] = data;
-        write_enables_ |= 1ULL << PortIndex;
-    }
-
-    void apply_next_tick() {
-        if (write_enables_ != 0) {
-            unroll_loop<0, WritePorts>([&](auto i) {
-                if (write_enables_ & (1ULL << i)) {
-                    memory_[write_addresses_[i]] = write_data_[i];
-                }
-            });
-            write_enables_ = 0;
-        }
-        unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = memory_[read_addresses_[i]];
-        });
-    }
-
 protected:
-
+    
     void init_from_readmemh(const std::string &path, bool strict_width = false) {
         std::ifstream fin(path);
         if (!fin) {
@@ -331,5 +277,122 @@ protected:
         }
     }
 }
+
+};
+
+
+template <uint32_t DataWidth, uint32_t AddrWidth>
+class VulBRAM1RW {
+public:
+    static_assert(DataWidth > 0, "DataWidth must be greater than 0");
+    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+
+    using DataType = UInt<DataWidth>;
+    using AddrType = UInt<AddrWidth>;
+
+protected:
+
+    VulBRAMImpl block_;
+
+    AddrType addr_;
+    DataType write_data_;
+    DataType read_data_;
+    bool write_en_;
+
+public:
+    VulBRAM1RW() : write_en_(false) {}
+
+    VulBRAM1RW(const string &path, bool hex) : write_en_(false), block_(path, hex) {}
+
+    void req(const AddrType &addr, const DataType &write_data, bool write_en) {
+        addr_ = addr;
+        write_data_ = write_data;
+        write_en_ = write_en;
+    }
+
+    const DataType readdata() const {
+        return read_data_;
+    }
+
+    void apply_next_tick() {
+        if (write_en_) {
+            block_.memory_[addr_] = write_data_;
+        }
+        read_data_ = block_.memory_[addr_];
+    }
+};
+
+template <uint32_t DataWidth, uint32_t AddrWidth, uint32_t ReadPorts, uint32_t WritePorts>
+class VulBRAM {
+public:
+
+    static_assert(DataWidth > 0, "DataWidth must be greater than 0");
+    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
+    static_assert(WritePorts > 0, "WritePorts must be greater than 0");
+    static_assert(WritePorts < 64, "WritePorts must be less than 64");
+
+    using DataType = UInt<DataWidth>;
+    using AddrType = UInt<AddrWidth>;
+
+protected:
+
+    VulBRAMImpl block_;
+
+    array<AddrType, ReadPorts> read_addresses_;
+    array<DataType, ReadPorts> read_data_;
+
+    array<AddrType, WritePorts> write_addresses_;
+    array<DataType, WritePorts> write_data_;
+    uint64_t write_enables_; // 每个位对应一个写端口，1表示该端口有效
+
+    template<int I, int N>
+    inline void unroll_loop(auto&& f) {
+        if constexpr (I < N) {
+            f(std::integral_constant<int, I>{});
+            unroll_loop<I + 1, N>(f);
+        }
+    }
+
+public:
+    VulBRAM() : write_enables_(0) {}
+
+    VulBRAM(const string &path, bool hex) : write_enables_(0), block_(path, hex) {}
+
+    template <uint32_t PortIndex>
+    void readreq(const AddrType &addr) {
+        static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        read_addresses_[PortIndex] = addr;
+    }
+
+    template <uint32_t PortIndex>
+    const DataType readdata() const {
+        static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        return read_data_[PortIndex];
+    }
+
+    template <uint32_t PortIndex>
+    void write(const AddrType &addr, const DataType &data) {
+        static_assert(PortIndex < WritePorts, "Write port index out of range");
+        write_addresses_[PortIndex] = addr;
+        write_data_[PortIndex] = data;
+        write_enables_ |= 1ULL << PortIndex;
+    }
+
+    void apply_next_tick() {
+        if (write_enables_ != 0) {
+            unroll_loop<0, WritePorts>([&](auto i) {
+                if (write_enables_ & (1ULL << i)) {
+                    block_.memory_[write_addresses_[i]] = write_data_[i];
+                }
+            });
+            write_enables_ = 0;
+        }
+        unroll_loop<0, ReadPorts>([&](auto i) {
+            read_data_[i] = block_.memory_[read_addresses_[i]];
+        });
+    }
+
+protected:
 
 };

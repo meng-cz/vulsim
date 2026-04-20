@@ -83,3 +83,10 @@
 #define BRAM_INIT_H(name, datawidth, addrwidth, readports, writeports, path) VulBRAM<datawidth, addrwidth, readports, writeports> name(path, true);
 
 #define BRAM_INIT_B(name, datawidth, addrwidth, readports, writeports, path) VulBRAM<datawidth, addrwidth, readports, writeports> name(path, false);
+
+#define BRAM_1RW(name, datawidth, addrwidth) VulBRAM1RW<datawidth, addrwidth> name;
+
+#define BRAM_1RW_INIT_H(name, datawidth, addrwidth, path) VulBRAM1RW<datawidth, addrwidth> name(path, true);
+
+#define BRAM_1RW_INIT_B(name, datawidth, addrwidth, path) VulBRAM1RW<datawidth, addrwidth> name(path, false);
+

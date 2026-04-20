@@ -42,6 +42,7 @@ const string StorageNextClassName = "VulStorageNext";
 const string StorageNextArrayClassName = "VulStorageNextArray";
 const string PipeClassName = "VulPipe";
 const string BlockRAMClassName = "VulBRAM";
+const string BlockRAM1RWClassName = "VulBRAM1RW";
 
 
 enum class PipeImplType {
@@ -1277,12 +1278,18 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     // brams
     for (const auto &bram_entry : module.bram_instances) {
         const VulBlockRAM &bram = bram_entry.second;
-        string bram_class = BlockRAMClassName + "<" +
+        string bram_class = "";
+        if (bram.read_ports.empty() || bram.write_ports.empty()) {
+            bram_class = BlockRAM1RWClassName + "<" +
+                replaceLog2CeilChar(bram.data_width) + ", " +
+                replaceLog2CeilChar(bram.addr_width) + ">";
+        } else {
+            bram_class = BlockRAMClassName + "<" +
             replaceLog2CeilChar(bram.data_width) + ", " +
             replaceLog2CeilChar(bram.addr_width) + ", " + 
             replaceLog2CeilChar(bram.read_ports) + ", " +
-            replaceLog2CeilChar(bram.write_ports) +
-        ">";
+            replaceLog2CeilChar(bram.write_ports) + ">";
+        }
         string bram_constr_param = "";
         if (!bram.init_path.empty()) {
             // strip " from path if exists
