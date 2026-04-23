@@ -728,14 +728,18 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             storage.type = item.args[1];
             module.storagenexts[storage.name] = storage;
         }
-        matches = _matchMacros(code, "REGISTER_ARRAY1($,$,$)");
+        matches = _matchMacros(code, "REGISTER_ARRAY1($,$,$,$)");
         for (const auto& item : matches) {
             VulStorage storage;
             storage.name = item.args[0];
             storage.comment = "";
             storage.type = item.args[1];
             storage.dims.push_back(item.args[2]);
+            uint32_t mul = std::stoul(item.args[3]);
             module.storagenexts[storage.name] = storage;
+            if (mul > 1) {
+                module.storagenext_ports[storage.name] = mul;
+            }
         }
         matches = _matchMacros(code, "REGISTER_INIT($,$,$)");
         for (const auto& item : matches) {

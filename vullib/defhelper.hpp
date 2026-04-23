@@ -45,9 +45,9 @@
 
 #define REGISTER_INIT(name, type, init) VulStorageNext<type> name(init); const type & name##_get(); void name##_setnext(const type& next);
 
-#define REGISTER_ARRAY1(name, type, N) const std::array<type, N> name; void name##_setnext(const uint64_t idx, const type& next);
+#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; const type & name##_get(); void name##_setnext(const type& next); void name##_setnext(const type& next, int port);
 
-#define REGISTER_MUL(name, type, portnum) const type name; void name##_setnext(const type& next); void name##_setnext(const type& next, int port);
+#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void name##_setnext(const uint64_t idx, const type& next); void name##_setnext(const uint64_t idx, const type& next, int port);
 
 #define WIRE(name, type, init) type name = init;
 

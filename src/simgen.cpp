@@ -1014,16 +1014,19 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         if (!sto.uint_length.empty()) {
             base_type = UIntClassName + "<" + replaceLog2CeilChar(sto.uint_length) + ">";
         }
-        if (port_num > 1) {
-            base_type = base_type + ", " + std::to_string(port_num);
-        }
         if (!sto.dims.empty()) {
             type_str += StorageNextArrayClassName + "<" + base_type;
             for (const auto &dim : sto.dims) {
                 type_str += "," + replaceLog2CeilChar(dim);
             }
+            if (port_num > 1) {
+                type_str = type_str + ", " + std::to_string(port_num);
+            }
             type_str += ">";
         } else {
+            if (port_num > 1) {
+                base_type = base_type + ", " + std::to_string(port_num);
+            }
             type_str = StorageNextClassName + "<" + base_type + ">";
         }
         return type_str;
