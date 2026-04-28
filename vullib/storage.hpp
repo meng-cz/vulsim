@@ -37,10 +37,10 @@ public:
     static_assert(WRPortNum < 64, "WRPortNum must be less than 64");
 
     VulStorageNextImpl() : data_() {
-        next_buffer_.fill(T{});
+        next_.fill(T{});
     }
     VulStorageNextImpl(const T &initial_value) : data_(initial_value) {
-        next_buffer_.fill(initial_value);
+        next_.fill(initial_value);
     }
 
     void setnext(const T &value, uint32_t priority) {
