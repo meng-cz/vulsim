@@ -233,16 +233,32 @@ public:
         return result;
     }
 
-    FORCE_INLINE constexpr UInt operator*(const UInt& other) const {
-        UInt result;
+    template <uint32_t OtherBitWidth>
+    FORCE_INLINE constexpr UInt<BitWidth + OtherBitWidth> operator*(const UInt<OtherBitWidth>& other) const {
+        UInt<BitWidth + OtherBitWidth> result;
+        const auto& other_data = other.get_data();
+        constexpr uint32_t OTHER_NUM_WORDS = UInt<OtherBitWidth>::NUM_WORDS;
+
         for (uint32_t i = 0; i < NUM_WORDS; ++i) {
-            uint64_t carry = 0;
-            for (uint32_t j = 0; j < NUM_WORDS - i; ++j) {
-                __int128 prod = (__int128)data[i] * other.data[j] + result.data[i + j] + carry;
-                result.data[i + j] = prod;
-                carry = prod >> 64;
+            unsigned __int128 carry = 0;
+            for (uint32_t j = 0; j < OTHER_NUM_WORDS; ++j) {
+                const uint32_t idx = i + j;
+                unsigned __int128 acc =
+                    static_cast<unsigned __int128>(data[i]) * other_data[j] +
+                    result.data[idx] + carry;
+                result.data[idx] = static_cast<uint64_t>(acc);
+                carry = acc >> 64;
+            }
+
+            uint32_t k = i + OTHER_NUM_WORDS;
+            while (carry != 0 && k < UInt<BitWidth + OtherBitWidth>::NUM_WORDS) {
+                unsigned __int128 acc = static_cast<unsigned __int128>(result.data[k]) + carry;
+                result.data[k] = static_cast<uint64_t>(acc);
+                carry = acc >> 64;
+                ++k;
             }
         }
+
         result.mask_high_bits();
         return result;
     }

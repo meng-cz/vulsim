@@ -105,7 +105,8 @@ void test_arithmetic_and_bitwise_for_width(u128 lhs, u128 rhs, uint32_t shl, uin
 
     expect_value(a + b, (lhs + rhs) & mask);
     expect_value(a - b, (lhs - rhs) & mask);
-    expect_value(a * b, (lhs * rhs) & mask);
+    UInt<BitWidth> mul_trunc = a * b;
+    expect_value(mul_trunc, (lhs * rhs) & mask);
 
     expect_value(a & b, lhs & rhs);
     expect_value(a | b, lhs | rhs);
@@ -121,6 +122,36 @@ void test_arithmetic_and_bitwise_for_width(u128 lhs, u128 rhs, uint32_t shl, uin
     assert((a <= b) == (lhs <= rhs));
     assert((a > b) == (lhs > rhs));
     assert((a >= b) == (lhs >= rhs));
+}
+
+void test_multiplication_full_width_and_cross_width() {
+    {
+        UInt<8> a = 0xff;
+        UInt<16> b = 0xabcd;
+        auto p = a * b;
+        static_assert(std::is_same_v<decltype(p), UInt<24>>);
+        expect_value(p, u128(0xff) * u128(0xabcd));
+    }
+
+    {
+        UInt<64> a = 0xffffffffffffffffULL;
+        UInt<64> b = 2;
+        auto p = a * b;
+        static_assert(std::is_same_v<decltype(p), UInt<128>>);
+        expect_value(p, (u128(0xffffffffffffffffULL) * 2));
+        assert(static_cast<bool>(p(64)));
+    }
+
+    {
+        UInt<80> a = 0;
+        a(79) = true;
+        UInt<48> b = 0;
+        b(47) = true;
+        auto p = a * b;
+        static_assert(std::is_same_v<decltype(p), UInt<128>>);
+        assert(static_cast<bool>(p(126)));
+        assert(!static_cast<bool>(p(127)));
+    }
 }
 
 void test_arithmetic_and_bitwise() {
@@ -199,6 +230,7 @@ int main() {
     test_default_and_integer_construction();
     test_cross_width_construction_and_assignment();
     test_arithmetic_and_bitwise();
+    test_multiplication_full_width_and_cross_width();
     test_slice_and_bit_access();
     test_shift_boundaries();
 
