@@ -420,23 +420,26 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
     }
     const string tick_func_name = "tick_impl";
     {
+        uint32_t tick_impl_count = 0;
         // parse TICK_IMPL
         auto matches = matchMacros(code, "TICK_IMPL()");
         if (!matches.empty()) {
-            auto block = findNextBraceBlock(code, matches[0].pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                std::cerr << "Error: TICK_IMPL has no body" << std::endl;
-                assert(0);
+            for (const auto & match : matches) {
+                auto block = findNextBraceBlock(code, match.pos, '{', '}', true);
+                if (block.end_pos.line == -1) {
+                    std::cerr << "Error: TICK_IMPL has no body" << std::endl;
+                    assert(0);
+                }
+                VulTickCodeBlock tick_block;
+                tick_block.codelines = split(block.content, '\n');
+                tick_block.name = tick_func_name + std::to_string(tick_impl_count++);
+                module.user_tick_codeblocks[tick_block.name] = tick_block;
             }
-            VulTickCodeBlock tick_block;
-            tick_block.codelines = split(block.content, '\n');
-            tick_block.name = tick_func_name;
-            module.user_tick_codeblocks[tick_block.name] = tick_block;
         } else {
             // 没有提供 TICK_IMPL，使用默认空实现
             VulTickCodeBlock tick_block;
             tick_block.codelines = {};
-            tick_block.name = tick_func_name;
+            tick_block.name = tick_func_name + std::to_string(tick_impl_count++);
             module.user_tick_codeblocks[tick_block.name] = tick_block;
         }
     }
