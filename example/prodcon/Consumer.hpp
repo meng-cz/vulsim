@@ -11,8 +11,12 @@
 
 // Register
 
-REGISTER_INIT(cycle, uint8_t, 0);
-REGISTER_INIT(sum, uint8_t, 0);
+REGISTER(cycle, uint8_t) {
+    cycle = 0;
+}
+REGISTER(sum, uint8_t) {
+    sum = 0;
+}
 
 // Port
 

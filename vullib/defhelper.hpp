@@ -22,6 +22,12 @@
 
 #pragma once
 
+/**
+ * The contents of this header file are only used to assist in syntax checking
+ * and code completion during coding, and have no connection to the final
+ * runtime semantics.
+ */
+
 #include <inttypes.h>
 #include <uint.hpp>
 #include <ram.hpp>
@@ -41,13 +47,11 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) VulStorageNext<type> name; const type & name##_get(); void name##_setnext(const type& next);
+#define REGISTER(name, type) VulStorageNext<type> name; const type & name##_get(); void name##_setnext(const type& next); void name##_reset(type& name)
 
-#define REGISTER_INIT(name, type, init) VulStorageNext<type> name(init); const type & name##_get(); void name##_setnext(const type& next);
+#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; const type & name##_get(); void name##_setnext(const type& next); void name##_setnext(const type& next, int port); void name##_reset(type& name)
 
-#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; const type & name##_get(); void name##_setnext(const type& next); void name##_setnext(const type& next, int port);
-
-#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void name##_setnext(const uint64_t idx, const type& next); void name##_setnext(const uint64_t idx, const type& next, int port);
+#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void name##_setnext(const uint64_t idx, const type& next); void name##_setnext(const uint64_t idx, const type& next, int port); void name##_reset(type name[size])
 
 #define WIRE(name, type, init) type name = init;
 

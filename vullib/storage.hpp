@@ -36,13 +36,6 @@ public:
     static_assert(WRPortNum >= 1, "WRPortNum must be at least 1");
     static_assert(WRPortNum < 64, "WRPortNum must be less than 64");
 
-    VulStorageNextImpl() : data_() {
-        next_.fill(T{});
-    }
-    VulStorageNextImpl(const T &initial_value) : data_(initial_value) {
-        next_.fill(initial_value);
-    }
-
     void setnext(const T &value, uint32_t priority) {
         assert(priority < WRPortNum);
         if (priority < pending_write_ports_) {
@@ -64,6 +57,12 @@ public:
         pending_write_ports_ = WRPortNum;
     }
 
+    void reset(const T &value) {
+        data_ = value;
+        next_ = value;
+        pending_write_ports_ = WRPortNum;
+    }
+
 protected:
     T data_;
     T next_;
@@ -74,9 +73,6 @@ template<typename T>
 class VulStorageNextImpl1 {
 
 public:
-    VulStorageNextImpl1() : data_(), next_buffer_() {}
-    VulStorageNextImpl1(const T &initial_value) : data_(initial_value), next_buffer_(initial_value) {}
-
     void setnext(const T &value, uint32_t priority) {
         next_buffer_ = value;
     }
@@ -87,6 +83,11 @@ public:
 
     operator const T&() const {
         return data_;
+    }
+
+    void reset(const T &value) {
+        data_ = value;
+        next_buffer_ = value;
     }
 
 protected:
@@ -103,9 +104,6 @@ class VulStorageNext {
     ImplType impl_;
 
 public:
-    VulStorageNext() : impl_() {}
-    VulStorageNext(const T &initial_value) : impl_(initial_value) {}
-
     void setnext(const T &value, uint32_t priority) {
         impl_.setnext(value, priority);
     }
@@ -121,6 +119,9 @@ public:
     operator const T&() const {
         return impl_;
     }
+    void reset(const T &value) {
+        impl_.reset(value);
+    }
 };
 
 template<typename T, uint32_t Size, uint32_t WRPortNum = 1>
@@ -134,13 +135,6 @@ protected:
     std::array<VulStorageNext<T, WRPortNum>, Size> data_;
 
 public:
-    VulStorageNextArrayFullImpl() : data_() {}
-    VulStorageNextArrayFullImpl(const T &initial_value) {
-        for (auto &elem : data_) {
-            elem = VulStorageNext<T, WRPortNum>(initial_value);
-        }
-    }
-
     void setnext(const uint32_t index, const T &value, uint32_t priority) {
         assert(index < Size);
         data_[index].setnext(value, priority);
@@ -157,6 +151,16 @@ public:
     const T& operator[](uint32_t index) const {
         assert(index < Size);
         return data_[index].get();
+    }
+    void reset(const T &value) {
+        for (auto &elem : data_) {
+            elem.reset(value);
+        }
+    }
+    void reset(const array<T, Size> &values) {
+        for (uint32_t i = 0; i < Size; i++) {
+            data_[i].reset(values[i]);
+        }
     }
 
 };
@@ -223,6 +227,28 @@ public:
         assert(index < Size);
         return curr_[index];
     }
+    void reset(const T &value) {
+        for (auto &elem : curr_) {
+            elem = value;
+        }
+        for (auto &slot : pending_) {
+            slot.value = value;
+            slot.best_prio = WRPortNum;
+            slot.has_write = false;
+        }
+        dirty_count_ = 0;
+        dirty_flags_.fill(0);
+    }
+    void reset(const array<T, Size> &values) {
+        for (uint32_t i = 0; i < Size; i++) {
+            curr_[i] = values[i];
+            pending_[i].value = values[i];
+            pending_[i].best_prio = WRPortNum;
+            pending_[i].has_write = false;
+            dirty_flags_[i] = 0;
+        }
+        dirty_count_ = 0;
+    }
 };
 
 template<typename T, uint32_t Size, uint32_t WRPortNum = 1>
@@ -252,6 +278,12 @@ public:
     }
     const T& operator[](uint32_t index) const {
         return impl_[index];
+    }
+    void reset(const T &value) {
+        impl_.reset(value);
+    }
+    void reset(const array<T, Size> &values) {
+        impl_.reset(values);
     }
 };
 
@@ -392,5 +424,5 @@ public:
 } // namespace vulstorage
 
 using vulstorage::VulStorageNext;
-// using vulstorage::VulStorageNextArray;
+using vulstorage::VulStorageNextArray;
 

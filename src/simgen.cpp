@@ -744,6 +744,8 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     vector<string> init_field;
     vector<string> member_field;
     vector<string> local_bundle_field;
+    vector<string> sys_rst_field;
+    vector<string> reg_rst_field;
     string constructor_list;
 
     const ModuleName &mod_name = module.name;
@@ -1038,12 +1040,17 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
             member_field.push_back("// " + line + "\n");
         }
         string line = _genStoTypeNormal(sto) + " " + sto_entry.first;
-        if (!sto.value.empty()) {
-            line += " = " + replaceLog2CeilChar(sto.value);
-        }
         line += ";\n";
         member_field.push_back(line);
         member_field.push_back("\n");
+        auto resetcode_iter = module.storage_reset_codelines.find(sto_entry.first);
+        if (resetcode_iter != module.storage_reset_codelines.end()) {
+            reg_rst_field.push_back("{\n");
+            for (const auto &line : resetcode_iter->second) {
+                reg_rst_field.push_back(CodeTab + line);
+            }
+            reg_rst_field.push_back("}\n");
+        }
     }
     // generate next-state storage members
     for (const auto &sto_entry : module.storagenexts) {
@@ -1066,6 +1073,16 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         member_field.push_back("}\n");
         member_field.push_back("\n");
         apply_tick_field.push_back(CodeTab + sto_entry.first + "." + ApplyTickFunctionName + "();\n");
+        auto resetcode_iter = module.storage_reset_codelines.find(sto_entry.first);
+        if (resetcode_iter != module.storage_reset_codelines.end()) {
+            reg_rst_field.push_back("{\n");
+            reg_rst_field.push_back(CodeTab + _genStoTypeNormal(sto) + " " + sto_entry.first + ";\n");
+            for (const auto &line : resetcode_iter->second) {
+                reg_rst_field.push_back(CodeTab + line);
+            }
+            reg_rst_field.push_back(CodeTab + "this->" + sto_entry.first + ".reset(" + sto_entry.first + ");\n");
+            reg_rst_field.push_back("}\n");
+        }
     }
     // generate tmp storage members
     for (const auto &sto_entry : module.storagetmp) {
@@ -1077,6 +1094,14 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         member_field.push_back(_genStoTypeNormal(sto) + " " + statement);
         member_field.push_back("\n");
         apply_tick_field.push_back(CodeTab + statement);
+        auto resetcode_iter = module.storage_reset_codelines.find(sto_entry.first);
+        if (resetcode_iter != module.storage_reset_codelines.end()) {
+            reg_rst_field.push_back("{\n");
+            for (const auto &line : resetcode_iter->second) {
+                reg_rst_field.push_back(CodeTab + line);
+            }
+            reg_rst_field.push_back("}\n");
+        }
     }
 
     // generate pipe instance
@@ -1163,6 +1188,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
             }
             child_class_name += ">";
         }
+        sys_rst_field.push_back(CodeTab + child_instptr_name + "->reset();\n");
 
         member_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instptr_name + ";\n");
 
@@ -1371,6 +1397,7 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     out_lines.push_back("explicit " + mod_name + "(const ConstructorParams & __params) : \n");
     out_lines.push_back(CodeTab + CodeTab + "__params(__params)" + constructor_list + " {\n");
     out_lines.push_back(CodeTab + "__init();\n");
+    out_lines.push_back(CodeTab + "__reset();\n");
     out_lines.push_back("}\n");
 
     // Tick function
@@ -1396,6 +1423,15 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         out_lines.push_back(line);
     }
     out_lines.push_back(CodeTab + "__stall_propagate_out();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    // Reset function
+    out_lines.push_back("FORCE_INLINE void reset() {\n");
+    out_lines.push_back(CodeTab + "__reset();\n");
+    for (const auto &line : sys_rst_field) {
+        out_lines.push_back(line);
+    }
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
 
@@ -1433,6 +1469,14 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
     for (const auto &line : member_field) {
         out_lines.push_back(line);
     }
+
+    // Reset Funciton
+    out_lines.push_back("FORCE_INLINE void __reset() {\n");
+    for (const auto &line : reg_rst_field) {
+        out_lines.push_back(line);
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
 
     // Private members (User-defined members)
     out_lines.push_back("private:\n");
@@ -1692,6 +1736,11 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
 
     out_lines.push_back("void sim_commit() {\n");
     out_lines.push_back(CodeTab + child_instptr_name + "->" + ApplyTickFunctionName + "();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("void sim_reset() {\n");
+    out_lines.push_back(CodeTab + child_instptr_name + "->reset();\n");
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
 

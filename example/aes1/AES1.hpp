@@ -11,9 +11,11 @@
 
 // Register
 
-REGISTER(d, AESData);
-REGISTER(k, AESKey);
-REGISTER_INIT(state, uint32_t, 0);
+REGISTER(d, AESData) {}
+REGISTER(k, AESKey) {}
+REGISTER(state, uint32_t) {
+    state = 0;
+}
 
 WIRE(inputed, bool, false);
 
@@ -47,31 +49,37 @@ TICK_IMPL() {
 
     constexpr uint8_t RC[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36};
 
-    auto aes128_round = [](AESData &data, AESKey &round_key, uint8_t rc, bool final) {
-        auto shift_rows = [](AESData& data) {
-            uint8_t temp = 0;
-            temp        = data[1];
-            data[1]    = data[5];
-            data[5]    = data[9];
-            data[9]    = data[13];
-            data[13]   = temp;
-            temp        = data[2];
-            data[2]    = data[10];
-            data[10]   = temp;
-            temp        = data[6];
-            data[6]    = data[14];
-            data[14]   = temp;
-            temp        = data[3];
-            data[3]    = data[7];
-            data[7]    = data[11];
-            data[11]   = data[15];
-            data[15]   = temp;
-        };
-        auto mul2 = [](uint8_t x) {
-            uint8_t m = -(x >> 7);
-            return (x << 1) ^ (0x1b & m);
-        };
-        uint8_t t0 = SBOX[round_key[13]] ^ rc;
+    auto shift_rows = [](AESData& data) {
+        uint8_t temp = 0;
+        temp        = data[1];
+        data[1]    = data[5];
+        data[5]    = data[9];
+        data[9]    = data[13];
+        data[13]   = temp;
+        temp        = data[2];
+        data[2]    = data[10];
+        data[10]   = temp;
+        temp        = data[6];
+        data[6]    = data[14];
+        data[14]   = temp;
+        temp        = data[3];
+        data[3]    = data[7];
+        data[7]    = data[11];
+        data[11]   = data[15];
+        data[15]   = temp;
+    };
+    auto mul2 = [](uint8_t x) {
+        uint8_t m = -(x >> 7);
+        return (x << 1) ^ (0x1b & m);
+    };
+
+
+    uint32_t state_next = 0;
+    if (state > 0 && state <= 10) {
+        AESData data = d;
+        AESKey round_key = k;
+
+        uint8_t t0 = SBOX[round_key[13]] ^ RC[state-1];
         uint8_t t1 = SBOX[round_key[14]];
         uint8_t t2 = SBOX[round_key[15]];
         uint8_t t3 = SBOX[round_key[12]];
@@ -90,7 +98,7 @@ TICK_IMPL() {
             tmp[i] = SBOX[data[i]];
         }
         shift_rows(tmp);
-        if (!final) {
+        if (state != 10) {
             for (uint32_t i = 0; i < 16; i+=4) {
                 uint8_t t = tmp[i] ^ tmp[i+1] ^ tmp[i+2] ^ tmp[i+3];
                 data[i] = mul2(tmp[i]  ^ tmp[i+1]) ^ tmp[i]   ^ t;
@@ -102,18 +110,12 @@ TICK_IMPL() {
         for (uint32_t i = 0; i < 16; ++i) {
             data[i] ^= round_key[i];
         }
-    };
 
-    uint32_t state_next = 0;
-    if (state > 0 && state <= 10) {
-        AESData data = d;
-        AESKey roundkey = k;
-        aes128_round(data, roundkey, RC[state-1], (state == 10));
         if (state == 10) {
             output(data);
         } else {
             d_setnext(data);
-            k_setnext(roundkey);
+            k_setnext(round_key);
             state_next = state + 1;
         }
     }

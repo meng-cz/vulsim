@@ -14,18 +14,15 @@ STRUCT(ReadStageReg) {
     bool valid = false;
 };
 
-STRUCT(RefillStageReg) {
-    UInt<ADDR_WIDTH> addr;
-    UInt<DATA_WIDTH> data;
-    bool valid = false;
-};
-
 // Register
 
 BRAM(tag_array, TAG_WIDTH + 1, INDEX_WIDTH, 1, 1);
 BRAM(data_array, DATA_WIDTH, INDEX_WIDTH, 1, 1);
 
-REGISTER(read_stage, ReadStageReg);
+REGISTER(read_stage, ReadStageReg) {
+    read_stage.addr = 0;
+    read_stage.valid = false;
+}
 
 WIRE(read_inputed, bool, false);
 

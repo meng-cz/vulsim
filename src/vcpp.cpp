@@ -311,6 +311,10 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             storage.comment = "";
             storage.type = item.args[1];
             module.storagenexts[storage.name] = storage;
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                module.storage_reset_codelines[storage.name] = split(block.content, '\n');
+            }
         }
         matches = matchMacros(code, "REGISTER_ARRAY1($,$,$,$)");
         for (const auto& item : matches) {
@@ -324,16 +328,20 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             if (mul > 1) {
                 module.storagenext_ports[storage.name] = mul;
             }
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                module.storage_reset_codelines[storage.name] = split(block.content, '\n');
+            }
         }
-        matches = matchMacros(code, "REGISTER_INIT($,$,$)");
-        for (const auto& item : matches) {
-            VulStorage storage;
-            storage.name = item.args[0];
-            storage.comment = "";
-            storage.type = item.args[1];
-            storage.value = item.args[2];
-            module.storagenexts[storage.name] = storage;
-        }
+        // matches = matchMacros(code, "REGISTER_INIT($,$,$)");
+        // for (const auto& item : matches) {
+        //     VulStorage storage;
+        //     storage.name = item.args[0];
+        //     storage.comment = "";
+        //     storage.type = item.args[1];
+        //     storage.value = item.args[2];
+        //     module.storagenexts[storage.name] = storage;
+        // }
         matches = matchMacros(code, "REGISTER_MUL($,$,$)");
         for (const auto& item : matches) {
             VulStorage storage;
@@ -344,6 +352,10 @@ VulModule _parseModule(const std::vector<std::string>& code, const ModuleName & 
             module.storagenexts[storage.name] = storage;
             if (mul > 1) {
                 module.storagenext_ports[storage.name] = mul;
+            }
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                module.storage_reset_codelines[storage.name] = split(block.content, '\n');
             }
         }
     }
