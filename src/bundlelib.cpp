@@ -404,3 +404,153 @@ bool VulBundleMember::fromDefinitionString(const string &def_str) {
 
     return true;
 }
+
+
+ErrorMsg resolveBundleTable(const VulBundleLib &bundle_lib, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides, BundleTable &out_bundle_table) {
+    unordered_map<ConfigName, ConfigRealValue> calculated_configlib;
+
+    for (const auto &conf_entry : config_lib.config_items) {
+        const string &conf_name = conf_entry.first;
+        const ConfigRealValue &real_value = conf_entry.second.real_value;
+        calculated_configlib[conf_name] = real_value;
+    }
+    for (const auto &conf_entry : overrides) {
+        calculated_configlib[conf_entry.first] = conf_entry.second;
+    }
+    for (const auto &bundle_entry : bundle_lib.bundles) {
+        const string &bundle_name = bundle_entry.first;
+        VulBundleItem item = bundle_entry.second.item;
+        ErrorMsg err = calculateBundleConstexprValue(item, config_lib, calculated_configlib);
+        if (err.error()) {
+            return err;
+        }
+        out_bundle_table[bundle_name] = item;
+    }
+    return "";
+}
+
+
+uint32_t get_basic_width(const std::string& type) {
+    if (type == "bool") return 1;
+
+    auto parse_int_type = [&](const std::string& s, const std::string& prefix) -> uint32_t {
+        if (s.rfind(prefix, 0) != 0) return 0;
+
+        size_t pos = prefix.size();
+
+        // 读取数字部分
+        size_t num_start = pos;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+            ++pos;
+        }
+
+        if (num_start == pos) return 0; // 没有数字
+
+        uint32_t bits = std::stoul(s.substr(num_start, pos - num_start));
+
+        // 允许 _t 或没有
+        if (pos == s.size()) {
+            return bits;
+        }
+        if (s.substr(pos) == "_t") {
+            return bits;
+        }
+
+        return 0;
+    };
+
+    // int / uint
+    uint32_t bits = 0;
+
+    bits = parse_int_type(type, "int");
+    if (bits != 0) return bits;
+
+    bits = parse_int_type(type, "uint");
+    if (bits != 0) return bits;
+
+    throw std::runtime_error("Unsupported type: " + type);
+}
+
+void flatten_member(
+    const VulBundleMember& m,
+    const BundleTable& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+) {
+    // ===== 1️⃣ 计算数组总元素数 =====
+    std::vector<uint32_t> dims;
+    for (const auto& d : m.dims) {
+        dims.push_back(std::stoul(d)); // 假设已是常量
+    }
+
+    uint32_t total = 1;
+    for (auto d : dims) total *= d;
+
+    // ===== 2️⃣ 递归展开数组（多维）=====
+    std::function<void(int, std::string)> expand_array =
+    [&](int dim_idx, std::string cur_name) {
+        if (dim_idx == (int)dims.size()) {
+            // ===== 3️⃣ 处理单个元素 =====
+
+            // uint<N>
+            if (!m.uint_length.empty()) {
+                uint32_t w = std::stoul(m.uint_length);
+                out.push_back({cur_name, offset, w});
+                offset += w;
+                return;
+            }
+
+            // 基本类型
+            if (table.find(m.type) == table.end()) {
+                uint32_t w = get_basic_width(m.type);
+                out.push_back({cur_name, offset, w});
+                offset += w;
+                return;
+            }
+
+            // ===== struct 类型 =====
+            const auto& sub = table.at(m.type);
+
+            if (sub.is_alias) {
+                // alias → 展开目标
+                const auto& alias_member = sub.members[0];
+                flatten_member(alias_member, table, cur_name, offset, out);
+                return;
+            }
+
+            if (!sub.enum_members.empty()) {
+                // enum → 用最小bit宽
+                uint32_t n = sub.enum_members.size();
+                uint32_t w = 0;
+                while ((1u << w) < n) ++w;
+                out.push_back({cur_name, offset, w});
+                offset += w;
+                return;
+            }
+
+            // 普通 struct
+            flatten_bundle(sub, table, cur_name, offset, out);
+        } else {
+            for (uint32_t i = 0; i < dims[dim_idx]; ++i) {
+                expand_array(dim_idx + 1,
+                    cur_name + "[" + std::to_string(i) + "]");
+            }
+        }
+    };
+
+    expand_array(0, prefix);
+}
+
+void flatten_bundle(
+    const VulBundleItem& bundle,
+    const BundleTable& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+) {
+    for (const auto& m : bundle.members) {
+        std::string name = prefix.empty() ? m.name : prefix + "." + m.name;
+        flatten_member(m, table, name, offset, out);
+    }
+}

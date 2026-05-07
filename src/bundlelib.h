@@ -162,4 +162,29 @@ public:
 
 };
 
+using BundleTable = std::unordered_map<BundleName, VulBundleItem>;
+
+ErrorMsg resolveBundleTable(const VulBundleLib &bundle_lib, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides, BundleTable &out_bundle_table);
+
+struct FlatField {
+    std::string name;  // 展平后的访问路径
+    uint32_t    offset;
+    uint32_t    width;
+};
+
+void flatten_bundle(
+    const VulBundleItem& bundle,
+    const BundleTable& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+);
+
+void flatten_member(
+    const VulBundleMember& m,
+    const BundleTable& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+);
 
