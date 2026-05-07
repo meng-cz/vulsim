@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2025 Meng Chengzhen, in Shandong University
+// Copyright (c) 2026 Meng Chengzhen, in Shandong University
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,19 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+
 #pragma once
 
-#include "uint.hpp"
-#include "pipe.hpp"
-#include "storage.hpp"
-#include "ram.hpp"
+#include "project.h"
 
-uint32_t trace_registe_signal(const std::string &signal_name, uint32_t signal_width);
+using InstancePath = string;
+using SignalPath = string;
 
-void trace_init(const std::string &filename, uint64_t cycle_time, uint64_t write_interval);
+struct VulTraceMatcher {
+    InstancePath instance_path_matcher;
+    SignalPath signal_path_matcher;
+};
 
-void trace_record(uint32_t signal_id, uint64_t signal_value);
+struct VulTracedSignal {
+    SignalPath signal_path;
+    uint32_t bit_width;
+};
 
-void trace_record(uint32_t signal_id, const std::vector<uint64_t> &signal_value);
+struct VulTracedModule {
+    ModuleName module_name;
+    vector<VulTracedSignal> traced_signals;
+    unordered_map<InstancePath, vector<bool>> traced_signals_of_instance;
+};
 
-void trace_commit();
+VulTraceMatcher parseTraceMatcher(const string &matcher_str);
+
+vector<VulTracedModule> parseTraceOptions(const VulProject &project, const vector<VulTraceMatcher> &trace_matchers);
+
+

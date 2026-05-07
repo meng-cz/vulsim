@@ -734,7 +734,13 @@ inline string _genReqServFuncArgsList(const VulReqServ &item) {
  * @param out_lines Output vector of strings to hold the generated header code lines. With \\n in each line.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulConfigLib> configlib, shared_ptr<VulModuleLib> modulelib) {
+ErrorMsg genModuleCodeHpp(
+    const VulModule &module,
+    vector<string> &out_lines,
+    shared_ptr<VulConfigLib> configlib,
+    shared_ptr<VulModuleLib> modulelib,
+    std::optional<VulTracedModule> traceinfo
+) {
 
     vector<string> constructor_param_field;
     vector<string> tick_field;
@@ -1335,6 +1341,50 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
         apply_tick_field.push_back(CodeTab + bram_entry.first + "." + ApplyTickFunctionName + "();\n");
     }
 
+
+    // trace
+    if (traceinfo) {
+        const auto &trace = traceinfo.value();
+        member_field.push_back("std::array<bool, " + std::to_string(trace.traced_signals.size()) + "> __trace_signals_en;\n");
+        init_field.push_back("__trace_signals_en.fill(false);\n");
+        for (const auto &ientry : trace.traced_signals_of_instance) {
+            const auto &inst_name = ientry.first;
+            const vector<bool> &enables = ientry.second;
+            init_field.push_back("if(__params.__instance_name == \"" + inst_name + "\") {\n");
+            for (size_t i = 0; i < enables.size(); ++i) {
+                if (enables[i]) {
+                    init_field.push_back("    __trace_signals_en[" + std::to_string(i) + "] = true;\n");
+                }
+            }
+            init_field.push_back("}\n");
+        }
+        for (uint64_t i = 0; i < trace.traced_signals.size(); ++i) {
+            const auto &sig = trace.traced_signals[i];
+            string traceid_var = "_trace_id_" + std::to_string(i);
+            string signal_name = "__params.__instance_name + \":\" + \"" + sig.signal_path + "\"";
+            member_field.push_back("uint32_t " + traceid_var + " = 0;\n");
+            init_field.push_back("if(__trace_signals_en[" + std::to_string(i) + "]) " + traceid_var + " = trace_registe_signal(" + signal_name + ", " + std::to_string(sig.bit_width) + ");\n");
+            string access_path = "";
+            string regname = sig.signal_path;
+            size_t dot_pos = access_path.find('.');
+            if (dot_pos != string::npos) {
+                regname = sig.signal_path.substr(0, dot_pos);
+                access_path = sig.signal_path.substr(dot_pos);
+            }
+            if (!regname.ends_with("]")) {
+                regname += ".get()";
+            }
+            access_path = regname + access_path;
+            if (sig.bit_width > 64) {
+                access_path = access_path + ".get_data()";
+            } else {
+                access_path = "static_cast<uint64_t>(" + access_path + ")";
+            }
+            apply_tick_field.push_back(CodeTab + "if(__trace_signals_en[" + std::to_string(i) + "]) trace_record(" + traceid_var + ", " + access_path + ");\n");
+        }
+    }
+
+
     // preparation done, start generating code lines
 
     out_lines = genHeaderPrelude();
@@ -1535,7 +1585,12 @@ ErrorMsg genTopSimCpp(const ModuleName &top_module_name, const vector<ConfigValu
     return "";
 }
 
-ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulModule & top_module, vector<string> &out_lines) {
+ErrorMsg genTestHarnessHpp(
+    const VulTestHarnessModule &test_module,
+    const VulModule & top_module,
+    vector<string> &out_lines,
+    bool enable_tracing
+) {
     
     vector<string> init_field;
     vector<string> member_field;
@@ -1710,6 +1765,9 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
     for (const auto &line : init_field) {
         out_lines.push_back(line);
     }
+    if (enable_tracing) {
+        out_lines.push_back(CodeTab + "trace_init(\"trace.vcd\", 1, 1000);\n");
+    }
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
     out_lines.push_back("FORCE_INLINE void simulation() {\n");
@@ -1736,6 +1794,9 @@ ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulMod
 
     out_lines.push_back("void sim_commit() {\n");
     out_lines.push_back(CodeTab + child_instptr_name + "->" + ApplyTickFunctionName + "();\n");
+    if (enable_tracing) {
+        out_lines.push_back(CodeTab + "trace_commit();\n");
+    }
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
 

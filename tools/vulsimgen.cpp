@@ -3,6 +3,7 @@
 
 #include "simgen.h"
 #include "argparse.hpp"
+#include "trace.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -32,14 +33,21 @@ int main(int argc, char * argv[]) {
         .help("sets the top module file")
         .required();
     parser.add_argument("-m", "--main")
-        .help("sets the main test file for test case generation (optional)")
-        .default_value(std::string(""));
+        .help("sets the main test file for test case generation")
+        .default_value(std::string(""))
+        .required();
     parser.add_argument("-o", "--out")
         .help("sets the output directory for generated code (default: ./simout)")
         .default_value(std::string("./simout"));
     parser.add_argument("-l", "--lib")
         .help("sets the directory for runtime library files (default: ./vullib)")
         .default_value(std::string("./vullib"));
+    parser.add_argument("-T", "--tracefile")
+        .help("tracing signal matcher file for generating tracing code (optional)")
+        .default_value(std::string(""));
+    parser.add_argument("--trace")
+        .help("tracing signal matcher strings seperated by commas (optional)")
+        .default_value(std::string(""));
     
     try {
         parser.parse_args(argc, argv);
@@ -53,6 +61,8 @@ int main(int argc, char * argv[]) {
     string main_file = parser.get<std::string>("--main");
     string out_dir = parser.get<std::string>("--out");
     string lib_dir = parser.get<std::string>("--lib");
+    string trace_file = parser.get<std::string>("--tracefile");
+    string trace_line = parser.get<std::string>("--trace");
     std::filesystem::path top_path(top_file);
     if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
         std::cerr << "Error: Top module file does not exist: " << top_file << std::endl;
@@ -112,7 +122,58 @@ int main(int argc, char * argv[]) {
     }
     writeLinesToFile(code_lines, (out_path / "bundle.h").string());
 
+    vector<VulTraceMatcher> trace_matchers;
+    if (trace_file.size() > 0) {
+        std::filesystem::path trace_path(trace_file);
+        if (!std::filesystem::exists(trace_path) || !std::filesystem::is_regular_file(trace_path)) {
+            std::cerr << "Error: Trace matcher file does not exist: " << trace_file << std::endl;
+            return 1;
+        }
+        // parse trace matcher file
+        // each line is a matcher string
+        std::ifstream trace_file_stream(trace_path.string());
+        if (!trace_file_stream.is_open()) {
+            std::cerr << "Error: Failed to open trace matcher file: " << trace_file << std::endl;
+            return 1;
+        }
+        string line;
+        while (std::getline(trace_file_stream, line)) {
+            // skip empty lines and lines starting with # or //
+            uint64_t commentpos = 0;
+            if ((commentpos = line.find('#')) != string::npos) {
+                line = line.substr(0, commentpos);
+            }
+            if ((commentpos = line.find("//")) != string::npos) {
+                line = line.substr(0, commentpos);
+            }
+            if (line.empty()) {
+                continue;
+            }
+            trace_matchers.push_back(parseTraceMatcher(line));
+        }
+    }
+    if (trace_line.size() > 0) {
+        // parse trace matcher line
+        // each matcher string is seperated by comma
+        std::stringstream ss(trace_line);
+        string matcher_str;
+        while (std::getline(ss, matcher_str, ',')) {
+            if (matcher_str.empty()) {
+                continue;
+            }
+            trace_matchers.push_back(parseTraceMatcher(matcher_str));
+        }
+    }
+    unordered_map<ModuleName, VulTracedModule> traceinfo;
+    if (!trace_matchers.empty()) {
+        auto module_traceinfo = parseTraceOptions(project, trace_matchers);
+        for (const auto &mod_trace : module_traceinfo) {
+            traceinfo[mod_trace.module_name] = mod_trace;
+        }
+    }
+
     vector<string> resource_files;
+    bool trace_enabled = false;
 
     // gen module
     for (const auto &mod_entry : project.modulelib->modules) {
@@ -121,7 +182,13 @@ int main(int argc, char * argv[]) {
             std::cerr << "Error: Module is not a VulModule: " << mod_entry.first << std::endl;
             return 1;
         }
-        err = simgen::genModuleCodeHpp(*mod_ptr, code_lines, project.configlib, project.modulelib);
+        auto iter = traceinfo.find(mod_entry.first);
+        std::optional<VulTracedModule> mod_traceinfo = std::nullopt;
+        if (iter != traceinfo.end()) {
+            mod_traceinfo = iter->second;
+            trace_enabled = true;
+        }
+        err = simgen::genModuleCodeHpp(*mod_ptr, code_lines, project.configlib, project.modulelib, mod_traceinfo);
         if (err.error()) {
             std::cerr << "Error generating module code for module " << mod_entry.first << ": " << err.msg << std::endl;
             return 1;
@@ -160,7 +227,7 @@ int main(int argc, char * argv[]) {
             std::cerr << "Error: Test module not found: " << project.test_module << std::endl;
             return 1;
         }
-        err = simgen::genTestHarnessHpp(test_iter->second, *top_module_ptr, code_lines);
+        err = simgen::genTestHarnessHpp(test_iter->second, *top_module_ptr, code_lines, trace_enabled);
         if (err.error()) {
             std::cerr << "Error generating test module code: " << err.msg << std::endl;
             return 1;
@@ -191,6 +258,7 @@ int main(int argc, char * argv[]) {
         "storage.hpp",
         "uint.hpp",
         "ram.hpp",
+        "vcdrecord.hpp",
     };
     std::filesystem::path lib_path(lib_dir);
     if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {

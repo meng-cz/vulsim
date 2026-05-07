@@ -22,8 +22,33 @@
 
 #include "VulTestMain.hpp"
 
+#include "vcdrecord.hpp"
+
+GlobalVCDRecord global_vcd_record;
+
+uint32_t trace_registe_signal(const std::string &signal_name, uint32_t signal_width) {
+    return global_vcd_record.registe(signal_name, signal_width);
+}
+
+void trace_init(const std::string &filename, uint64_t cycle_time, uint64_t write_interval) {
+    global_vcd_record.init(filename, cycle_time, write_interval);
+}
+
+void trace_record(uint32_t signal_id, uint64_t signal_value) {
+    global_vcd_record.record(signal_id, signal_value);
+}
+
+void trace_record(uint32_t signal_id, const std::vector<uint64_t> &signal_value) {
+    global_vcd_record.record(signal_id, signal_value);
+}
+
+void trace_commit() {
+    global_vcd_record.commit();
+}
+
 int main() {
     VulTestMain test_main;
     test_main.simulation();
+    global_vcd_record.close();
     return 0;
 }

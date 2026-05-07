@@ -79,7 +79,7 @@ int main(int argc, char * argv[]) {
 
     // prepare data for RTL generation
     unordered_map<ConfigName, ConfigRealValue> calculated_configlib;
-    rtlgen::BundleTable bundle_table;
+    BundleTable bundle_table;
 
     for (const auto &conf_entry : project.configlib->config_items) {
         const string &conf_name = conf_entry.first;
@@ -107,7 +107,7 @@ int main(int argc, char * argv[]) {
         }
         unordered_map<ConfigName, ConfigValue> config_overrides;
         unordered_map<ConfigName, ConfigRealValue> local_calculated_configlib = calculated_configlib;
-        rtlgen::BundleTable local_bundle_table = bundle_table;
+        BundleTable local_bundle_table = bundle_table;
         for (const auto &local_conf_entry : mod_ptr->local_consts) {
             const string &conf_name = local_conf_entry.first;
             const ConfigValue &conf_value = local_conf_entry.second.value;

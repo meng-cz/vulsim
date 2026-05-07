@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "errormsg.hpp"
 #include "type.h"
 
@@ -29,6 +31,7 @@
 #include "configlib.h"
 #include "module.h"
 #include "project.h"
+#include "trace.hpp"
 
 namespace simgen {
 
@@ -96,7 +99,13 @@ ErrorMsg genBundleHeaderCode(const VulBundleLib &bundle_lib, vector<string> &out
  * @param out_lines Output vector of strings to hold the generated header code lines. With \\n in each line.
  * @return An ErrorMsg indicating failure, empty if success.
  */
-ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, shared_ptr<VulConfigLib> configlib, shared_ptr<VulModuleLib> modulelib);
+ErrorMsg genModuleCodeHpp(
+    const VulModule &module,
+    vector<string> &out_lines,
+    shared_ptr<VulConfigLib> configlib,
+    shared_ptr<VulModuleLib> modulelib,
+    std::optional<VulTracedModule> traceinfo = std::nullopt
+);
 
 /**
  * @brief Generate simulation.cpp C++ code for the top-level module.
@@ -108,6 +117,11 @@ ErrorMsg genModuleCodeHpp(const VulModule &module, vector<string> &out_lines, sh
 ErrorMsg genTopSimCpp(const ModuleName &top_module_name, const vector<ConfigValue> &local_configs, vector<string> &out_lines);
 
 
-ErrorMsg genTestHarnessHpp(const VulTestHarnessModule &test_module, const VulModule & top_module, vector<string> &out_lines);
+ErrorMsg genTestHarnessHpp(
+    const VulTestHarnessModule &test_module,
+    const VulModule & top_module,
+    vector<string> &out_lines,
+    bool enable_tracing = false
+);
 
 } // namespace simgen
