@@ -108,7 +108,7 @@ CONNECT_CR_R(cons, output, output); // 连接 cons 模块的 output 事务接口
 一个可运行的 VulCPP 项目必须包含一个 **顶层硬件设计模块** 和一个 **Main 模块**。在上述的例子中，`TopModule` 可以作为顶层硬件设计模块，而 `Main` 模块则是仿真入口模块：
 
 ```cpp
-// <Main.hpp>
+// <Main.cpp>
 
 #include <defhelper.hpp>
 #include <run.hpp> // 专用于 Main 模块的帮助头文件
@@ -147,7 +147,7 @@ SIMULATION() {
 
 ```bash
 # 生成仿真代码
-./vulsimgen -t example/prodcon/TopModule.hpp -m example/prodcon/Main.hpp
+./vulsimgen -t example/prodcon/TopModule.hpp -m example/prodcon/Main.cpp
 # -t: 指定顶层硬件设计模块的头文件路径
 # -m: 指定 Main 模块的头文件路径
 # -l: 指定 VulCPP 库文件的路径（默认./vullib/）

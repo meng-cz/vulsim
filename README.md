@@ -11,25 +11,15 @@
 
 本项目为Vul的命令行工具和Vul GUI的后端命令行程序。
 
-前端GUI项目：[VulSimGUI (https://github.com/meng-cz/VulSimGUI)](https://github.com/meng-cz/VulSimGUI)
+## User Guide
 
-通讯API文档：[VulSimAPI (./doc/api)](./doc/api/api.md)
-
-## 开发状态
-
-Working in progress.
-
-原型版本v0.1代码已签出到分支legacy_0_0_1_demo，实现基于TUI的单模块Vul模型设计和RTL对齐模拟器代码生成。
-
-v1.0开发中：
-
-1. 基于HLS的从Vul模型到可综合RTL的生成（预计2025/05）
-2. 构建VulDesigner GUI v1.0 （预计2025/06）
-3. 构建VulDesigner v1.1，添加对波形调试、性能统计、快照保存和恢复的支持（预计2025/08）
-
-前期工作：
-1. [nullrvsim](https://github.com/meng-cz/nullrvsim): 验证VUL模型生成的模拟器框架的正确性和并行效率
-2. [FASE](https://github.com/meng-cz/fase-rv64)：对RTL实现的处理器实现系统调用模拟（SE模式），为VUL模型上的SE模式做准备
+- [1. VulCPP 简介（Get Started）](./doc/vulcpp/1-intro.md)
+- [2. VulCPP header 常量与数据结构定义](./doc/vulcpp/2-header.md)
+- [3. VulCPP 硬件模块定义](./doc/vulcpp/3-module.md)
+- [4. VulCPP Main 模块（Test Harness）定义](./doc/vulcpp/4-Main.md)
+- [5. VulCPP 无符号任意宽度整数类型 UInt](./doc/vulcpp/5-uint.md)
+- [6. VulCPP 通用块内存组件 BRAM](./doc/vulcpp/6-bram.md)
+- [7. VulCPP 波形追踪与调试](./doc/vulcpp/7-debugging.md)
 
 ## 构建
 
@@ -42,16 +32,20 @@ cmake ..
 make -j8
 ```
 
-构建完成后会在 `build` 目录下生成如下可执行文件：
+构建完成后会在 `build` 目录下生成如下文件：
 - `vulsimgen`：VulCPP 仿真代码生成工具，用于将 VulCPP 项目转换为可执行的仿真代码
-- `vulrtlgen`：VulCPP RTL代码生成工具，用于将 VulCPP 项目转换为可综合的RTL代码（整理中）
+- `vullib`：VulCPP 仿真库目录，供生成的仿真代码链接使用
+- `example`：示例代码目录
+
+另外两个文件 `vulrtlgen` 和 `vulconsole` 是后续版本的工具，目前暂不可用：
+- `vulrtlgen`：VulCPP RTL代码生成工具，用于将 VulCPP 项目转换为可综合的RTL代码
 - `vulconsole`：VulSim GUI 的后端命令行工具，无法独立使用
 
 运行示例：
 
 ```bash
 # 生成仿真代码
-./vulsimgen -t ../example/prodcon/TopModule.hpp -m ../example/prodcon/Main.hpp -l ../vullib/ -o sim_out
+./vulsimgen -t ../example/prodcon/TopModule.hpp -m ../example/prodcon/Main.cpp -l ../vullib/ -o sim_out
 # -t: 指定顶层硬件设计模块的头文件路径
 # -m: 指定 Main 模块的头文件路径
 # -l: 指定 VulCPP 库文件的路径
@@ -64,20 +58,17 @@ source build.sh
 ./prodcon
 ```
 
-## 文档
-
-User Guide for vulsimgen/vulrtlgen：
-
-- [1. VulCPP 简介](./doc/vulcpp/1-intro.md)
-- [2. VulCPP header 常量与数据结构定义](./doc/vulcpp/2-header.md)
-- [3. VulCPP 模块定义](./doc/vulcpp/3-module.md)
-- [4. VulCPP Main 模块定义](./doc/vulcpp/4-Main.md)
-
-开发文档：
+## 开发文档：
 
 v1.0版本的Vul模型Module文档：[module.md](./doc/module.md) 
 
-v0.1版本的Vul模型文档：[vularch.md](https://github.com/meng-cz/vulsim/blob/legacy_0_0_1_demo/doc/vularch.md)
+前端GUI项目：[VulSimGUI (https://github.com/meng-cz/VulSimGUI)](https://github.com/meng-cz/VulSimGUI)
+
+通讯API文档：[VulSimAPI (./doc/api)](./doc/api/api.md)
+
+前期工作链接：
+1. [nullrvsim](https://github.com/meng-cz/nullrvsim): 验证VUL模型生成的模拟器框架的正确性和并行效率
+2. [FASE](https://github.com/meng-cz/fase-rv64)：对RTL实现的处理器实现系统调用模拟（SE模式），为VUL模型上的SE模式做准备
 
 ## “泺源”简介
 
