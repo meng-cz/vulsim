@@ -147,11 +147,11 @@ SIMULATION() {
 
 ```bash
 # 生成仿真代码
-./vulsimgen -t ../example/prodcon/TopModule.hpp -m ../example/prodcon/Main.hpp -l ../vullib/ -o sim_out
+./vulsimgen -t example/prodcon/TopModule.hpp -m example/prodcon/Main.hpp
 # -t: 指定顶层硬件设计模块的头文件路径
 # -m: 指定 Main 模块的头文件路径
-# -l: 指定 VulCPP 库文件的路径
-# -o: 指定生成的仿真代码输出目录
+# -l: 指定 VulCPP 库文件的路径（默认./vullib/）
+# -o: 指定生成的仿真代码输出目录（默认./sim_out/）
 
 # 编译生成的仿真代码 (build.sh 默认使用 g++)
 cd sim_out
