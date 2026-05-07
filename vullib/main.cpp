@@ -46,6 +46,12 @@ void trace_commit() {
     global_vcd_record.commit();
 }
 
+void sim_exit() {
+    global_vcd_record.commit();
+    global_vcd_record.close();
+    exit(1);
+}
+
 int main() {
     VulTestMain test_main;
     test_main.simulation();

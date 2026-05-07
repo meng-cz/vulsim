@@ -13,6 +13,8 @@ void sim_commit();
 
 void sim_reset();
 
+void sim_exit();
+
 #define SIMULATION() void sim_main()
 
 #define VAR(type, name) type name;

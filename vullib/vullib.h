@@ -36,3 +36,5 @@ void trace_record(uint32_t signal_id, uint64_t signal_value);
 void trace_record(uint32_t signal_id, const std::vector<uint64_t> &signal_value);
 
 void trace_commit();
+
+void sim_exit();
