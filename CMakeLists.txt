@@ -34,3 +34,33 @@ foreach(tool ${TOOL_SOURCES})
 
     add_executable(${tool_name} ${tool}  $<TARGET_OBJECTS:vulcore>)
 endforeach()
+
+# Copy project runtime directories to the build directory on each build:
+# - vullib: only top-level files (non-recursive)
+# - example: full directory recursively
+file(GLOB VULLIB_TOP_LEVEL_ITEMS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "vullib/*")
+set(VULLIB_COPY_COMMANDS "")
+foreach(item ${VULLIB_TOP_LEVEL_ITEMS})
+    if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${item}")
+        list(APPEND VULLIB_COPY_COMMANDS
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/${item}"
+            "${CMAKE_CURRENT_BINARY_DIR}/vullib/"
+        )
+    endif()
+endforeach()
+
+add_custom_target(copy_project_dirs ALL
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/vullib"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/example"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/vulcppdocs"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/vullib"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/example"
+            "${CMAKE_CURRENT_BINARY_DIR}/example"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/doc/vulcpp"
+            "${CMAKE_CURRENT_BINARY_DIR}/vulcppdocs"
+    ${VULLIB_COPY_COMMANDS}
+    COMMENT "Copying vullib, example, and vulcppdocs into build directory"
+)
