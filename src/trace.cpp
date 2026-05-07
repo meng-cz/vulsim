@@ -90,16 +90,74 @@ vector<string> splitByToken(const string &s, const string &token) {
     return out;
 }
 
-bool matchPathSegments(const string &pattern, const string &value, const string &sep) {
-    if (pattern == "*") return true;
-    vector<string> p = (sep == "::" ? splitByToken(pattern, sep) : splitByChar(pattern, sep[0]));
-    vector<string> v = (sep == "::" ? splitByToken(value, sep) : splitByChar(value, sep[0]));
-    if (p.size() != v.size()) return false;
-    for (size_t i = 0; i < p.size(); ++i) {
-        if (p[i] == "*") continue;
-        if (p[i] != v[i]) return false;
+struct IndexedSegment {
+    string base;
+    vector<string> indices;
+};
+
+IndexedSegment parseIndexedSegment(const string &seg) {
+    IndexedSegment out;
+    size_t i = 0;
+    while (i < seg.size() && seg[i] != '[') ++i;
+    out.base = seg.substr(0, i);
+
+    while (i < seg.size()) {
+        if (seg[i] != '[') {
+            break;
+        }
+        size_t close = seg.find(']', i + 1);
+        if (close == string::npos) {
+            break;
+        }
+        out.indices.push_back(seg.substr(i + 1, close - i - 1));
+        i = close + 1;
+    }
+    return out;
+}
+
+bool matchSegmentWithIndexRule(const string &lhs, const string &rhs) {
+    IndexedSegment a = parseIndexedSegment(lhs);
+    IndexedSegment b = parseIndexedSegment(rhs);
+    if (a.base != b.base) return false;
+
+    // 若任一侧无索引，则仅比较名称。
+    if (a.indices.empty() || b.indices.empty()) return true;
+
+    // 若两侧均有索引，则比较共同前缀索引（允许一侧有更多维）。
+    size_t common = std::min(a.indices.size(), b.indices.size());
+    for (size_t i = 0; i < common; ++i) {
+        if (a.indices[i] != b.indices[i]) return false;
     }
     return true;
+}
+
+bool matchPathSegments(const string &pattern, const string &value, const string &sep) {
+    vector<string> p = (sep == "::" ? splitByToken(pattern, sep) : splitByChar(pattern, sep[0]));
+    vector<string> v = (sep == "::" ? splitByToken(value, sep) : splitByChar(value, sep[0]));
+
+    // dp[i][j]: pattern前i段是否可匹配value前j段
+    // 规则：
+    // - 普通分段：精确匹配1段
+    // - "*"：匹配任意个(>=1)分段，不允许匹配0段
+    vector<vector<uint8_t>> dp(p.size() + 1, vector<uint8_t>(v.size() + 1, 0));
+    dp[0][0] = 1;
+
+    for (size_t i = 0; i < p.size(); ++i) {
+        for (size_t j = 0; j <= v.size(); ++j) {
+            if (!dp[i][j]) continue;
+            if (p[i] == "*") {
+                for (size_t k = j + 1; k <= v.size(); ++k) {
+                    dp[i + 1][k] = 1;
+                }
+            } else {
+                if (j < v.size() && matchSegmentWithIndexRule(p[i], v[j])) {
+                    dp[i + 1][j + 1] = 1;
+                }
+            }
+        }
+    }
+
+    return dp[p.size()][v.size()] != 0;
 }
 
 
@@ -239,4 +297,3 @@ vector<VulTracedModule> parseTraceOptions(const VulProject &project, const vecto
 
     return traced_modules;
 }
-
