@@ -11,19 +11,8 @@ endif()
 include_directories( ./src )
 
 file (GLOB_RECURSE LIB_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
-file (GLOB_RECURSE TUI_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/tui/*.cpp")
 
 add_library(vulcore OBJECT ${LIB_CXX_SRC})
-
-# TUI Executable
-
-add_executable(vulconsole ${TUI_CXX_SRC} $<TARGET_OBJECTS:vulcore>)
-
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(vulconsole PRIVATE -O2 -DNDEBUG)
-else ()
-    target_compile_options(vulconsole PRIVATE -g -O2)
-endif ()
 
 # Tools
 

@@ -32,9 +32,6 @@
 using std::make_unique;
 using std::make_shared;
 
-#include "json.hpp"
-using nlohmann::json;
-
 ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides) {
     // 计算 bundle 中所有成员的 constexpr 值，包括 enumerate, uint 长度，数组维度，初始值 value
 

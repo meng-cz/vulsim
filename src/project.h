@@ -86,55 +86,9 @@ struct VulProjectRaw {
     vector<ModuleName>              modules;
 };
 
-struct VulOperationArg {
-    uint32_t            index;
-    OperationArgName    name;
-    OperationArg        value;
-};
-
-class VulOperationPackage {
-public:
-    OperationName       name;
-    vector<VulOperationArg>    arg_list;
-
-    std::unique_ptr<OperationArg> getArg(const OperationArgName &arg_name, uint32_t index) const {
-        for (const auto &arg : arg_list) {
-            if ((!arg.name.empty() && arg.name != arg_name) || (arg.index != -1 && arg.index != index)) {
-                continue;
-            }
-            return std::make_unique<OperationArg>(arg.value);
-        }
-        return nullptr;
-    };
-    bool getBoolArg(const OperationArgName &arg_name, uint32_t index) const {
-        auto arg_ptr = getArg(arg_name, index);
-        if (!arg_ptr) {
-            return false;
-        }
-        string val_str = *arg_ptr;
-        return (val_str == "true" || val_str == "True" || val_str == "TRUE" || val_str == "1");
-    }
-};
-
-struct VulOperationResponse {
-    uint32_t            code;
-    string              msg;
-    unordered_map<OperationArgName, string>  results;
-    unordered_map<OperationArgName, vector<string>>  list_results;
-
-    VulOperationResponse() : code(0), msg("") {};
-    VulOperationResponse(const ErrorMsg & err) : code(err.code), msg(err.msg) {};
-    VulOperationResponse(const uint32_t c, const string &m) : code(c), msg(m) {};
-};
-
-using OperationFactory = function<unique_ptr<VulProjectOperation>(const VulOperationPackage &)>;
-
 class VulProject {
 public:
     
-    static bool registerOperation(const OperationName &op_name, const OperationFactory &factory);
-    static vector<OperationName> listAllRegisteredOperations();
-
     VulProject() {
         configlib = std::make_shared<VulConfigLib>();
         bundlelib = std::make_shared<VulBundleLib>();
@@ -144,24 +98,8 @@ public:
     ProjectName                 name;
     ProjectPath                 dirpath;
 
-    ErrorMsg load(const ProjectPath &path, const ProjectName &project_name);
-    ErrorMsg save() const;
-
     ModuleName                  top_module;
     ModuleName                  test_module;
-
-    bool is_opened = false;
-    bool is_modified = false;
-
-    bool is_config_modified = false;
-    bool is_bundle_modified = false;
-    unordered_set<ModuleName> modified_modules;
-
-    VulOperationResponse doOperation(const VulOperationPackage &op);
-    string undoLastOperation();
-    string redoLastOperation();
-
-    vector<string> listHelpForOperation(const OperationName &op_name) const;
 
     shared_ptr<VulConfigLib> configlib;
     shared_ptr<VulBundleLib> bundlelib;
@@ -170,46 +108,9 @@ public:
 
     unordered_map<ModuleName, VulImport>   imports;
 
-    std::deque<unique_ptr<VulProjectOperation>>   operation_undo_history;
-    std::deque<unique_ptr<VulProjectOperation>>   operation_redo_history;
-
-    inline void closeAndFinalize() {
-        is_modified = false;
-        is_opened = false;
-        is_config_modified = false;
-        is_bundle_modified = false;
-        modified_modules.clear();
-        name = "";
-        dirpath = "";
-        top_module = "";
-        configlib->clear();
-        bundlelib->clear();
-        modulelib->clear();
-        imports.clear();
-        operation_undo_history.clear();
-        operation_redo_history.clear();
-    }
-
     inline bool globalNameConflictCheck(const string &name) const {
         return configlib->config_items.find(name) != configlib->config_items.end() ||
                bundlelib->bundles.find(name) != bundlelib->bundles.end() ||
                modulelib->modules.find(name) != modulelib->modules.end();
     }
 };
-
-class VulProjectOperation {
-public:
-
-    VulProjectOperation(const VulOperationPackage &op);
-
-    virtual VulOperationResponse execute(VulProject &project) = 0;
-    virtual string undo(VulProject &project) { return  ""; }; // not supported by default
-    virtual bool is_undoable() const { return false; }; // not undoable by default
-    virtual bool is_modify() const { return false; }; // does not modify project by default
-
-    virtual vector<string> help() const { return vector<string>(); };
-    
-    VulOperationPackage    op;
-    string timestamp;
-};
-
