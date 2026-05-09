@@ -44,6 +44,30 @@ typedef string BMemberName;
 typedef string BMemberType;
 typedef string BundleTag;
 
+struct VulStaticEnumMember {
+    BMemberName         name;
+    ConfigRealValue     value;
+    bool                has_value = false; // whether the value is explicitly defined in the enum definition
+};
+
+struct VulStaticBundleMember {
+    BMemberName         name;
+    BMemberType         type;
+    ConfigRealValue     uint_length; // only for uint types
+    vector<ConfigRealValue> dims; // only for array types
+};
+
+struct VulStaticBundle {
+    BundleName                      name;
+    vector<VulStaticBundleMember>   members;
+    vector<VulStaticEnumMember>     enum_members;   // if not empty, other members must be empty
+    bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
+};
+
+using VulStaticBundleLib = std::vector<VulStaticBundle>;
+
+
+
 typedef struct {
     BMemberName         name;
     ConfigValue         value;
@@ -187,4 +211,6 @@ void flatten_member(
     uint32_t& offset,
     std::vector<FlatField>& out
 );
+
+ErrorMsg staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib, VulStaticBundle &out_item);
 

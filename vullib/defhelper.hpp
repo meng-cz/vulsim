@@ -53,7 +53,7 @@
 
 #define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void name##_setnext(const uint64_t idx, const type& next); void name##_setnext(const uint64_t idx, const type& next, int port); void name##_reset(type name[size])
 
-#define WIRE(name, type, init) type name = init;
+#define WIRE(name, type) type name; void name##_reset(type& name)
 
 #define ARG(type) const type &
 
@@ -67,13 +67,15 @@
 
 #define SERVICE_LOGIC_IMPL(name, ...) void _##name##_impl (__VA_ARGS__)
 
+#define SERVICE_LOGIC_IMPL_PRIO(name, priority, ...) void _##name##_impl (__VA_ARGS__)
+
 #define TICK_IMPL() void tick()
 
 #define CHILD_INSTANCE(module, name, ...) void * name = nullptr;
 
 #define CHILD_INSTANCE_PRIO(module, name, order, ...) void * name = nullptr;
 
-#define USE_CHILD_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
+#define USE_CHILD_SERVICE_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
 
 #define CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv) ;
 

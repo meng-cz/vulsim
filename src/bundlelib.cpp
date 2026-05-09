@@ -551,3 +551,56 @@ void flatten_bundle(
         flatten_member(m, table, name, offset, out);
     }
 }
+
+
+ErrorMsg staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib, VulStaticBundle &out_item) {
+    
+    VulStaticBundle static_item;
+    static_item.name = item.name;
+    static_item.is_alias = item.is_alias;
+
+    for (const auto &enum_member : item.enum_members) {
+        VulStaticEnumMember static_enum_member;
+        static_enum_member.name = enum_member.name;
+        static_enum_member.has_value = !enum_member.value.empty();
+        if (static_enum_member.has_value) {
+            ConfigRealValue value = 0;
+            auto err = calculateConstexprValue(enum_member.value, config_lib, value);
+            if (err.error()) {
+                return EStr(err.code, string("Failed to calculate enum member value expression '") + enum_member.value + string("' for enum member '") + enum_member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            static_enum_member.value = value;
+        }
+        static_item.enum_members.push_back(std::move(static_enum_member));
+    }
+
+    for (const auto &member : item.members) {
+        VulStaticBundleMember static_member;
+        static_member.name = member.name;
+        static_member.type = member.type;
+        // 计算 uint 长度
+        if (!member.uint_length.empty()) {
+            ConfigRealValue uint_len_value;
+            auto err = calculateConstexprValue(member.uint_length, config_lib, uint_len_value);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate uint length expression '") + member.uint_length + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            static_member.uint_length = uint_len_value;
+        } else {
+            static_member.uint_length = 0;
+        }
+        // 计算数组维度
+        for (const auto &dim_expr : member.dims) {
+            ConfigRealValue dim_value;
+            auto err = calculateConstexprValue(dim_expr, config_lib, dim_value);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate array dimension expression '") + dim_expr + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            static_member.dims.push_back(dim_value);
+        }
+        static_item.members.push_back(std::move(static_member));
+    }
+    out_item = std::move(static_item);
+    return "";
+}
+

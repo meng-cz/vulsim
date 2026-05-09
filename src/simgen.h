@@ -124,4 +124,22 @@ ErrorMsg genTestHarnessHpp(
     bool enable_tracing = false
 );
 
+
+
+vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib);
+
+vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib);
+
+struct StaticModuleCodeHpp {
+    vector<string> decl;
+    vector<string> impl;
+    vector<string> resource_files;
+};
+
+StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &module_instance);
+
+vector<string> genStaticTestHarnessHpp(const VulStaticTestHarnessModule &test_module, const VulStaticModuleInstance &top_module, bool enable_tracing);
+
+vector<string> genStaticTestMainHpp(shared_ptr<VulStaticModuleInstance> top_module);
+
 } // namespace simgen

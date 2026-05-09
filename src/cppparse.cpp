@@ -326,7 +326,56 @@ std::vector<MatchMacroResult> matchMacros(const std::vector<std::string>& code, 
     return results;
 }
 
+bool codeblockContainsFunctionCall(const std::vector<std::string>& code, const std::string& func_name) {
+    if (func_name.empty()) return false;
+
+    auto is_ident_char = [](char c) {
+        return (c >= 'a' && c <= 'z') ||
+               (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') ||
+               c == '_';
+    };
+
+    for (size_t i = 0; i < code.size(); ++i) {
+        const std::string& line = code[i];
+        size_t pos = 0;
+
+        while (true) {
+            pos = line.find(func_name, pos);
+            if (pos == std::string::npos) break;
+
+            // 仅匹配完整标识符，避免 foo 匹配到 myfoo
+            if (pos > 0 && is_ident_char(line[pos - 1])) {
+                pos += func_name.size();
+                continue;
+            }
+            size_t end = pos + func_name.size();
+            if (end < line.size() && is_ident_char(line[end])) {
+                pos += func_name.size();
+                continue;
+            }
+
+            // 找 name 后第一个非空白字符（可跨行）
+            size_t li = i;
+            size_t ci = end;
+            while (li < code.size()) {
+                const std::string& cur = code[li];
+                while (ci < cur.size() && (cur[ci] == ' ' || cur[ci] == '\t' || cur[ci] == '\r' || cur[ci] == '\n')) {
+                    ++ci;
+                }
+                if (ci < cur.size()) {
+                    if (cur[ci] == '(') return true;
+                    break;
+                }
+                ++li;
+                ci = 0;
+            }
+
+            pos += func_name.size();
+        }
+    }
+    return false;
+}
 
 
 } // namespace cppparse
-

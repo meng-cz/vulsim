@@ -114,3 +114,11 @@ public:
                modulelib->modules.find(name) != modulelib->modules.end();
     }
 };
+
+struct VulStaticProject {
+    VulStaticConfigLib          global_configlib;
+    VulStaticBundleLib          global_bundlelib;
+
+    VulStaticTestHarnessModule  test_harness;
+    shared_ptr<VulStaticModuleInstance> top_module_instance;
+};

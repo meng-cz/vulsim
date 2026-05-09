@@ -28,6 +28,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <map>
 #include <unordered_set>
 #include <memory>
 
@@ -35,6 +36,7 @@ using std::pair;
 using std::vector;
 using std::string;
 using std::unordered_map;
+using std::map;
 using std::unordered_set;
 using std::shared_ptr;
 using std::unique_ptr;
@@ -43,6 +45,21 @@ typedef int64_t ConfigRealValue;
 typedef string GroupName;
 typedef string ConfigName;
 typedef string ConfigValue;
+
+/**
+ * 不再长期维护配置间的依赖关系，而是每次插入时直接计算并存储配置的实际整数值。
+ * 用于命令行工具的单次解析-生成工具流，而非是一个长期维护与更新的配置库。
+ */
+using VulStaticConfigLib = std::map<ConfigName, ConfigRealValue>;
+
+ErrorMsg insertStaticConfig(VulStaticConfigLib &config_lib, const ConfigName &name, const ConfigValue &value);
+
+ErrorMsg calculateConstexprValue(
+    const ConfigValue &value,
+    const VulStaticConfigLib &config_lib,
+    ConfigRealValue &out_real_value
+);
+
 
 typedef struct {
     ConfigName      name;

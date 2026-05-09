@@ -12,6 +12,17 @@
 #include <string>
 
 inline static void writeLinesToFile(const std::vector<std::string> &lines, const std::string &filepath) {
+    const std::filesystem::path target_path(filepath);
+    const std::filesystem::path parent_dir = target_path.parent_path();
+    if (!parent_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent_dir, ec);
+        if (ec) {
+            std::cerr << "Error: Failed to create directory: " << parent_dir
+                      << ", reason: " << ec.message() << std::endl;
+            return;
+        }
+    }
     std::ofstream file(filepath);
     if (!file.is_open()) {
         std::cerr << "Error: Failed to open file for writing: " << filepath << std::endl;
@@ -26,43 +37,24 @@ inline static void writeLinesToFile(const std::vector<std::string> &lines, const
     file.close();
 }
 
-int main(int argc, char * argv[]) {
+struct SimGenArgs {
+    std::string top_file;
+    std::string main_file;
+    std::string proj_dir;
+    std::string out_dir;
+    std::string lib_dir;
+    std::string trace_file;
+    std::string trace_line;
+};
 
-    argparse::ArgumentParser parser("vulsimgen", "VulSim Simulation Generator V1.0");
-    parser.add_argument("-t", "--top")
-        .help("sets the top module file")
-        .required();
-    parser.add_argument("-m", "--main")
-        .help("sets the main test file for test case generation")
-        .default_value(std::string(""))
-        .required();
-    parser.add_argument("-o", "--out")
-        .help("sets the output directory for generated code (default: ./simout)")
-        .default_value(std::string("./simout"));
-    parser.add_argument("-l", "--lib")
-        .help("sets the directory for runtime library files (default: ./vullib)")
-        .default_value(std::string("./vullib"));
-    parser.add_argument("-T", "--tracefile")
-        .help("tracing signal matcher file for generating tracing code (optional)")
-        .default_value(std::string(""));
-    parser.add_argument("--trace")
-        .help("tracing signal matcher strings seperated by commas (optional)")
-        .default_value(std::string(""));
-    
-    try {
-        parser.parse_args(argc, argv);
-    } catch (const std::exception &e) {
-        std::cerr << "Argument parsing error: " << e.what() << std::endl;
-        std::cerr << parser.help().str() << std::endl;
-        return 1;
-    }
-    
-    string top_file = parser.get<std::string>("--top");
-    string main_file = parser.get<std::string>("--main");
-    string out_dir = parser.get<std::string>("--out");
-    string lib_dir = parser.get<std::string>("--lib");
-    string trace_file = parser.get<std::string>("--tracefile");
-    string trace_line = parser.get<std::string>("--trace");
+int simgenDyn(const SimGenArgs &args) {
+    const string &top_file = args.top_file;
+    const string &main_file = args.main_file;
+    const string &out_dir = args.out_dir;
+    const string &lib_dir = args.lib_dir;
+    const string &trace_file = args.trace_file;
+    const string &trace_line = args.trace_line;
+
     std::filesystem::path top_path(top_file);
     if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
         std::cerr << "Error: Top module file does not exist: " << top_file << std::endl;
@@ -297,3 +289,197 @@ int main(int argc, char * argv[]) {
     return 0;
 }
 
+int simgenStatic(const SimGenArgs &args) {
+    const string &top_file = args.top_file;
+    const string &main_file = args.main_file;
+    const string &proj_dir = args.proj_dir;
+    const string &out_dir = args.out_dir;
+    const string &lib_dir = args.lib_dir;
+    const string &trace_file = args.trace_file;
+    const string &trace_line = args.trace_line;
+
+    std::filesystem::path top_path(top_file);
+    if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
+        std::cerr << "Error: Top module file does not exist: " << top_file << std::endl;
+        return 1;
+    }
+    std::filesystem::path main_path(main_file);
+    if (!std::filesystem::exists(main_path) || !std::filesystem::is_regular_file(main_path)) {
+        std::cerr << "Error: Main file does not exist: " << main_file << std::endl;
+        return 1;
+    }
+    std::filesystem::path proj_path = top_path.parent_path();
+    if (!proj_dir.empty()) {
+        proj_path = std::filesystem::path(proj_dir);
+        if (!std::filesystem::exists(proj_path) || !std::filesystem::is_directory(proj_path)) {
+            std::cerr << "Error: Project directory does not exist or is not a directory: " << proj_dir << std::endl;
+            return 1;
+        }
+    }
+
+    VulStaticProject project = parseVcppStaticProject(proj_path.string(), top_path.string(), main_path.string());
+
+    std::filesystem::path out_path(out_dir);
+    if (!std::filesystem::exists(out_path)) {
+        std::filesystem::create_directories(out_path);
+    } else if (!std::filesystem::is_directory(out_path)) {
+        std::cerr << "Error: Output path is not a directory: " << out_dir << std::endl;
+        return 1;
+    } else {
+        // ask user to confirm before deleting existing files in the output directory
+        std::cout << "Output directory already exists: " << out_dir << std::endl;
+        std::cout << "Do you want to clear the output directory before generating code? (y/n) ";
+        char choice;
+        std::cin >> choice;
+        if (choice == 'y' || choice == 'Y') {
+            std::filesystem::remove_all(out_path);
+            std::filesystem::create_directories(out_path);
+        } else {
+            std::cerr << "Error: Output directory is not empty. Please clear the output directory or choose a different output directory." << std::endl;
+            return 1;
+        }
+    }
+
+    writeLinesToFile(simgen::genStaticConfigHeaderCode(project.global_configlib), (out_path / "config.h").string());
+    writeLinesToFile(simgen::genStaticBundleHeaderCode(project.global_bundlelib), (out_path / "bundle.h").string());
+
+    // gen module
+    std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
+    bfs_queue.push_back(project.top_module_instance);
+    while (!bfs_queue.empty()) {
+        auto mod_instance = bfs_queue.front();
+        bfs_queue.pop_front();
+        for (const auto &child : mod_instance->children) {
+            bfs_queue.push_back(child);
+        }
+
+        auto codes = simgen::genStaticModuleCodeHpp(*mod_instance);
+        writeLinesToFile(codes.decl, (out_path / (mod_instance->simDeclPath())).string());
+        writeLinesToFile(codes.impl, (out_path / (mod_instance->simImplPath())).string());
+        for (const auto &res_file : codes.resource_files) {
+            std::filesystem::path src_file = proj_path / res_file;
+            if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
+                std::cerr << "Error: Resource file does not exist: " << src_file << ", used in module: " << mod_instance->module_name << std::endl;
+                return 1;
+            }
+            std::filesystem::path dst_file = out_path / res_file;
+            std::filesystem::create_directories(dst_file.parent_path());
+            std::filesystem::copy_file(src_file, dst_file);
+        }
+    }
+
+    // gen test harness module
+    vector<string> testharness_code = simgen::genStaticTestHarnessHpp(
+        project.test_harness, *project.top_module_instance, /*enable_tracing=*/false
+    );
+    writeLinesToFile(testharness_code, (out_path / project.top_module_instance->parent->simDeclPath()).string());
+
+    // gen VulTestMain.hpp
+    vector<string> testmain_code = simgen::genStaticTestMainHpp(project.top_module_instance);
+    writeLinesToFile(testmain_code, (out_path / "VulTestMain.hpp").string());
+
+    // copy vullib runtime files to output directory
+    vector<std::string> runtime_files = {
+        "common.h",
+        "vullib.h",
+        "main.cpp",
+        "pipe.hpp",
+        "storage.hpp",
+        "uint.hpp",
+        "ram.hpp",
+        "vcdrecord.hpp",
+    };
+    std::filesystem::path lib_path(lib_dir);
+    if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
+        std::cerr << "Error: Library directory does not exist: " << lib_dir << std::endl;
+        return 1;
+    }
+    for (const auto &filename : runtime_files) {
+        std::filesystem::path src_file = lib_path / filename;
+        if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
+            std::cerr << "Error: Runtime library file does not exist: " << src_file << std::endl;
+            return 1;
+        }
+        std::filesystem::path dst_file = out_path / filename;
+        std::filesystem::copy_file(src_file, dst_file);
+    }
+
+    // generate build script
+    string projname = project.top_module_instance->module_name;
+    string build_cmd = "g++ -std=c++20 -g -O2 main.cpp -I. -o " + projname;
+    std::ofstream build_script((out_path / "build.sh").string());
+    if (!build_script.is_open()) {
+        std::cerr << "Error: Failed to create build script." << std::endl;
+        return 1;
+    }
+    build_script << "#!/bin/bash\necho \"Building " << projname << "\"\n" << build_cmd << "\n";
+    build_script.close();
+
+    string build_cmd_o3 = "g++ -std=c++20 -O3 main.cpp -I. -o " + projname + "_O3";
+    std::ofstream build_script_o3((out_path / "build_O3.sh").string());
+    if (!build_script_o3.is_open()) {
+        std::cerr << "Error: Failed to create O3 build script." << std::endl;
+        return 1;
+    }
+    build_script_o3 << "#!/bin/bash\necho \"Building " << projname << " with O3 optimization\"\n" << build_cmd_o3 << "\n";
+    build_script_o3.close();
+
+    return 0;
+}
+
+
+int main(int argc, char * argv[]) {
+
+    argparse::ArgumentParser parser("vulsimgen", "VulSim Simulation Generator V1.0");
+    parser.add_argument("-t", "--top")
+        .help("sets the top module file")
+        .required();
+    parser.add_argument("-m", "--main")
+        .help("sets the main test file for test case generation")
+        .default_value(std::string(""))
+        .required();
+    parser.add_argument("-p", "--project")
+        .help("sets the project directory (default: parent directory of the top module file)")
+        .default_value(std::string(""));
+    parser.add_argument("-o", "--out")
+        .help("sets the output directory for generated code (default: ./simout)")
+        .default_value(std::string("./simout"));
+    parser.add_argument("-l", "--lib")
+        .help("sets the directory for runtime library files (default: ./vullib)")
+        .default_value(std::string("./vullib"));
+    parser.add_argument("-T", "--tracefile")
+        .help("tracing signal matcher file for generating tracing code (optional)")
+        .default_value(std::string(""));
+    parser.add_argument("--trace")
+        .help("tracing signal matcher strings seperated by commas (optional)")
+        .default_value(std::string(""));
+    parser.add_argument("--dynamic")
+        .help("generate dynamic simulation code instead of static code")
+        .default_value(false)
+        .implicit_value(true);
+    
+    try {
+        parser.parse_args(argc, argv);
+    } catch (const std::exception &e) {
+        std::cerr << "Argument parsing error: " << e.what() << std::endl;
+        std::cerr << parser.help().str() << std::endl;
+        return 1;
+    }
+    
+    string top_file = parser.get<std::string>("--top");
+    string main_file = parser.get<std::string>("--main");
+    string proj_dir = parser.get<std::string>("--project");
+    string out_dir = parser.get<std::string>("--out");
+    string lib_dir = parser.get<std::string>("--lib");
+    string trace_file = parser.get<std::string>("--tracefile");
+    string trace_line = parser.get<std::string>("--trace");
+    SimGenArgs args{top_file, main_file, proj_dir, out_dir, lib_dir, trace_file, trace_line};
+
+    if (parser.get<bool>("--dynamic")) {
+        return simgenDyn(args);
+    } else {
+        return simgenStatic(args);
+    }
+
+    return 0;
+}

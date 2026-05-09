@@ -10,7 +10,9 @@ SERVICE_PORT(output, void, ARG(uint8_t) s);
 
 // Variables
 
-VAR_INIT(uint64_t, tick_count, 0);
+GLOBAL() {
+    uint64_t tick_count = 0;
+}
 
 // Functions
 

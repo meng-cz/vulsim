@@ -1815,6 +1815,675 @@ ErrorMsg genTestHarnessHpp(
     return "";
 }
 
+vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib) {
+    vector<string> out_lines = genHeaderPrelude();
+
+    out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("// Configuration Items\n");
+    out_lines.push_back("\n");
+
+    for (const auto &cfg : configlib) {
+        out_lines.push_back("constexpr int64_t " + cfg.first + " = " + std::to_string(cfg.second) + ";\n");
+    }
+
+    return out_lines;
+}
+
+string _genStaticMemberTypeStr(const VulStaticBundleMember &member) {
+    string type_str;
+    string base_type = member.type;
+    if (member.uint_length > 0) {
+        base_type = UIntClassName + "<" + std::to_string(member.uint_length) + ">";
+    }
+    if (!member.dims.empty()) {
+        for (const auto &dim : member.dims) {
+            type_str += "std::array<";
+        }
+        type_str += base_type;
+        for (uint32_t i = member.dims.size(); i > 0; i--) {
+            type_str += ", " + std::to_string(member.dims[i-1]) + ">";
+        }
+    } else {
+        type_str = base_type;
+    }
+    return type_str;
+}
+
+vector<string> _genStaticBundle(const VulStaticBundle &bundle) {
+    vector<string> out_lines;
+
+    if (bundle.is_alias) {
+        if (!bundle.members.empty()) {
+            string alias_target = _genStaticMemberTypeStr(bundle.members[0]);
+            out_lines.push_back("using " +  bundle.name + " = " + alias_target + ";\n");
+        }
+    } else if (!bundle.enum_members.empty()) {
+        out_lines.push_back("enum class " + bundle.name + " {\n");
+        for (const auto &enum_member : bundle.enum_members) {
+            if (enum_member.has_value) {
+                out_lines.push_back(CodeTab + enum_member.name + " = " + std::to_string(enum_member.value) + ",\n");
+            } else {
+                out_lines.push_back(CodeTab + enum_member.name + ",\n");
+            }
+        }
+        out_lines.push_back("};\n");
+    } else {
+        out_lines.push_back("struct " + bundle.name + " {\n");
+        for (const auto &member : bundle.members) {
+            string type_str = _genStaticMemberTypeStr(member);
+            out_lines.push_back(CodeTab + type_str + " " + member.name + ";\n");
+        }
+        out_lines.push_back("};\n");
+    }
+
+    return out_lines;
+}
+
+vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib) {
+    vector<string> out_lines = genHeaderPrelude();
+
+    out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("#include \"config.h\"\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("// Bundle Definitions\n");
+    out_lines.push_back("\n");
+
+
+    for (const auto &bundle : bundlelib) {
+        auto bundle_lines = _genStaticBundle(bundle);
+        out_lines.insert(out_lines.end(), bundle_lines.begin(), bundle_lines.end());
+        out_lines.push_back("\n");
+    }
+
+    return out_lines;
+}
+
+StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod) {
+
+    vector<string> decl_include_field;
+    vector<string> decl_public_field;
+    vector<string> decl_private_field;
+
+    vector<string> impl_field;
+    vector<string> impl_init_field;
+    vector<string> impl_commit_field;
+    vector<string> impl_sys_reset_field;
+    vector<string> impl_reg_reset_field;
+
+    string mod_class_name = mod.simClassName();
+
+    // local params and consts
+    for (const auto &param : mod.local_parameters) {
+        decl_private_field.push_back("static constexpr int64_t " + param.first + " = " + std::to_string(param.second) + ";\n");
+    }
+    for (const auto &constvar : mod.local_consts) {
+        decl_private_field.push_back("static constexpr int64_t " + constvar.first + " = " + std::to_string(constvar.second) + ";\n");
+    }
+    // local bundles
+    for (const auto &bundle_entry : mod.local_bundles) {
+        auto bundle_lines = _genStaticBundle(bundle_entry);
+        decl_private_field.insert(decl_private_field.end(), bundle_lines.begin(), bundle_lines.end());
+        decl_private_field.push_back("\n");
+    }
+
+    // generate request declarations
+    for (const auto &req_entry : mod.requests) {
+        const auto &req = req_entry.second;
+        string rettype = _genReqServFuncReturnType(req);
+        string argtypes = _genReqServFuncArgsTypes(req);
+        string argnames = _genReqServFuncArgsNames(req);
+        string arglists = _genReqServFuncArgsList(req);
+
+        decl_private_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ");\n");
+        decl_private_field.push_back("\n");
+
+        string call_prefix = (rettype == "void" ? "" : "return ");
+        impl_field.push_back(rettype + " " + mod_class_name + "::" + req_entry.first + "(" + arglists + ") {\n");
+        impl_field.push_back(CodeTab + call_prefix + "__parent->__wrapper_" + mod.instance_path.back() + "_" + req_entry.first + "(" + argnames + ");\n");
+        impl_field.push_back("}\n");
+        impl_field.push_back("\n");
+    }
+
+    // generate service declarations
+    for (const auto &serv_entry : mod.services) {
+        const auto &serv = serv_entry.second;
+        string rettype = _genReqServFuncReturnType(serv);
+        string argnames = _genReqServFuncArgsNames(serv);
+        string arglists = _genReqServFuncArgsList(serv);
+
+        decl_public_field.push_back(rettype + " " + serv_entry.first + "(" + arglists + ");\n");
+
+        // implemented by logic block, or connented to child module's service
+        auto lb_iter = mod.serv_logic_blocks.find(serv_entry.first);
+        if (lb_iter != mod.serv_logic_blocks.end()) {
+            if (rettype == "void") {
+                impl_field.push_back("void " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
+                impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
+                impl_field.push_back("}\n");
+            } else {
+                decl_private_field.push_back("bool __cond_" + serv_entry.first + "(" + arglists + ");\n");
+                decl_private_field.push_back("void __impl_" + serv_entry.first + "(" + arglists + ");\n");
+
+                impl_field.push_back("bool " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
+                impl_field.push_back(CodeTab + "bool cond = __cond_" + serv_entry.first + "(" + argnames + ");\n");
+                impl_field.push_back(CodeTab + "if (cond) __impl_" + serv_entry.first + "(" + argnames + ");\n");
+                impl_field.push_back(CodeTab + "return cond;\n");
+                impl_field.push_back("}\n");
+
+                impl_field.push_back("bool " + mod_class_name + "::__cond_" + serv_entry.first + "(" + arglists + ") {\n");
+                impl_field.insert(impl_field.end(), lb_iter->second.cond_codelines.begin(), lb_iter->second.cond_codelines.end());
+                impl_field.push_back("}\n");
+
+                impl_field.push_back("void " + mod_class_name + "::__impl_" + serv_entry.first + "(" + arglists + ") {\n");
+                impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
+                impl_field.push_back("}\n");
+            }
+        }
+
+        decl_public_field.push_back("\n");
+        impl_field.push_back("\n");
+    }
+
+    // generate register
+    for (const auto &reg : mod.registers) {
+        const auto &sig = reg.signature;
+        string type_str;
+        string base_type = sig.type;
+        if (sig.uint_length > 0) {
+            base_type = UIntClassName + "<" + std::to_string(sig.uint_length) + ">";
+        }
+        if (!sig.dims.empty()) {
+            type_str += StorageNextArrayClassName + "<" + base_type;
+            for (const auto &dim : sig.dims) {
+                type_str += "," + std::to_string(dim);
+            }
+            if (reg.ports > 1) {
+                type_str = type_str + ", " + std::to_string(reg.ports);
+            }
+            type_str += ">";
+
+            decl_private_field.push_back(type_str + " " + sig.name + ";\n");
+            decl_private_field.push_back("void " + sig.name + "_setnext(const uint64_t idx, const " + base_type + " &value, const uint32_t port = 0) {\n");
+            decl_private_field.push_back(CodeTab + sig.name + ".setnext(idx, value, port);\n");
+            decl_private_field.push_back("}\n");
+            decl_private_field.push_back("\n");
+        } else {
+            if (reg.ports > 1) {
+                type_str = StorageNextClassName + "<" + base_type + ", " + std::to_string(reg.ports) + ">";
+            } else {
+                type_str = StorageNextClassName + "<" + base_type + ">";
+            }
+
+            decl_private_field.push_back(type_str + " " + sig.name + ";\n");
+            decl_private_field.push_back("void " + sig.name + "_setnext(const " + base_type + " &value, const uint32_t port = 0) {\n");
+            decl_private_field.push_back(CodeTab + sig.name + ".setnext(value, port);\n");
+            decl_private_field.push_back("}\n");
+            decl_private_field.push_back("const " + base_type + " &" + sig.name + "_get() const {\n");
+            decl_private_field.push_back(CodeTab + "return " + sig.name + ".get();\n");
+            decl_private_field.push_back("}\n");
+            decl_private_field.push_back("\n");
+        }
+
+        impl_reg_reset_field.push_back("{\n");
+        impl_reg_reset_field.push_back(_genStaticMemberTypeStr(sig) + " " + sig.name + ";\n");
+        impl_reg_reset_field.insert(impl_reg_reset_field.end(), reg.reset_codelines.begin(), reg.reset_codelines.end());
+        impl_reg_reset_field.push_back("this->" + sig.name + ".reset(" + sig.name + ");\n");
+        impl_reg_reset_field.push_back("}\n");
+
+        impl_commit_field.push_back(sig.name + "." + ApplyTickFunctionName + "();\n");
+    }
+
+    // generate wire
+    for (const auto &wire : mod.wires) {
+        const auto &sig = wire.signature;
+        string type_str = _genStaticMemberTypeStr(sig);
+
+        decl_private_field.push_back(type_str + " " + sig.name + ";\n");
+        decl_private_field.push_back("\n");
+
+        impl_commit_field.push_back("{\n");
+        impl_commit_field.insert(impl_commit_field.end(), wire.reset_codelines.begin(), wire.reset_codelines.end());
+        impl_commit_field.push_back("}\n");
+        impl_reg_reset_field.push_back("{\n");
+        impl_reg_reset_field.insert(impl_reg_reset_field.end(), wire.reset_codelines.begin(), wire.reset_codelines.end());
+        impl_reg_reset_field.push_back("}\n");
+    }
+
+    vector<string> bram_resources_files;
+    // generate bram
+    for (const auto &bram : mod.brams) {
+        string bram_class = "";
+        if (bram.read_ports == 0 || bram.write_ports == 0) {
+            bram_class = BlockRAM1RWClassName + "<" +
+                std::to_string(bram.data_width) + ", " +
+                std::to_string(bram.addr_width) + ">";
+        } else {
+            bram_class = BlockRAMClassName + "<" +
+            std::to_string(bram.data_width) + ", " +
+            std::to_string(bram.addr_width) + ", " + 
+            std::to_string(bram.read_ports) + ", " +
+            std::to_string(bram.write_ports) + ">";
+        }
+        string bram_constr_param = "";
+        if (!bram.init_path.empty()) {
+            // strip " from path if exists
+            string init_path = bram.init_path;
+            if (init_path.size() >= 2 && init_path.front() == '"' && init_path.back() == '"') {
+                init_path = init_path.substr(1, init_path.size() - 2);
+            }
+            bram_constr_param = "\"" + init_path + "\", " + (bram.init_hex ? "true" : "false");
+            bram_resources_files.push_back(init_path);
+        }
+
+        decl_private_field.push_back(bram_class + " " + bram.name + "{" + bram_constr_param + "};\n");
+        impl_commit_field.push_back(CodeTab + bram.name + "." + ApplyTickFunctionName + "();\n");
+    }
+
+    // generate instances
+    for (const auto &inst_entry : mod.instances) {
+        const auto &inst = inst_entry.second;
+        const auto &inst_name = inst_entry.first;
+
+        shared_ptr<VulStaticModuleInstance> inst_mod_ptr;
+        for (auto &mod_ptr : mod.children) {
+            if (mod_ptr->instance_path.back() == inst_name) {
+                inst_mod_ptr = mod_ptr;
+                break;
+            }
+        }
+        if (!inst_mod_ptr) {
+            throw std::runtime_error("Instance module not found for instance: " + inst_name);
+        }
+
+        decl_include_field.push_back("#include \"" + inst_mod_ptr->simDeclPath() + "\"\n");
+
+        string child_class_name = inst_mod_ptr->simClassName();
+        string child_instance_ptr_name = "__instptr_" + inst_name;
+        decl_private_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instance_ptr_name + ";\n");
+        impl_init_field.push_back(child_instance_ptr_name + " = std::make_unique<" + child_class_name + ">(this);\n");
+        impl_commit_field.push_back(child_instance_ptr_name + "->" + ApplyTickFunctionName + "();\n");
+        impl_sys_reset_field.push_back(child_instance_ptr_name + "->reset();\n");
+
+        // export services
+        for (const auto &serv_name : inst.referenced_services) {
+            auto serv_iter = inst_mod_ptr->services.find(serv_name);
+            if (serv_iter == inst_mod_ptr->services.end()) {
+                throw std::runtime_error("Service " + serv_name + " not found in module "+ inst_mod_ptr->module_name + " but required by " + mod.module_name);
+            }
+            const auto &serv = serv_iter->second;
+            string rettype = _genReqServFuncReturnType(serv);
+            string arglists = _genReqServFuncArgsList(serv);
+            string argname = _genReqServFuncArgsNames(serv);
+            decl_private_field.push_back(rettype + " " + inst_name + "_" + serv_name + "(" + arglists + ") {\n");
+            string call_prefix = (rettype == "void" ? "" : "return ");
+            decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "(" + argname + ");\n");
+            decl_private_field.push_back("}\n");
+        }
+
+        // connected requests
+        for (const auto &req_entry : inst_mod_ptr->requests) {
+            const auto &req_name = req_entry.first;
+            const auto &req = req_entry.second;
+            string rettype = _genReqServFuncReturnType(req);
+            string arglists = _genReqServFuncArgsList(req);
+            string argname = _genReqServFuncArgsNames(req);
+            decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
+            string call_prefix = (rettype == "void" ? "" : "return ");
+            // find the connected service
+            VulReqServConnection conn;
+            bool found_conn = false;
+            for (const auto &c : mod.req_connections) {
+                if (c.req_instance == inst_name && c.req_name == req_name) {
+                    conn = c;
+                    found_conn = true;
+                    break;
+                }
+            }
+            if (!found_conn) {
+                throw std::runtime_error("No connection found for request " + req_name + " of instance " + inst_name + " in module " + mod.module_name);
+            }
+            if (conn.serv_instance.empty() || conn.serv_instance == VulModule::TopInterface) {
+                // passed to local request/service, directly call the function
+                decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "(" + argname + ");\n");
+            } else {
+                // passed to child module's service
+                decl_public_field.push_back(CodeTab + call_prefix + "__instptr_" + conn.serv_instance + "->" + conn.serv_name + "(" + argname + ");\n");
+            }
+
+            decl_public_field.push_back("}\n");
+        }
+    }
+
+    // tick functions
+    for (uint64_t i = 0; i < mod.tick_blocks.size(); i++) {
+        const auto &tick = mod.tick_blocks[i];
+        string tick_func_name = "__tick" + std::to_string(i);
+
+        decl_private_field.push_back("void " + tick_func_name + "();\n");
+
+        impl_field.push_back("void " + mod_class_name + "::" + tick_func_name + "() {\n");
+        impl_field.insert(impl_field.end(), tick.codelines.begin(), tick.codelines.end());
+        impl_field.push_back("}\n");
+        impl_field.push_back("\n");
+    }
+
+    // preparation done, start generating code lines
+
+    vector<string> decl = genHeaderPrelude();
+    decl.push_back("#include \"common.h\"\n");
+    decl.push_back("#include \"config.h\"\n");
+    decl.push_back("#include \"bundle.h\"\n");
+    decl.push_back("#include \"vullib.h\"\n");
+    decl.push_back("\n");
+
+    // include child module decls
+    for (const auto &line : decl_include_field) {
+        decl.push_back(line);
+    }
+    decl.push_back("\n");
+
+    // declare parent class
+    string parent_class_name = mod.parent->simClassName();
+    decl.push_back("class " + parent_class_name + ";\n");
+    decl.push_back("\n");
+
+    // start class declaration
+    decl.push_back("class " + mod_class_name + " {\n");
+
+    decl.push_back("private:\n");
+    decl.push_back(CodeTab + parent_class_name + " * __parent;\n");
+    decl.push_back("\n");
+
+    // entry declarations
+    decl.push_back("public:\n");
+    decl.push_back("void " + TickFunctionName + "();\n");
+    decl.push_back("void " + ApplyTickFunctionName + "();\n");
+    decl.push_back("void __sys_reset();\n");
+    decl.push_back("void __reg_reset();\n");
+    decl.push_back("void reset() { __sys_reset(); __reg_reset(); }\n");
+    decl.push_back("void init();\n");
+    decl.push_back("\n");
+
+    // constructor declaration
+    decl.push_back(mod_class_name + "(" + parent_class_name + " *parent) : __parent(parent) {\n");
+    decl.push_back(CodeTab + "init();\n");
+    decl.push_back(CodeTab + "__reg_reset();\n");
+    decl.push_back("}\n");
+    decl.push_back("\n");
+
+    // private member declaration
+    decl.push_back("private:\n");
+    for (const auto &line : decl_private_field) {
+        decl.push_back(line);
+    }
+    decl.push_back("\n");
+
+    // public member declaration
+    decl.push_back("public:\n");
+    for (const auto &line : decl_public_field) {
+        decl.push_back(line);
+    }
+    decl.push_back("\n");
+
+    decl.push_back("};\n");
+    decl.push_back("\n");
+
+
+
+    vector<string> impl = genHeaderPrelude();
+
+    impl.push_back("#include \"" + mod.simDeclPath() + "\"\n");
+    impl.push_back("\n");
+
+    // tick function implementations
+    impl.push_back("void " + mod_class_name + "::" + TickFunctionName + "() {\n");
+    for (const auto &id : mod.update_seq) {
+        if (id == mod.instance_id) {
+            // tick functions here
+            for (uint64_t i = 0; i < mod.tick_blocks.size(); i++) {
+                impl.push_back(CodeTab + "__tick" + std::to_string(i) + "();\n");
+            }
+        } else {
+            for (const auto &inst_ptr : mod.children) {
+                if (inst_ptr->instance_id == id) {
+                    impl.push_back(CodeTab + "__instptr_" + inst_ptr->instance_path.back() + "->" + TickFunctionName + "();\n");
+                    break;
+                }
+            }
+        }
+    }
+    impl.push_back("}\n");
+    impl.push_back("\n");
+
+    // apply tick function implementations
+    impl.push_back("void " + mod_class_name + "::" + ApplyTickFunctionName + "() {\n");
+    impl.insert(impl.end(), impl_commit_field.begin(), impl_commit_field.end());
+    impl.push_back("}\n");
+
+    // sys reset function implementations
+    impl.push_back("void " + mod_class_name + "::__sys_reset() {\n");
+    impl.insert(impl.end(), impl_sys_reset_field.begin(), impl_sys_reset_field.end());
+    impl.push_back("}\n");
+    impl.push_back("\n");
+
+    // reg reset function implementations
+    impl.push_back("void " + mod_class_name + "::__reg_reset() {\n");
+    impl.insert(impl.end(), impl_reg_reset_field.begin(), impl_reg_reset_field.end());
+    impl.push_back("}\n");
+    impl.push_back("\n");
+
+    // init function implementations
+    impl.push_back("void " + mod_class_name + "::init() {\n");
+    impl.insert(impl.end(), impl_init_field.begin(), impl_init_field.end());
+    impl.push_back("}\n");
+    impl.push_back("\n");
+
+    // other function implementations
+    impl.insert(impl.end(), impl_field.begin(), impl_field.end());
+
+    return {decl, impl, bram_resources_files};
+}
+
+
+vector<string> genStaticTestHarnessHpp(
+    const VulStaticTestHarnessModule &test_module,
+    const VulStaticModuleInstance &top_module,
+    bool enable_tracing
+) {
+    
+    vector<string> init_field;
+    vector<string> member_field;
+    vector<string> public_member_field;
+    vector<string> simulation_field;
+    vector<string> const_field;
+
+    string child_instptr_name = "__instptr_top";
+    string child_class_name = top_module.simClassName();
+
+    member_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instptr_name + ";\n");
+    init_field.push_back(CodeTab + child_instptr_name + " = std::make_unique<" + child_class_name + ">(this);\n");
+
+    for (const auto &req_entry : test_module.requests) {
+        const auto &req = req_entry.second;
+        string rettype = _genReqServFuncReturnType(req);
+        string argtypes = _genReqServFuncArgsTypes(req);
+        string argnames = _genReqServFuncArgsNames(req);
+        string arglists = _genReqServFuncArgsList(req);
+        member_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ") {\n");
+        string return_prefix = (rettype == "void" ? "" : "return ");
+        member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + req_entry.first + "(" + argnames + ");\n");
+        member_field.push_back("}\n");
+        member_field.push_back("\n");
+    }
+
+    for (const auto &serve : test_module.services) {
+        const auto &serv = serve.second;
+        string rettype = _genReqServFuncReturnType(serv);
+        string argtypes = _genReqServFuncArgsTypes(serv);
+        string argnames = _genReqServFuncArgsNames(serv);
+        string arglists = _genReqServFuncArgsList(serv);
+
+        public_member_field.push_back(rettype + " __wrapper_" + top_module.instance_path.back() + "_" + serve.first + "(" + arglists + ") {\n");
+        if (serv.has_handshake) {
+            public_member_field.push_back(CodeTab + "bool cond = __cond_" + serve.first + "(" + argnames + ");\n");
+            public_member_field.push_back(CodeTab + "if (cond) __impl_" + serve.first + "(" + argnames + ");\n");
+            public_member_field.push_back(CodeTab + "return cond;\n");
+        } else {
+            public_member_field.push_back(CodeTab + "__impl_" + serve.first + "(" + argnames + ");\n");
+        }
+        public_member_field.push_back("}\n");
+    }
+    for (const auto &scode_entry : test_module.serv_codelines) {
+        const auto &serv_name = scode_entry.first;
+        const auto &code_lines = scode_entry.second;
+        // find the service declaration to get argument list
+        auto serv_iter = test_module.services.find(serv_name);
+        if (serv_iter != test_module.services.end()) {
+            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            member_field.push_back("void __impl_" + serv_name + "(" + arglists + ") {\n");
+        } else {
+            member_field.push_back("void __impl_" + serv_name + "() {\n");
+        }
+        for (const auto &line : code_lines) {
+            if (line.ends_with("\n")) {
+                member_field.push_back(line);
+            } else {
+                member_field.push_back(line + "\n");
+            }
+        }
+        member_field.push_back("}\n");
+    }
+    for (const auto &scode_entry : test_module.serv_cond_codelines) {
+        const auto &serv_name = scode_entry.first;
+        const auto &code_lines = scode_entry.second;
+        // find the service declaration to get argument list
+        auto serv_iter = test_module.services.find(serv_name);
+        if (serv_iter != test_module.services.end() && serv_iter->second.has_handshake) {
+            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            member_field.push_back("bool __cond_" + serv_name + "(" + arglists + ") {\n");
+            for (const auto &line : code_lines) {
+                if (line.ends_with("\n")) {
+                    member_field.push_back(line);
+                } else {
+                    member_field.push_back(line + "\n");
+                }
+            }
+            member_field.push_back("}\n");
+        }
+    }
+
+    simulation_field = test_module.test_codelines;
+
+    vector<string> out_lines = genHeaderPrelude();
+    out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("#include \"config.h\"\n");
+    out_lines.push_back("#include \"bundle.h\"\n");
+    out_lines.push_back("#include \"vullib.h\"\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("#include \"" + top_module.simDeclPath() + "\"\n");
+    out_lines.push_back("\n");
+
+    for (const auto &includes : test_module.includedHeaders) {
+        out_lines.push_back("#include \"" + includes + "\"\n");
+    }
+    out_lines.push_back("\n");
+
+    string class_name = top_module.parent->simClassName();
+    out_lines.push_back("class " + class_name + " {\n");
+
+    out_lines.push_back("protected:\n");
+    for (const auto &line : const_field) {
+        out_lines.push_back(line);
+    }
+    for (const auto &line : test_module.globalCodes) {
+        out_lines.push_back(line);
+    }
+
+    out_lines.push_back("public:\n");
+    out_lines.push_back(class_name + "() {\n");
+    for (const auto &line : init_field) {
+        out_lines.push_back(line);
+    }
+    if (enable_tracing) {
+        out_lines.push_back(CodeTab + "trace_init(\"trace.vcd\", 1, 1000);\n");
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("void simulation() {\n");
+    for (const auto &line : simulation_field) {
+        if (line.ends_with("\n")) {
+            out_lines.push_back(line);
+        } else {
+            out_lines.push_back(line + "\n");
+        }
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    out_lines.insert(out_lines.end(), public_member_field.begin(), public_member_field.end());
+
+    out_lines.push_back("protected:\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("void sim_execute() {\n");
+    out_lines.push_back(CodeTab + child_instptr_name + "->" + TickFunctionName + "();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("void sim_commit() {\n");
+    out_lines.push_back(CodeTab + child_instptr_name + "->" + ApplyTickFunctionName + "();\n");
+    if (enable_tracing) {
+        out_lines.push_back(CodeTab + "trace_commit();\n");
+    }
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("void sim_reset() {\n");
+    out_lines.push_back(CodeTab + child_instptr_name + "->reset();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
+    for (const auto &line : member_field) {
+        out_lines.push_back(line);
+    }
+
+    out_lines.push_back("};\n");
+    out_lines.push_back("\n");
+
+    return out_lines;
+}
+
+vector<string> genStaticTestMainHpp(shared_ptr<VulStaticModuleInstance> top_module) {
+    
+    vector<string> out_lines = genHeaderPrelude();
+
+    out_lines.push_back("#include \"" + top_module->parent->simDeclPath() + "\"\n");
+    out_lines.push_back("\n");
+
+    // include all instances' impl headers
+    std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
+    bfs_queue.push_back(top_module);
+    while (!bfs_queue.empty()) {
+        auto mod_ptr = bfs_queue.front();
+        bfs_queue.pop_front();
+        out_lines.push_back("#include \"" + mod_ptr->simImplPath() + "\"\n");
+        for (const auto &child : mod_ptr->children) {
+            bfs_queue.push_back(child);
+        }
+    }
+
+    out_lines.push_back("\n");
+
+    // alias top-sim module's class name to VulTestMain
+    string top_class_name = top_module->parent->simClassName();
+    out_lines.push_back("using VulTestMain = " + top_class_name + ";\n");
+    out_lines.push_back("\n");
+
+    return out_lines;
+}
+
 
 
 } // namespace simgen

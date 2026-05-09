@@ -101,5 +101,6 @@ struct BlockResult {
 
 BlockResult findNextBraceBlock(const std::vector<std::string>& code, LinePosition start, const char begin, const char end, bool keep_nextline = false);
 
+bool codeblockContainsFunctionCall(const std::vector<std::string>& code, const std::string& func_name);
 
 } // namespace cppparse

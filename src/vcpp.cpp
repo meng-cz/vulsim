@@ -33,6 +33,7 @@ using namespace cppparse;
 #include <sstream>
 #include <filesystem>
 #include <assert.h>
+#include <optional>
 
 struct MemberDecl {
     std::string type;
@@ -944,5 +945,849 @@ VulProject parseVcppProject(
 }
 
 
+void _parseStaticModule(
+    const std::vector<std::string>& code,
+    const VulStaticConfigLib &configlib,
+    const VulStaticConfigLib &param_overrides,
+    VulStaticModuleInstance &module
+) {
+    VulStaticConfigLib local_configlib = configlib; // copy global config lib to local, will add local consts to it
 
+    {
+        // parse params
+        auto matches = matchMacros(code, "PARAMETER($,$)");
+        for (const auto& item : matches) {
+            ConfigRealValue value = 0;
+            const string &param_name = item.args[0];
+            const string &param_value_str = item.args[1];
+            auto iter = param_overrides.find(param_name);
+            if (iter != param_overrides.end()) {
+                // override parameter value
+                value = iter->second;
+            } else {
+                ErrorMsg err = calculateConstexprValue(param_value_str, configlib, value);
+                if (err.error()) {
+                    std::cerr << "Error: Failed to evaluate parameter value for " << param_name << ": " << err.msg << std::endl;
+                    assert(0);
+                }
+            }
+            module.local_parameters[param_name] = value;
+        }
+    }
+    {
+        // parse consts
+        auto consts = _parseConsts(code);
+        for (const auto& item : consts) {
+            ConfigRealValue value = 0;
+            ErrorMsg err = calculateConstexprValue(item.value, configlib, value);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate constant value for " << item.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            local_configlib[item.name] = value;
+            module.local_consts[item.name] = value;
+        }
+    }
+    {
+        // parse bundles
+        auto bundles = _parseBundles(code);
+        for (const auto& item : bundles) {
+            VulStaticBundle static_bundle;
+            auto err = staticalizeBundle(item, local_configlib, static_bundle);
+            if (err.error()) {
+                std::cerr << "Error: Failed to staticalize bundle " << item.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            module.local_bundles.push_back(std::move(static_bundle));
+        }
+    }
+    auto parse_reg_uint_type = [](const string& type_str, const VulStaticConfigLib &configlib, VulStaticBundleMember &signature) -> ErrorMsg {
+        // parse UInt<N> to extract N
+        const string prefix = "UInt<";
+        const string suffix = ">";
+        if (type_str.substr(0, prefix.size()) == prefix && type_str.size() > prefix.size() + suffix.size() && type_str.substr(type_str.size() - suffix.size()) == suffix) {
+            string num_str = type_str.substr(prefix.size(), type_str.size() - prefix.size() - suffix.size());
+            ConfigRealValue value = 0;
+            ErrorMsg err = calculateConstexprValue(num_str, configlib, value);
+            if (err.error()) {
+                return ErrorMsg(err.code, "Failed to evaluate bit width in type " + type_str + ": " + err.msg);
+            }
+            signature.type = "UInt";
+            signature.uint_length = value;
+        } else {
+            signature.type = type_str;
+            signature.uint_length = 0;
+        }
+        return "";
+    };
+    {
+        // parse register
+        auto matches = matchMacros(code, "REGISTER($,$)");
+        for (const auto& item : matches) {
+            VulStaticRegister reg;
+            reg.signature.name = item.args[0];
+            ErrorMsg err = parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
+            if (err.error()) {
+                std::cerr << "Error: Failed to parse type for register " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            reg.ports = 1;
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                reg.reset_codelines = split(block.content, '\n');
+            }
+            module.registers.push_back(std::move(reg));
+        }
+        matches = matchMacros(code, "REGISTER_ARRAY1($,$,$,$)");
+        for (const auto& item : matches) {
+            VulStaticRegister reg;
+            reg.signature.name = item.args[0];
+            ErrorMsg err = parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
+            if (err.error()) {
+                std::cerr << "Error: Failed to parse type for register " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            ConfigRealValue array_size = 0;
+            err = calculateConstexprValue(item.args[2], local_configlib, array_size);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate array size for register " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            reg.signature.dims.push_back(array_size);
+            err = calculateConstexprValue(item.args[3], local_configlib, array_size);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate multiplier for register " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            reg.ports = (array_size > 1) ? array_size : 1;
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                reg.reset_codelines = split(block.content, '\n');
+            }
+            module.registers.push_back(std::move(reg));
+        }
+        matches = matchMacros(code, "REGISTER_MUL($,$,$)");
+        for (const auto& item : matches) {
+            VulStaticRegister reg;
+            reg.signature.name = item.args[0];
+            ErrorMsg err = parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
+            if (err.error()) {
+                std::cerr << "Error: Failed to parse type for register " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            ConfigRealValue portnum = 0;
+            err = calculateConstexprValue(item.args[2], local_configlib, portnum);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate multiplier for register " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            reg.ports = (portnum > 1) ? portnum : 1;
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                reg.reset_codelines = split(block.content, '\n');
+            }
+            module.registers.push_back(std::move(reg));
+        }
+    }
+    {
+        // parse wire
+        auto matches = matchMacros(code, "WIRE($,$)");
+        for (const auto& item : matches) {
+            VulStaticWire reg;
+            reg.signature.name = item.args[0];
+            ErrorMsg err = parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
+            if (err.error()) {
+                std::cerr << "Error: Failed to parse type for wire " << reg.signature.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
+            if (block.end_pos.line != -1) {
+                reg.reset_codelines = split(block.content, '\n');
+            }
+            module.wires.push_back(std::move(reg));
+        }
+    }
+    {
+        // parse req/serv ports
+        auto matches = matchMacros(code, "REQUEST_PORT()");
+        for (const auto& item : matches) {
+            VulReqServ req = _parseReqServPort(item.args);
+            module.requests[req.name] = req;
+        }
+        matches = matchMacros(code, "SERVICE_PORT()");
+        for (const auto& item : matches) {
+            VulReqServ serv = _parseReqServPort(item.args);
+            module.services[serv.name] = serv;
+        }
+    }
+    {
+        // parse SERVICE_COND_IMPL
+        auto matches = matchMacros(code, "SERVICE_COND_IMPL()");
+
+        for (const auto& item : matches) {
+            if (item.args.size() < 1) {
+                std::cerr << "Error: SERVICE_COND_IMPL requires at least one argument (service name)" << std::endl;
+                assert(0);
+            }
+            const std::string& serv_name = item.args[0];
+            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SERVICE_COND_IMPL for service " << serv_name << " has no body" << std::endl;
+                assert(0);
+            }
+            auto lb_iter = module.serv_logic_blocks.find(serv_name);
+            if (lb_iter == module.serv_logic_blocks.end()) {
+                // 如果没有对应的逻辑块，先创建一个空的逻辑块
+                VulLogicBlock logic_block;
+                logic_block.priority = 0;
+                logic_block.cond_codelines = split(block.content, '\n');
+                logic_block.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
+                module.serv_logic_blocks[serv_name] = logic_block;
+            } else {
+                // 已经有逻辑块了，说明之前解析到 SERVICE_LOGIC_IMPL 了，现在补充条件代码
+                lb_iter->second.cond_codelines = split(block.content, '\n');
+            }
+        }
+    }
+    {
+        // parse SERVICE_LOGIC_IMPL
+        auto matches = matchMacros(code, "SERVICE_LOGIC_IMPL()");
+        auto matches_prio = matchMacros(code, "SERVICE_LOGIC_IMPL_PRIO()");
+        for (const auto & item : matches) {
+            // insert empty priority 0 at item[2] and pushed into matches_prio
+            vector<string> new_args;
+            new_args.push_back(item.args[0]);
+            new_args.push_back("0"); // default priority 0
+            for (size_t i = 1; i < item.args.size(); ++i) {
+                new_args.push_back(item.args[i]);
+            }
+            matches_prio.push_back({item.pos, new_args});
+        }
+        for (const auto& item : matches_prio) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: SERVICE_LOGIC_IMPL_PRIO requires at least two arguments (service name and priority)" << std::endl;
+                assert(0);
+            }
+            const std::string& serv_name = item.args[0];
+            const std::string& priority_str = item.args[1];
+            int32_t priority = std::stoi(priority_str);
+            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SERVICE_LOGIC_IMPL for service " << serv_name << " has no body" << std::endl;
+                assert(0);
+            }
+            auto lb_iter = module.serv_logic_blocks.find(serv_name);
+            if (lb_iter == module.serv_logic_blocks.end()) {
+                VulLogicBlock logic_block;
+                logic_block.priority = priority;
+                logic_block.codelines = split(block.content, '\n');
+                logic_block.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
+                module.serv_logic_blocks[serv_name] = logic_block;
+            } else {
+                lb_iter->second.codelines = split(block.content, '\n');
+                lb_iter->second.priority = priority; // 更新优先级
+            }
+        }
+    }
+    const string tick_func_name = "tick";
+    {
+        uint32_t tick_impl_count = 0;
+        // parse TICK_IMPL
+        auto matches = matchMacros(code, "TICK_IMPL()");
+        if (!matches.empty()) {
+            for (const auto & match : matches) {
+                auto block = findNextBraceBlock(code, match.pos, '{', '}', true);
+                if (block.end_pos.line == -1) {
+                    std::cerr << "Error: TICK_IMPL has no body" << std::endl;
+                    assert(0);
+                }
+                VulTickBlock tick_block;
+                tick_block.codelines = split(block.content, '\n');
+                module.tick_blocks.push_back(std::move(tick_block));
+            }
+        } else {
+            // 没有提供 TICK_IMPL，使用默认空实现
+            VulTickBlock tick_block;
+            tick_block.codelines = {};
+            module.tick_blocks.push_back(std::move(tick_block));
+        }
+    }
+    {
+        // parse CHILD_INSTANCE(module, instance, param1=value1, param2=value2, ...)
+        auto matches = matchMacros(code, "CHILD_INSTANCE()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: CHILD_INSTANCE requires at least two arguments (module name and instance name)" << std::endl;
+                assert(0);
+            }
+            ModuleName child_module = item.args[0];
+            std::string instance_name = item.args[1];
+            unordered_map<std::string, std::string> param_values;
+            for (size_t i = 2; i < item.args.size(); ++i) {
+                const std::string& arg = item.args[i];
+                size_t eq_pos = arg.find('=');
+                if (eq_pos == std::string::npos) {
+                    std::cerr << "Error: Invalid parameter assignment in CHILD_INSTANCE: " << arg << std::endl;
+                    assert(0);
+                }
+                std::string param_name = trim(arg.substr(0, eq_pos));
+                std::string param_value = trim(arg.substr(eq_pos + 1));
+                param_values[param_name] = param_value;
+            }
+
+            VulStaticInstanceDecl instance;
+            instance.name = instance_name;
+            instance.module_name = child_module;
+            for (const auto& [param_name, param_value] : param_values) {
+                ConfigRealValue value = 0;
+                ErrorMsg err = calculateConstexprValue(param_value, configlib, value);
+                if (err.error()) {
+                    std::cerr << "Error: Failed to evaluate parameter value for instance " << instance_name << ": " << err.msg << std::endl;
+                    assert(0);
+                }
+                instance.parameter_overrides[param_name] = value;
+            }
+            module.instances[instance.name] = instance;
+        }
+        // parse USE_CHILD_SERVICE_PORT(instance, serv, ret, ...)
+        matches = matchMacros(code, "USE_CHILD_SERVICE_PORT()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: USE_CHILD_SERVICE_PORT requires at least two arguments (instance name and service name)" << std::endl;
+                assert(0);
+            }
+            std::string instance_name = item.args[0];
+            std::string serv_name = item.args[1];
+            auto instance_iter = module.instances.find(instance_name);
+            if (instance_iter == module.instances.end()) {
+                std::cerr << "Error: Instance not found for USE_CHILD_SERVICE_PORT: " << instance_name << std::endl;
+                assert(0);
+            }
+            instance_iter->second.referenced_services.insert(serv_name);
+        }
+    }
+    {
+        // parse CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv)
+        auto matches = matchMacros(code, "CONNECT_CR_CS($,$,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = item.args[0];
+            conn.req_name = item.args[1];
+            conn.serv_instance = item.args[2];
+            conn.serv_name = item.args[3];
+            module.req_connections.push_back(conn);
+        }
+        // parse CONNECT_CR_S(srcmod, srcreq, dstserv)
+        matches = matchMacros(code, "CONNECT_CR_S($,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = item.args[0];
+            conn.req_name = item.args[1];
+            conn.serv_instance = VulModule::TopInterface; // 连接到顶层接口
+            conn.serv_name = item.args[2];
+            module.req_connections.push_back(conn);
+        }
+        // parse CONNECT_CR_R(srcmod, srcreq, dstreq)
+        matches = matchMacros(code, "CONNECT_CR_R($,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = item.args[0];
+            conn.req_name = item.args[1];
+            conn.serv_instance = VulModule::TopInterface; // 连接到顶层接口
+            conn.serv_name = item.args[2];
+            module.req_connections.push_back(conn);
+        }
+        // parse CONNECT_S_CS(srcserv, dstmod, dstserv)
+        matches = matchMacros(code, "CONNECT_S_CS($,$,$)");
+        for (const auto& item : matches) {
+            VulReqServConnection conn;
+            conn.req_instance = VulModule::TopInterface; // 连接到顶层接口
+            conn.req_name = item.args[0];
+            conn.serv_instance = item.args[1];
+            conn.serv_name = item.args[2];
+            module.req_connections.push_back(conn);
+        }
+    }
+    {
+        // parse BRAM
+        vector<VulBlockRAM> brams;
+        auto matches = matchMacros(code, "BRAM($,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = item.args[3];
+            bram.write_ports = item.args[4];
+            bram.init_path = "";
+            bram.init_hex = false;
+            brams.push_back(bram);
+        }
+        matches = matchMacros(code, "BRAM_INIT_H($,$,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = item.args[3];
+            bram.write_ports = item.args[4];
+            bram.init_path = item.args[5];
+            bram.init_hex = true;
+            brams.push_back(bram);
+        }
+        matches = matchMacros(code, "BRAM_INIT_B($,$,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = item.args[3];
+            bram.write_ports = item.args[4];
+            bram.init_path = item.args[5];
+            bram.init_hex = false;
+            brams.push_back(bram);
+        }
+        matches = matchMacros(code, "BRAM_1RW($,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = "0";
+            bram.write_ports = "0";
+            bram.init_path = "";
+            bram.init_hex = false;
+            brams.push_back(bram);
+        }
+        matches = matchMacros(code, "BRAM_1RW_INIT_H($,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = "0";
+            bram.write_ports = "0";
+            bram.init_path = item.args[3];
+            bram.init_hex = true;
+            brams.push_back(bram);
+        }
+        matches = matchMacros(code, "BRAM_1RW_INIT_B($,$,$,$)");
+        for (const auto& item : matches) {
+            VulBlockRAM bram;
+            bram.name = item.args[0];
+            bram.data_width = item.args[1];
+            bram.addr_width = item.args[2];
+            bram.read_ports = "0";
+            bram.write_ports = "0";
+            bram.init_path = item.args[3];
+            bram.init_hex = false;
+            brams.push_back(bram);
+        }
+        for (auto& bram : brams) {
+            VulStaticBRAM static_bram;
+            static_bram.name = bram.name;
+            static_bram.init_path = bram.init_path;
+            static_bram.init_hex = bram.init_hex;
+            ErrorMsg err = calculateConstexprValue(bram.data_width, local_configlib, static_bram.data_width);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate data width for BRAM " << bram.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            err = calculateConstexprValue(bram.addr_width, local_configlib, static_bram.addr_width);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate address width for BRAM " << bram.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            err = calculateConstexprValue(bram.read_ports, local_configlib, static_bram.read_ports);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate read ports for BRAM " << bram.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            err = calculateConstexprValue(bram.write_ports, local_configlib, static_bram.write_ports);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate write ports for BRAM " << bram.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            module.brams.push_back(std::move(static_bram));
+        }
+    }
+}
+
+VulStaticTestHarnessModule _parseStaticTestHarnessModule(
+    const std::vector<std::string>& code,
+    const VulStaticConfigLib &configlib
+) {
+    VulStaticTestHarnessModule module;
+    VulStaticConfigLib local_configlib = configlib;
+    
+    // {
+    //     // parse consts
+    //     auto consts = _parseConsts(code);
+    //     for (const auto& item : consts) {
+    //         ConfigRealValue value = 0;
+    //         ErrorMsg err = calculateConstexprValue(item.value, configlib, value);
+    //         if (err.error()) {
+    //             std::cerr << "Error: Failed to evaluate constant value for " << item.name << ": " << err.msg << std::endl;
+    //             assert(0);
+    //         }
+    //         local_configlib[item.name] = value;
+    //         module.local_consts[item.name] = value;
+    //     }
+    // }
+    // {
+    //     // parse bundles
+    //     auto bundles = _parseBundles(code);
+    //     for (const auto& item : bundles) {
+    //         VulStaticBundle static_bundle;
+    //         auto err = staticalizeBundle(item, local_configlib, static_bundle);
+    //         if (err.error()) {
+    //             std::cerr << "Error: Failed to staticalize bundle " << item.name << ": " << err.msg << std::endl;
+    //             assert(0);
+    //         }
+    //         module.local_bundles.push_back(std::move(static_bundle));
+    //     }
+    // }
+    {
+        // parse test codelines
+        auto matches = matchMacros(code, "SIMULATION()");
+        if (!matches.empty()) {
+            auto block = findNextBraceBlock(code, matches[0].pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SIMULATION has no body" << std::endl;
+                assert(0);
+            }
+            module.test_codelines = split(block.content, '\n');
+        }
+    }
+    {
+        // parse req/serv ports
+        auto matches = matchMacros(code, "REQUEST_PORT()");
+        for (const auto& item : matches) {
+            VulReqServ req = _parseReqServPort(item.args);
+            module.requests[req.name] = req;
+        }
+        matches = matchMacros(code, "SERVICE_PORT()");
+        for (const auto& item : matches) {
+            VulReqServ serv = _parseReqServPort(item.args);
+            module.services[serv.name] = serv;
+        }
+    }
+    {
+        // parse SERVICE_COND_IMPL
+        auto matches = matchMacros(code, "SERVICE_COND_IMPL()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 1) {
+                std::cerr << "Error: SERVICE_COND_IMPL requires at least one argument (service name)" << std::endl;
+                assert(0);
+            }
+            const std::string& serv_name = item.args[0];
+            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SERVICE_COND_IMPL for service " << serv_name << " has no body" << std::endl;
+                assert(0);
+            }
+            module.serv_cond_codelines[serv_name] = split(block.content, '\n');
+        }
+    }
+    {
+        // parse SERVICE_LOGIC_IMPL
+        auto matches = matchMacros(code, "SERVICE_LOGIC_IMPL()");
+        for (const auto& item : matches) {
+            if (item.args.size() < 1) {
+                std::cerr << "Error: SERVICE_LOGIC_IMPL requires at least one argument (service name)" << std::endl;
+                assert(0);
+            }
+            const std::string& serv_name = item.args[0];
+            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: SERVICE_LOGIC_IMPL for service " << serv_name << " has no body" << std::endl;
+                assert(0);
+            }
+            module.serv_codelines[serv_name] = split(block.content, '\n');
+        }
+    }
+    {
+        // parse PARAMETER(name, value)
+        auto matches = matchMacros(code, "PARAMETER($,$)");
+        for (const auto& item : matches) {
+            if (item.args.size() < 2) {
+                std::cerr << "Error: PARAMETER requires at least two arguments (name and value)" << std::endl;
+                assert(0);
+            }
+            ConfigRealValue value = 0;
+            const string &param_name = item.args[0];
+            const string &param_value_str = item.args[1];
+            ErrorMsg err = calculateConstexprValue(param_value_str, configlib, value);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate parameter value for " << param_name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            module.top_config_overrides[param_name] = value;
+        }
+    }
+    {
+        // parse #include "xxx"
+        auto includes = extractIncludes(code);
+        // exclude internal includes (defhelper.hpp, header.hpp, testheader.hpp, run.hpp)
+        includes.erase(std::remove_if(includes.begin(), includes.end(), [](const std::string& s) {
+            return s == "defhelper.hpp" || s == "header.hpp" || s == "testheader.hpp" || s == "run.hpp";
+        }), includes.end());
+        module.includedHeaders = includes;
+    }
+    {
+        // parse GLOBAL() { ...}
+        auto matches = matchMacros(code, "GLOBAL() {");
+        for (const auto& item : matches) {
+            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
+            if (block.end_pos.line == -1) {
+                std::cerr << "Error: GLOBAL() has no body" << std::endl;
+                assert(0);
+            }
+            auto codelines = split(block.content, '\n');
+            module.globalCodes.insert(module.globalCodes.end(), codelines.begin(), codelines.end());
+        }
+    }
+
+    return module;
+}
+
+VulStaticProject parseVcppStaticProject(
+    const string &project_dir,
+    const string &top_file_path,
+    const string &main_file_path
+) {
+    VulStaticProject project;
+
+    using namespace std::filesystem;
+
+    path proj_dir(project_dir);
+    if (!exists(proj_dir) || !is_directory(proj_dir)) {
+        std::cerr << "Error: Project directory does not exist or is not a directory: " << project_dir << std::endl;
+        assert(0);
+    }
+
+    path header_path = proj_dir / "header.hpp";
+    bool header_found = false;
+    if (exists(header_path) && is_regular_file(header_path)) {
+        header_found = true;
+    } else if (exists(proj_dir / "header.h") && is_regular_file(proj_dir / "header.h")) {
+        header_path = proj_dir / "header.h";
+        header_found = true;
+    }
+    if (header_found) {
+        auto header_lines = readFileLines(header_path.string());
+        auto header_strip = stripComments(header_lines);
+        auto consts = _parseConsts(header_strip.lines);
+        for (const auto& item : consts) {
+            ConfigRealValue value = 0;
+            ErrorMsg err = calculateConstexprValue(item.value, project.global_configlib, value);
+            if (err.error()) {
+                std::cerr << "Error: Failed to evaluate constant value for " << item.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            project.global_configlib[item.name] = value;
+        }
+        auto bundles = _parseBundles(header_strip.lines);
+        for (const auto& item : bundles) {
+            VulStaticBundle static_bundle;
+            auto err = staticalizeBundle(item, project.global_configlib, static_bundle);
+            if (err.error()) {
+                std::cerr << "Error: Failed to staticalize bundle " << item.name << ": " << err.msg << std::endl;
+                assert(0);
+            }
+            project.global_bundlelib.push_back(std::move(static_bundle));
+        }
+    }
+
+    path main_path(main_file_path);
+    if (!exists(main_path) || !is_regular_file(main_path)) {
+        std::cerr << "Error: Main file does not exist or is not a regular file: " << main_file_path << std::endl;
+        assert(0);
+    }
+    {
+        auto main_lines = readFileLines(main_path.string());
+        auto main_strip = stripComments(main_lines);
+        project.test_harness = _parseStaticTestHarnessModule(main_strip.lines, project.global_configlib);
+    }
+
+    unordered_map<ModuleName, path> module_file_path_cache;
+    auto find_module_file = [&](const ModuleName& mod_name) -> std::optional<path> {
+        auto iter = module_file_path_cache.find(mod_name);
+        if (iter != module_file_path_cache.end()) {
+            return iter->second;
+        }
+        vector<string> candidates = {
+            mod_name + ".hpp",
+            mod_name + ".cpp",
+            mod_name + ".vul",
+            mod_name + ".h"
+        };
+        for (const auto& candidate : candidates) {
+            // find in project directory recursively
+            vector<path> found_paths;
+            for (auto& p : recursive_directory_iterator(proj_dir)) {
+                if (p.is_regular_file() && p.path().filename() == candidate) {
+                    found_paths.push_back(p.path());
+                }
+            }
+            if (found_paths.size() > 1) {
+                std::cerr << "Error: Multiple files found for module " << mod_name << ": " << std::endl;
+                for (const auto& p : found_paths) {
+                    std::cerr << "  " << p << std::endl;
+                }
+                assert(0);
+            } else if (!found_paths.empty()) {
+                module_file_path_cache[mod_name] = found_paths.front();
+                return found_paths.front();
+            }
+        }
+        return std::nullopt;
+    };
+
+    struct InstanceToProcess {
+        shared_ptr<VulStaticModuleInstance> ptr;
+        VulStaticConfigLib config_overrides;
+    };
+    std::deque<InstanceToProcess> todo_queue;
+
+    shared_ptr<VulStaticModuleInstance> top_instance = std::make_shared<VulStaticModuleInstance>();
+    path top_path(top_file_path);
+    if (!exists(top_path) || !is_regular_file(top_path)) {
+        std::cerr << "Error: Top file does not exist or is not a regular file: " << top_file_path << std::endl;
+        assert(0);
+    }
+    top_instance->module_name = top_path.stem().string();
+    top_instance->instance_path = {"sim", "top"};
+    top_instance->filepath = top_path.string();
+    todo_queue.push_back({top_instance, project.test_harness.top_config_overrides});
+
+    uint32_t module_count = 0;
+
+    while (!todo_queue.empty()) {
+        auto [instance_ptr, config_overrides] = todo_queue.front();
+        todo_queue.pop_front();
+        auto mod_file_opt = find_module_file(instance_ptr->module_name);
+        if (!mod_file_opt.has_value()) {
+            std::cerr << "Error: Module file not found for module " << instance_ptr->module_name << std::endl;
+            assert(0);
+        }
+        path mod_path = mod_file_opt.value();
+        instance_ptr->filepath = mod_path.string();
+        auto mod_lines = readFileLines(mod_path.string());
+        auto mod_strip = stripComments(mod_lines);
+        _parseStaticModule(mod_strip.lines, project.global_configlib, config_overrides, *instance_ptr);
+        detectRequestCallInLogicBlocks(*instance_ptr);
+
+        instance_ptr->instance_id = module_count++;
+
+        // process child instances
+        for (const auto& [child_name, child_instance_decl] : instance_ptr->instances) {
+            shared_ptr<VulStaticModuleInstance> child_instance = std::make_shared<VulStaticModuleInstance>();
+            child_instance->instance_path = instance_ptr->instance_path;
+            child_instance->instance_path.push_back(child_name);
+            child_instance->module_name = child_instance_decl.module_name;
+            child_instance->exported_services = child_instance_decl.referenced_services;
+            child_instance->parent = instance_ptr;
+            instance_ptr->children.push_back(child_instance);
+            todo_queue.push_back({child_instance, child_instance_decl.parameter_overrides});
+        }
+    }
+    project.top_module_instance = top_instance;
+
+
+    printf("Successfully parsed project. Summary:\n");
+    printf("Parse %ld modules:\n", module_file_path_cache.size());
+    for (const auto& [mod_name, mod_path] : module_file_path_cache) {
+        printf("  [%s]: %s\n", mod_name.c_str(), mod_path.string().c_str());
+    }
+    printf("Instance hierarchy:\n");
+    vector<pair<shared_ptr<VulStaticModuleInstance>, size_t>> dfs_stack;
+    dfs_stack.reserve(64);
+    dfs_stack.push_back({top_instance, 1});
+    while (!dfs_stack.empty()) {
+        auto [node, depth] = dfs_stack.back();
+        dfs_stack.pop_back();
+
+        for (size_t i = 0; i < depth; ++i) {
+            putchar(' ');
+        }
+        std::string instance_path_str;
+        for (const auto& name : node->instance_path) {
+            if (!instance_path_str.empty()) {
+                instance_path_str += "::";
+            }
+            instance_path_str += name;
+        }
+        printf("%s [%s]\n", instance_path_str.c_str(), node->module_name.c_str());
+
+        for (size_t i = node->children.size(); i > 0; --i) {
+            dfs_stack.push_back({node->children[i - 1], depth + 1});
+        }
+    }
+    printf("Total instances: %d\n", module_count);
+    
+
+    printf("Setting up simulation hierarchy and update sequence...\n");
+
+    shared_ptr<VulStaticModuleInstance> fake_main = std::make_shared<VulStaticModuleInstance>();
+    fake_main->instance_path = {"sim", "main"};
+    fake_main->module_name = "TestMain";
+    fake_main->instance_id = module_count + 1;
+    fake_main->tick_blocks.push_back(VulTickBlock());
+
+    shared_ptr<VulStaticModuleInstance> sim_top = std::make_shared<VulStaticModuleInstance>();
+    sim_top->instance_path = {"sim"};
+    sim_top->module_name = "SimTop";
+    sim_top->filepath = main_file_path;
+    sim_top->instance_id = module_count + 2;
+    sim_top->tick_blocks.push_back(VulTickBlock());
+
+    for (const auto &req_entry: project.top_module_instance->requests) {
+        fake_main->services[req_entry.first] = req_entry.second;
+        VulLogicBlock logic_block;
+        logic_block.block_id = fake_main->services.size();
+        logic_block.with_priority = false;
+        fake_main->serv_logic_blocks[req_entry.first] = logic_block;
+        VulReqServConnection conn;
+        conn.req_instance = "top";
+        conn.req_name = req_entry.first;
+        conn.serv_instance = "main";
+        conn.serv_name = req_entry.first;
+        sim_top->req_connections.push_back(conn);
+    }
+    for (const auto &serv_entry: project.top_module_instance->services) {
+        fake_main->requests[serv_entry.first] = serv_entry.second;
+        LogicBlockCall call;
+        call.instance = "";
+        call.port = serv_entry.first;
+        fake_main->tick_blocks[0].call_requests.push_back(call);
+        VulReqServConnection conn;
+        conn.req_instance = "main";
+        conn.req_name = serv_entry.first;
+        conn.serv_instance = "top";
+        conn.serv_name = serv_entry.first;
+        sim_top->req_connections.push_back(conn);
+    }
+
+    VulStaticInstanceDecl main_decl;
+    main_decl.name = "main";
+    main_decl.module_name = "TestMain";
+    sim_top->instances["main"] = main_decl;
+    VulStaticInstanceDecl top_decl;
+    top_decl.name = "top";
+    top_decl.module_name = project.top_module_instance->module_name;
+    sim_top->instances["top"] = top_decl;
+
+    sim_top->children.push_back(fake_main);
+    sim_top->children.push_back(project.top_module_instance);
+
+    fake_main->parent = sim_top;
+    project.top_module_instance->parent = sim_top;
+
+    setupUpdateSequence(sim_top);
+
+    printf("Setup complete.\n");
+
+    return project;
+}
 

@@ -17,7 +17,9 @@ REGISTER(state, uint32_t) {
     state = 0;
 }
 
-WIRE(inputed, bool, false);
+WIRE(inputed, bool) {
+    inputed = false;
+}
 
 // Port
 

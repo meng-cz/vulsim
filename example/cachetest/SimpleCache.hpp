@@ -24,7 +24,9 @@ REGISTER(read_stage, ReadStageReg) {
     read_stage.valid = false;
 }
 
-WIRE(read_inputed, bool, false);
+WIRE(read_inputed, bool) {
+    read_inputed = false;
+}
 
 // Port
 
