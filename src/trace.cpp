@@ -297,3 +297,58 @@ vector<VulTracedModule> parseTraceOptions(const VulProject &project, const vecto
 
     return traced_modules;
 }
+
+VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<VulTraceMatcher> &trace_matchers) {
+
+    VulTraceTable trace_table;
+
+    std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
+    bfs_queue.push_back(project.top_module_instance);
+
+    while (!bfs_queue.empty()) {
+        auto instance_ptr = bfs_queue.front();
+        bfs_queue.pop_front();
+
+        for (const auto &child : instance_ptr->children) {
+            bfs_queue.push_back(child);
+        }
+
+        vector<SignalPath> applied_signal_path_matchers;
+        for (const auto &matcher : trace_matchers) {
+            string instance_path = instance_ptr->concatInstancePath("::", true);
+            if (matchPathSegments(matcher.instance_path_matcher, instance_path, "::")) {
+                applied_signal_path_matchers.push_back(matcher.signal_path_matcher);
+            }
+        }
+
+        vector<VulTracedSignal> all_signals;
+        for (const auto &reg : instance_ptr->registers) {
+            vector<FlatField> flat_fields;
+            uint32_t offset = 0;
+            flatten_member(reg.signature, project.global_bundlelib, reg.signature.name, offset, flat_fields);
+            for (const auto &f : flat_fields) {
+                all_signals.push_back(VulTracedSignal{f.name, f.width});
+            }
+        }
+
+        vector<VulTracedSignal> &traced_signals = trace_table[instance_ptr->instance_id];
+        for (const auto &signal : all_signals) {
+            bool matched = false;
+            for (const auto &sig_matcher : applied_signal_path_matchers) {
+                if (matchPathSegments(sig_matcher, signal.signal_path, ".")) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) {
+                traced_signals.push_back(signal);
+            }
+        }
+
+    }
+
+    return trace_table;
+}
+
+
+

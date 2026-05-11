@@ -427,6 +427,66 @@ ErrorMsg resolveBundleTable(const VulBundleLib &bundle_lib, const VulConfigLib &
 }
 
 
+
+ErrorMsg staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib, VulStaticBundle &out_item) {
+    
+    VulStaticBundle static_item;
+    static_item.name = item.name;
+    static_item.is_alias = item.is_alias;
+
+    for (const auto &enum_member : item.enum_members) {
+        VulStaticEnumMember static_enum_member;
+        static_enum_member.name = enum_member.name;
+        static_enum_member.has_value = !enum_member.value.empty();
+        if (static_enum_member.has_value) {
+            ConfigRealValue value = 0;
+            auto err = calculateConstexprValue(enum_member.value, config_lib, value);
+            if (err.error()) {
+                return EStr(err.code, string("Failed to calculate enum member value expression '") + enum_member.value + string("' for enum member '") + enum_member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            static_enum_member.value = value;
+        }
+        static_item.enum_members.push_back(std::move(static_enum_member));
+    }
+
+    for (const auto &member : item.members) {
+        VulStaticBundleMember static_member;
+        static_member.name = member.name;
+        static_member.type = member.type;
+        // 计算 uint 长度
+        if (!member.uint_length.empty()) {
+            ConfigRealValue uint_len_value;
+            auto err = calculateConstexprValue(member.uint_length, config_lib, uint_len_value);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate uint length expression '") + member.uint_length + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            static_member.uint_length = uint_len_value;
+        } else {
+            static_member.uint_length = 0;
+        }
+        // 计算数组维度
+        for (const auto &dim_expr : member.dims) {
+            ConfigRealValue dim_value;
+            auto err = calculateConstexprValue(dim_expr, config_lib, dim_value);
+            if (err) {
+                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate array dimension expression '") + dim_expr + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            }
+            static_member.dims.push_back(dim_value);
+        }
+        static_item.members.push_back(std::move(static_member));
+    }
+    out_item = std::move(static_item);
+    return "";
+}
+
+
+
+
+
+
+
+
+
 uint32_t get_basic_width(const std::string& type) {
     if (type == "bool") return 1;
 
@@ -552,55 +612,112 @@ void flatten_bundle(
     }
 }
 
-
-ErrorMsg staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib, VulStaticBundle &out_item) {
-    
-    VulStaticBundle static_item;
-    static_item.name = item.name;
-    static_item.is_alias = item.is_alias;
-
-    for (const auto &enum_member : item.enum_members) {
-        VulStaticEnumMember static_enum_member;
-        static_enum_member.name = enum_member.name;
-        static_enum_member.has_value = !enum_member.value.empty();
-        if (static_enum_member.has_value) {
-            ConfigRealValue value = 0;
-            auto err = calculateConstexprValue(enum_member.value, config_lib, value);
-            if (err.error()) {
-                return EStr(err.code, string("Failed to calculate enum member value expression '") + enum_member.value + string("' for enum member '") + enum_member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
-            }
-            static_enum_member.value = value;
-        }
-        static_item.enum_members.push_back(std::move(static_enum_member));
+void flatten_member(
+    const VulStaticBundleMember& m,
+    const VulStaticBundleLib& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+) {
+    // ===== 1️⃣ 计算数组总元素数 =====
+    std::vector<uint32_t> dims;
+    for (const auto& d : m.dims) {
+        dims.push_back(d);
     }
 
-    for (const auto &member : item.members) {
-        VulStaticBundleMember static_member;
-        static_member.name = member.name;
-        static_member.type = member.type;
-        // 计算 uint 长度
-        if (!member.uint_length.empty()) {
-            ConfigRealValue uint_len_value;
-            auto err = calculateConstexprValue(member.uint_length, config_lib, uint_len_value);
-            if (err) {
-                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate uint length expression '") + member.uint_length + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+    uint32_t total = 1;
+    for (auto d : dims) total *= d;
+
+    // ===== 2️⃣ 递归展开数组（多维）=====
+    std::function<void(int, std::string)> expand_array =
+    [&](int dim_idx, std::string cur_name) {
+        if (dim_idx == (int)dims.size()) {
+            // ===== 3️⃣ 处理单个元素 =====
+
+            // uint<N>
+            if (m.uint_length > 0) {
+                uint32_t w = m.uint_length;
+                out.push_back({cur_name, offset, w});
+                offset += w;
+                return;
             }
-            static_member.uint_length = uint_len_value;
+
+            // 基本类型
+            const VulStaticBundle *sub_ptr = nullptr;
+            for (const auto& b : table) {
+                if (b.name == m.type) {
+                    sub_ptr = &b;
+                    break;
+                }
+            }
+            if (sub_ptr == nullptr) {
+                uint32_t w = get_basic_width(m.type);
+                out.push_back({cur_name, offset, w});
+                offset += w;
+                return;
+            }
+
+            // ===== struct 类型 =====
+            const auto& sub = *sub_ptr;
+
+            if (sub.is_alias) {
+                // alias → 展开目标
+                const auto& alias_member = sub.members[0];
+                flatten_member(alias_member, table, cur_name, offset, out);
+                return;
+            }
+
+            if (!sub.enum_members.empty()) {
+                // enum → 用最小bit宽
+                uint32_t n = sub.enum_members.size();
+                uint32_t w = 0;
+                while ((1u << w) < n) ++w;
+                out.push_back({cur_name, offset, w});
+                offset += w;
+                return;
+            }
+
+            // 普通 struct
+            flatten_bundle(sub, table, cur_name, offset, out);
         } else {
-            static_member.uint_length = 0;
-        }
-        // 计算数组维度
-        for (const auto &dim_expr : member.dims) {
-            ConfigRealValue dim_value;
-            auto err = calculateConstexprValue(dim_expr, config_lib, dim_value);
-            if (err) {
-                return EStr(EItemBundConstGrammarInvalid, string("Failed to calculate array dimension expression '") + dim_expr + string("' for member '") + member.name + string("' in bundle '") + item.name + string("': ") + err.msg);
+            for (uint32_t i = 0; i < dims[dim_idx]; ++i) {
+                expand_array(dim_idx + 1,
+                    cur_name + "[" + std::to_string(i) + "]");
             }
-            static_member.dims.push_back(dim_value);
         }
-        static_item.members.push_back(std::move(static_member));
-    }
-    out_item = std::move(static_item);
-    return "";
+    };
+
+    expand_array(0, prefix);
 }
 
+void flatten_bundle(
+    const VulStaticBundle& bundle,
+    const VulStaticBundleLib& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+) {
+    if (bundle.is_alias) {
+        const auto& alias_member = bundle.members[0];
+        flatten_member(alias_member, table, prefix, offset, out);
+        return;
+    } else if(!bundle.enum_members.empty()) {
+        uint64_t n = bundle.enum_members.size();
+        for (const auto& enum_member : bundle.enum_members) {
+            uint64_t value = static_cast<uint64_t>(enum_member.value);
+            if (enum_member.has_value && value > n) {
+                n = value + 1;
+            }
+        }
+        uint32_t w = 0;
+        while ((1u << w) < n) ++w;
+        out.push_back({prefix, offset, w});
+        offset += w;
+        return;
+    } else {
+        for (const auto& m : bundle.members) {
+            std::string name = prefix.empty() ? m.name : prefix + "." + m.name;
+            flatten_member(m, table, name, offset, out);
+        }
+    }
+}

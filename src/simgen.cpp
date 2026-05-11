@@ -1899,7 +1899,7 @@ vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib) {
     return out_lines;
 }
 
-StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod) {
+StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, const vector<VulTracedSignal> &traced_signals) {
 
     vector<string> decl_include_field;
     vector<string> decl_public_field;
@@ -2166,6 +2166,36 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod) {
         impl_field.insert(impl_field.end(), tick.codelines.begin(), tick.codelines.end());
         impl_field.push_back("}\n");
         impl_field.push_back("\n");
+    }
+
+    // trace
+    if (!traced_signals.empty()) {
+        for (uint64_t i = 0; i < traced_signals.size(); ++i) {
+            const auto &sig = traced_signals[i];
+            string traceid_var = "_trace_id_" + std::to_string(i);
+            string signal_name = mod.concatInstancePath(".") + "." + sig.signal_path;
+            string access_path = "";
+            string regname = sig.signal_path;
+            size_t dot_pos = access_path.find('.');
+            if (dot_pos != string::npos) {
+                regname = sig.signal_path.substr(0, dot_pos);
+                access_path = sig.signal_path.substr(dot_pos);
+            }
+            if (!regname.ends_with("]")) {
+                regname += ".get()";
+            }
+            access_path = regname + access_path;
+            if (sig.bit_width > 64) {
+                access_path = access_path + ".get_data()";
+            } else {
+                access_path = "static_cast<uint64_t>(" + access_path + ")";
+            }
+
+            decl_private_field.push_back("uint32_t " + traceid_var + " = 0;\n");
+
+            impl_init_field.push_back(traceid_var + " = trace_registe_signal(\"" + signal_name + "\", " + std::to_string(sig.bit_width) + ");\n");
+            impl_commit_field.push_back("trace_record(" + traceid_var + ", " + access_path + ");\n");
+        }
     }
 
     // preparation done, start generating code lines

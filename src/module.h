@@ -641,6 +641,14 @@ struct VulStaticModuleInstance {
         }
         return path.substr(1) + ".impl.hpp";
     }
+    inline string concatInstancePath(const string &sep, bool include_topsim = false) const {
+        string path = "";
+        uint64_t i = (include_topsim ? 0 : 1);
+        for (; i < instance_path.size(); ++i) {
+            path += (path.empty() ? "" : sep) + instance_path[i];
+        }
+        return path;
+    }
 
     VulStaticConfigLib local_parameters;
     VulStaticConfigLib local_consts;

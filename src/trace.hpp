@@ -48,4 +48,9 @@ VulTraceMatcher parseTraceMatcher(const string &matcher_str);
 
 vector<VulTracedModule> parseTraceOptions(const VulProject &project, const vector<VulTraceMatcher> &trace_matchers);
 
+using VulTraceTable = std::unordered_map<VulInstanceID, vector<VulTracedSignal>>;
 
+VulTraceTable parseTraceOptions(
+    const VulStaticProject &project,
+    const vector<VulTraceMatcher> &trace_matchers
+);

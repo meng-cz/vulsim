@@ -136,7 +136,7 @@ struct StaticModuleCodeHpp {
     vector<string> resource_files;
 };
 
-StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &module_instance);
+StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &module_instance, const vector<VulTracedSignal> &traced_signals);
 
 vector<string> genStaticTestHarnessHpp(const VulStaticTestHarnessModule &test_module, const VulStaticModuleInstance &top_module, bool enable_tracing);
 

@@ -343,6 +343,51 @@ int simgenStatic(const SimGenArgs &args) {
     writeLinesToFile(simgen::genStaticConfigHeaderCode(project.global_configlib), (out_path / "config.h").string());
     writeLinesToFile(simgen::genStaticBundleHeaderCode(project.global_bundlelib), (out_path / "bundle.h").string());
 
+    vector<VulTraceMatcher> trace_matchers;
+    if (trace_file.size() > 0) {
+        std::filesystem::path trace_path(trace_file);
+        if (!std::filesystem::exists(trace_path) || !std::filesystem::is_regular_file(trace_path)) {
+            std::cerr << "Error: Trace matcher file does not exist: " << trace_file << std::endl;
+            return 1;
+        }
+        // parse trace matcher file
+        // each line is a matcher string
+        std::ifstream trace_file_stream(trace_path.string());
+        if (!trace_file_stream.is_open()) {
+            std::cerr << "Error: Failed to open trace matcher file: " << trace_file << std::endl;
+            return 1;
+        }
+        string line;
+        while (std::getline(trace_file_stream, line)) {
+            // skip empty lines and lines starting with # or //
+            uint64_t commentpos = 0;
+            if ((commentpos = line.find('#')) != string::npos) {
+                line = line.substr(0, commentpos);
+            }
+            if ((commentpos = line.find("//")) != string::npos) {
+                line = line.substr(0, commentpos);
+            }
+            if (line.empty()) {
+                continue;
+            }
+            trace_matchers.push_back(parseTraceMatcher(line));
+        }
+    }
+    if (trace_line.size() > 0) {
+        // parse trace matcher line
+        // each matcher string is seperated by comma
+        std::stringstream ss(trace_line);
+        string matcher_str;
+        while (std::getline(ss, matcher_str, ',')) {
+            if (matcher_str.empty()) {
+                continue;
+            }
+            trace_matchers.push_back(parseTraceMatcher(matcher_str));
+        }
+    }
+
+    auto trace_table = parseTraceOptions(project, trace_matchers);
+
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
     bfs_queue.push_back(project.top_module_instance);
@@ -353,7 +398,7 @@ int simgenStatic(const SimGenArgs &args) {
             bfs_queue.push_back(child);
         }
 
-        auto codes = simgen::genStaticModuleCodeHpp(*mod_instance);
+        auto codes = simgen::genStaticModuleCodeHpp(*mod_instance, trace_table[mod_instance->instance_id]);
         writeLinesToFile(codes.decl, (out_path / (mod_instance->simDeclPath())).string());
         writeLinesToFile(codes.impl, (out_path / (mod_instance->simImplPath())).string());
         for (const auto &res_file : codes.resource_files) {
@@ -370,7 +415,7 @@ int simgenStatic(const SimGenArgs &args) {
 
     // gen test harness module
     vector<string> testharness_code = simgen::genStaticTestHarnessHpp(
-        project.test_harness, *project.top_module_instance, /*enable_tracing=*/false
+        project.test_harness, *project.top_module_instance, /*enable_tracing=*/trace_matchers.size() > 0
     );
     writeLinesToFile(testharness_code, (out_path / project.top_module_instance->parent->simDeclPath()).string());
 

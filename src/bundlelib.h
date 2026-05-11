@@ -190,6 +190,8 @@ using BundleTable = std::unordered_map<BundleName, VulBundleItem>;
 
 ErrorMsg resolveBundleTable(const VulBundleLib &bundle_lib, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides, BundleTable &out_bundle_table);
 
+ErrorMsg staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib, VulStaticBundle &out_item);
+
 struct FlatField {
     std::string name;  // 展平后的访问路径
     uint32_t    offset;
@@ -212,5 +214,19 @@ void flatten_member(
     std::vector<FlatField>& out
 );
 
-ErrorMsg staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib, VulStaticBundle &out_item);
+void flatten_bundle(
+    const VulStaticBundle& bundle,
+    const VulStaticBundleLib& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+);
+
+void flatten_member(
+    const VulStaticBundleMember& m,
+    const VulStaticBundleLib& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+);
 
