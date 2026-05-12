@@ -47,11 +47,11 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) VulStorageNext<type> name; const type & name##_get(); void name##_setnext(const type& next); void name##_reset(type& name)
+#define REGISTER(name, type) VulStorageNext<type> name; const type & name##_get(); void name##_setnext(const type& next) {name.setnext(next);}; void name##_reset(type& name)
 
-#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; const type & name##_get(); void name##_setnext(const type& next); void name##_setnext(const type& next, int port); void name##_reset(type& name)
+#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; const type & name##_get(); template<uint32_t P=0> void name##_setnext(const type& next) {name.setnext<P>(next);}; void name##_reset(type& name)
 
-#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void name##_setnext(const uint64_t idx, const type& next); void name##_setnext(const uint64_t idx, const type& next, int port); void name##_reset(type name[size])
+#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; template<uint32_t P=0> void name##_setnext(const uint64_t idx, const type& next) {name.setnext<P>(idx, next);}; void name##_reset(type name[size])
 
 #define WIRE(name, type) type name; void name##_reset(type& name)
 
