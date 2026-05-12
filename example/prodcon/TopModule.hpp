@@ -13,7 +13,7 @@
 
 // Port
 
-REQUEST_PORT(output, void, ARG(uint8_t) s);
+REQUEST(output, ARG(uint8_t) s);
 
 // Logic block
 

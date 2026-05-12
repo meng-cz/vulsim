@@ -10,10 +10,6 @@
 #include <random>
 #include <vector>
 
-REQUEST_PORT(input, void, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init, ARG(bool) last);
-
-SERVICE_PORT(output, void, ARG(UInt<32>) sum);
-
 GLOBAL() {
 
 // variables here are visibal to both SERVICE and SIMULATION, and maintain their state across ticks.
@@ -22,7 +18,9 @@ uint64_t total_tests = 0;
 
 }
 
-SERVICE_LOGIC_IMPL(output, ARG(UInt<32>) sum) {
+REQUEST(input, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init, ARG(bool) last);
+
+SERVICE(output, ARG(UInt<32>) sum) {
     if (!expect_results.empty()) {
         UInt<32> expected = expect_results.front();
         expect_results.erase(expect_results.begin());

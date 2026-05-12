@@ -30,10 +30,28 @@ WIRE(read_inputed, bool) {
 
 // Port
 
-SERVICE_PORT(read_s0, void, ARG(UInt<ADDR_WIDTH>) addr);
-SERVICE_PORT(refill_s0, void, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data);
+REQUEST(readresp_s1, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data);
 
-REQUEST_PORT(readresp_s1, void, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data);
+SERVICE(read_s0, ARG(UInt<ADDR_WIDTH>) addr)  {
+    ReadStageReg s0;
+    s0.addr = addr;
+    s0.valid = true;
+    read_stage_setnext(s0);
+    UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
+    tag_array.readreq<0>(index);
+    data_array.readreq<0>(index);
+    read_inputed = true;
+}
+
+SERVICE(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data) {
+    UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
+    UInt<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
+    UInt<TAG_WIDTH + 1> tag_entry;
+    tag_entry(TAG_WIDTH, 1) = tag;
+    tag_entry(0) = 1; // valid bit
+    tag_array.write<0>(index, tag_entry);
+    data_array.write<0>(index, data);
+}
 
 // Logic block
 
@@ -56,26 +74,5 @@ TICK_IMPL() {
         s0.valid = false;
         read_stage_setnext(s0);
     }
-}
-
-SERVICE_LOGIC_IMPL(read_s0, ARG(UInt<ADDR_WIDTH>) addr) {
-    ReadStageReg s0;
-    s0.addr = addr;
-    s0.valid = true;
-    read_stage_setnext(s0);
-    UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
-    tag_array.readreq<0>(index);
-    data_array.readreq<0>(index);
-    read_inputed = true;
-}
-
-SERVICE_LOGIC_IMPL(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data) {
-    UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
-    UInt<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
-    UInt<TAG_WIDTH + 1> tag_entry;
-    tag_entry(TAG_WIDTH, 1) = tag;
-    tag_entry(0) = 1; // valid bit
-    tag_array.write<0>(index, tag_entry);
-    data_array.write<0>(index, data);
 }
 

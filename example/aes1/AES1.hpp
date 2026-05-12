@@ -11,21 +11,25 @@
 
 // Register
 
-REGISTER(d, AESData) {}
-REGISTER(k, AESKey) {}
-REGISTER(state, uint32_t) {
+REGISTER_MUL(d, AESData, 2) {}
+REGISTER_MUL(k, AESKey, 2) {}
+REGISTER_MUL(state, uint32_t, 2) {
     state = 0;
-}
-
-WIRE(inputed, bool) {
-    inputed = false;
 }
 
 // Port
 
-SERVICE_PORT(input, bool, ARG(AESData) data, ARG(AESKey) key);
+REQUEST(output, ARG(AESData) data);
 
-REQUEST_PORT(output, void, ARG(AESData) data);
+SERVICE_READY(input, (state == 0 || state >= 10) && !inputed, ARG(AESData) data, ARG(AESKey) key) {
+    k_setnext<0>(key);
+    AESData indata;
+    for (uint32_t i = 0; i < 16; i++) {
+        indata[i] = data[i] ^ key[i];
+    }
+    d_setnext<0>(indata);
+    state_setnext<0>(1);
+}
 
 // Logic block
 
@@ -75,71 +79,53 @@ TICK_IMPL() {
         return (x << 1) ^ (0x1b & m);
     };
 
+    if (state == 0 || state > 10) {
+        return;
+    }
 
-    uint32_t state_next = 0;
-    if (state > 0 && state <= 10) {
-        AESData data = d;
-        AESKey round_key = k;
+    AESData data = d;
+    AESKey round_key = k;
 
-        uint8_t t0 = SBOX[round_key[13]] ^ RC[state-1];
-        uint8_t t1 = SBOX[round_key[14]];
-        uint8_t t2 = SBOX[round_key[15]];
-        uint8_t t3 = SBOX[round_key[12]];
+    uint8_t t0 = SBOX[round_key[13]] ^ RC[state-1];
+    uint8_t t1 = SBOX[round_key[14]];
+    uint8_t t2 = SBOX[round_key[15]];
+    uint8_t t3 = SBOX[round_key[12]];
 
-        round_key[0] ^= t0;
-        round_key[1] ^= t1;
-        round_key[2] ^= t2;
-        round_key[3] ^= t3;
+    round_key[0] ^= t0;
+    round_key[1] ^= t1;
+    round_key[2] ^= t2;
+    round_key[3] ^= t3;
 
-        for (int i = 4; i < 16; i++) {
-            round_key[i] ^= round_key[i-4];
-        }
-        // round
-        AESData tmp;
-        for (uint32_t i = 0; i < 16; ++i) {
-            tmp[i] = SBOX[data[i]];
-        }
-        shift_rows(tmp);
-        if (state != 10) {
-            for (uint32_t i = 0; i < 16; i+=4) {
-                uint8_t t = tmp[i] ^ tmp[i+1] ^ tmp[i+2] ^ tmp[i+3];
-                data[i] = mul2(tmp[i]  ^ tmp[i+1]) ^ tmp[i]   ^ t;
-                data[i+1] = mul2(tmp[i+1] ^ tmp[i+2]) ^ tmp[i+1] ^ t;
-                data[i+2] = mul2(tmp[i+2] ^ tmp[i+3]) ^ tmp[i+2] ^ t;
-                data[i+3] = mul2(tmp[i+3] ^ tmp[i]  ) ^ tmp[i+3] ^ t;
-            }
-        }
-        for (uint32_t i = 0; i < 16; ++i) {
-            data[i] ^= round_key[i];
-        }
-
-        if (state == 10) {
-            output(data);
-        } else {
-            d_setnext(data);
-            k_setnext(round_key);
-            state_next = state + 1;
+    for (int i = 4; i < 16; i++) {
+        round_key[i] ^= round_key[i-4];
+    }
+    // round
+    AESData tmp;
+    for (uint32_t i = 0; i < 16; ++i) {
+        tmp[i] = SBOX[data[i]];
+    }
+    shift_rows(tmp);
+    if (state != 10) {
+        for (uint32_t i = 0; i < 16; i+=4) {
+            uint8_t t = tmp[i] ^ tmp[i+1] ^ tmp[i+2] ^ tmp[i+3];
+            data[i] = mul2(tmp[i]  ^ tmp[i+1]) ^ tmp[i]   ^ t;
+            data[i+1] = mul2(tmp[i+1] ^ tmp[i+2]) ^ tmp[i+1] ^ t;
+            data[i+2] = mul2(tmp[i+2] ^ tmp[i+3]) ^ tmp[i+2] ^ t;
+            data[i+3] = mul2(tmp[i+3] ^ tmp[i]  ) ^ tmp[i+3] ^ t;
         }
     }
-    if (inputed) {
-        state_setnext(1);
+    for (uint32_t i = 0; i < 16; ++i) {
+        data[i] ^= round_key[i];
+    }
+
+    if (state == 10) {
+        output(data);
+        state_setnext<1>(0);
     } else {
-        state_setnext(state_next);
+        d_setnext<1>(data);
+        k_setnext<1>(round_key);
+        state_setnext<1>(state + 1);
     }
-}
-
-SERVICE_COND_IMPL(input, ARG(AESData) data, ARG(AESKey) key) {
-    return (state == 0 || state >= 10) && !inputed;
-}
-
-SERVICE_LOGIC_IMPL(input, ARG(AESData) data, ARG(AESKey) key) {
-    k_setnext(key);
-    AESData indata;
-    for (uint32_t i = 0; i < 16; i++) {
-        indata[i] = data[i] ^ key[i];
-    }
-    d_setnext(indata);
-    inputed = true;
 }
 
 

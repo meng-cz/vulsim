@@ -248,6 +248,31 @@ void _parseHeader(const std::vector<std::string>& code, shared_ptr<VulConfigLib>
     }
 }
 
+void _parseReqServArgs(const vector<string> & macro_args, const uint64_t begin_idx, VulReqServ & reqserv) {
+    for (size_t i = begin_idx; i < macro_args.size(); ++i) {
+        VulArg arg;
+        vector<string> parts = split(macro_args[i], ' ');
+        if (parts.size() != 2) {
+            std::cerr << "Error: Invalid argument format in REQ_PORT/SERV_PORT: " << macro_args[i] << std::endl;
+            assert(0);
+        }
+        arg.name = parts[1];
+        arg.comment = "";
+        // parse ARG(type) or RESP(type) for parts[0]
+        string type_str = trim(parts[0]);
+        if (type_str.substr(0, 4) == "ARG(" && type_str.back() == ')') {
+            arg.type = type_str.substr(4, type_str.size() - 5);
+            reqserv.args.push_back(arg);
+        } else if (type_str.substr(0, 5) == "RESP(" && type_str.back() == ')') {
+            arg.type = type_str.substr(5, type_str.size() - 6);
+            reqserv.rets.push_back(arg);
+        } else {
+            std::cerr << "Error: Invalid argument type format in REQ_PORT/SERV_PORT: " << parts[0] << std::endl;
+            assert(0);
+        }
+    }
+}
+
 VulReqServ _parseReqServPort(const vector<string> & macro_args) {
     VulReqServ reqserv;
     reqserv.name = macro_args[0];
@@ -1108,85 +1133,79 @@ void _parseStaticModule(
         }
     }
     {
-        // parse req/serv ports
-        auto matches = matchMacros(code, "REQUEST_PORT()");
+        // parse req
+        auto matches = matchMacros(code, "REQUEST()");
         for (const auto& item : matches) {
-            VulReqServ req = _parseReqServPort(item.args);
+            VulReqServ req;
+            req.name = item.args[0];
+            req.has_handshake = false;
+            _parseReqServArgs(item.args, 1, req);
             module.requests[req.name] = req;
         }
-        matches = matchMacros(code, "SERVICE_PORT()");
+        matches = matchMacros(code, "REQUEST_READY()");
         for (const auto& item : matches) {
-            VulReqServ serv = _parseReqServPort(item.args);
+            VulReqServ req;
+            req.name = item.args[0];
+            req.has_handshake = true;
+            _parseReqServArgs(item.args, 1, req);
+            module.requests[req.name] = req;
+        }
+    }
+    {
+        // parse serv
+        vector<MatchMacroResult> unified_matches;
+        auto matches = matchMacros(code, "SERVICE()");
+        for (const auto& item : matches) {
+            vector<string> args;
+            args.push_back(item.args[0]);
+            args.push_back(""); // condition = None
+            args.push_back(""); // priority = None
+            args.insert(args.end(), item.args.begin() + 1, item.args.end());
+            unified_matches.push_back(MatchMacroResult{item.pos, args});
+        }
+        matches = matchMacros(code, "SERVICE_READY()");
+        for (const auto& item : matches) {
+            vector<string> args;
+            args.push_back(item.args[0]);
+            args.push_back(item.args[1]);
+            args.push_back(""); // priority = None
+            args.insert(args.end(), item.args.begin() + 2, item.args.end());
+            unified_matches.push_back(MatchMacroResult{item.pos, args});
+        }
+        matches = matchMacros(code, "SERVICE_PRIO()");
+        for (const auto& item : matches) {
+            vector<string> args;
+            args.push_back(item.args[0]);
+            args.push_back(""); // condition = None
+            args.push_back(item.args[1]);
+            args.insert(args.end(), item.args.begin() + 2, item.args.end());
+            unified_matches.push_back(MatchMacroResult{item.pos, args});
+        }
+        matches = matchMacros(code, "SERVICE_PRIO_READY()");
+        for (const auto& item : matches) {
+            vector<string> args;
+            args.push_back(item.args[0]);
+            args.push_back(item.args[2]);
+            args.push_back(item.args[1]);
+            args.insert(args.end(), item.args.begin() + 3, item.args.end());
+            unified_matches.push_back(MatchMacroResult{item.pos, args});
+        }
+        for (const auto& item : unified_matches) {
+            VulReqServ serv;
+            serv.name = item.args[0];
+            serv.has_handshake = (item.args[1] != "");
+            _parseReqServArgs(item.args, 3, serv);
             module.services[serv.name] = serv;
-        }
-    }
-    {
-        // parse SERVICE_COND_IMPL
-        auto matches = matchMacros(code, "SERVICE_COND_IMPL()");
-
-        for (const auto& item : matches) {
-            if (item.args.size() < 1) {
-                std::cerr << "Error: SERVICE_COND_IMPL requires at least one argument (service name)" << std::endl;
-                assert(0);
+            VulLogicBlock lb;
+            lb.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
+            lb.with_priority = (item.args[2] != "");
+            lb.priority = lb.with_priority ? std::stoi(item.args[2]) : 0;
+            if (serv.has_handshake) {
+                lb.cond_codelines.push_back("return (" + item.args[1] + ");\n");
             }
-            const std::string& serv_name = item.args[0];
             auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                std::cerr << "Error: SERVICE_COND_IMPL for service " << serv_name << " has no body" << std::endl;
-                assert(0);
-            }
-            auto lb_iter = module.serv_logic_blocks.find(serv_name);
-            if (lb_iter == module.serv_logic_blocks.end()) {
-                // 如果没有对应的逻辑块，先创建一个空的逻辑块
-                VulLogicBlock logic_block;
-                logic_block.priority = 0;
-                logic_block.cond_codelines = split(block.content, '\n');
-                logic_block.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
-                module.serv_logic_blocks[serv_name] = logic_block;
-            } else {
-                // 已经有逻辑块了，说明之前解析到 SERVICE_LOGIC_IMPL 了，现在补充条件代码
-                lb_iter->second.cond_codelines = split(block.content, '\n');
-            }
-        }
-    }
-    {
-        // parse SERVICE_LOGIC_IMPL
-        auto matches = matchMacros(code, "SERVICE_LOGIC_IMPL()");
-        auto matches_prio = matchMacros(code, "SERVICE_LOGIC_IMPL_PRIO()");
-        for (const auto & item : matches) {
-            // insert empty priority 0 at item[2] and pushed into matches_prio
-            vector<string> new_args;
-            new_args.push_back(item.args[0]);
-            new_args.push_back("0"); // default priority 0
-            for (size_t i = 1; i < item.args.size(); ++i) {
-                new_args.push_back(item.args[i]);
-            }
-            matches_prio.push_back({item.pos, new_args});
-        }
-        for (const auto& item : matches_prio) {
-            if (item.args.size() < 2) {
-                std::cerr << "Error: SERVICE_LOGIC_IMPL_PRIO requires at least two arguments (service name and priority)" << std::endl;
-                assert(0);
-            }
-            const std::string& serv_name = item.args[0];
-            const std::string& priority_str = item.args[1];
-            int32_t priority = std::stoi(priority_str);
-            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                std::cerr << "Error: SERVICE_LOGIC_IMPL for service " << serv_name << " has no body" << std::endl;
-                assert(0);
-            }
-            auto lb_iter = module.serv_logic_blocks.find(serv_name);
-            if (lb_iter == module.serv_logic_blocks.end()) {
-                VulLogicBlock logic_block;
-                logic_block.priority = priority;
-                logic_block.codelines = split(block.content, '\n');
-                logic_block.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
-                module.serv_logic_blocks[serv_name] = logic_block;
-            } else {
-                lb_iter->second.codelines = split(block.content, '\n');
-                lb_iter->second.priority = priority; // 更新优先级
-            }
+            lb.cond_codelines = split(block.content, '\n');
+            module.serv_logic_blocks[serv.name] = lb;
         }
     }
     const string tick_func_name = "tick";

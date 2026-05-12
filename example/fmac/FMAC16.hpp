@@ -18,15 +18,7 @@ STRUCT(UnpackedMulResult) {
     UInt<22> frac_unnorm;
 };
 
-/**
- * a,b: 16-bit FP16 inputs in IEEE 754 binary16 format for multiplication
- * c: 16-bit FP16 input in IEEE 754 binary16 format for accumulation, valid only when init is true
- * init: indicates whether this is the first multiplication-accumulation in the sequence
- * last: indicates whether this is the last multiplication-accumulation in the sequence
- */
-SERVICE_PORT(input, void, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init, ARG(bool) last);
-
-REQUEST_PORT(output, void, ARG(UInt<32>) sum);
+REQUEST(output, ARG(UInt<32>) sum);
 
 REGISTER(A1, UnpackedFP16) { A1.sign = false; A1.exp = 0; A1.frac = 0; }
 REGISTER(B1, UnpackedFP16) { B1.sign = false; B1.exp = 0; B1.frac = 0; }
@@ -34,8 +26,13 @@ REGISTER(C1, UnpackedFP16) { C1.sign = false; C1.exp = 0; C1.frac = 0; }
 REGISTER(init1, bool) { init1 = false; }
 REGISTER(last1, bool) { last1 = false; }
 
-SERVICE_LOGIC_IMPL(input, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init, ARG(bool) last) {
-   
+/**
+ * a,b: 16-bit FP16 inputs in IEEE 754 binary16 format for multiplication
+ * c: 16-bit FP16 input in IEEE 754 binary16 format for accumulation, valid only when init is true
+ * init: indicates whether this is the first multiplication-accumulation in the sequence
+ * last: indicates whether this is the last multiplication-accumulation in the sequence
+ */
+SERVICE(input, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init, ARG(bool) last) {
     // Stage 1: Unpacking
     auto unpack = [](const UInt<16>& input) -> UnpackedFP16 {
         UnpackedFP16 result;

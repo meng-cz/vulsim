@@ -20,7 +20,7 @@ REGISTER(count, uint8_t) {
 
 // Port
 
-REQUEST_PORT(send, bool, ARG(uint8_t) d);
+REQUEST_READY(send, ARG(uint8_t) d);
 
 // Logic block
 

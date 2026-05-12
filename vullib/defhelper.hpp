@@ -59,21 +59,22 @@
 
 #define RESP(type) type &
 
-#define REQUEST_PORT(name, ret, ...) ret name (__VA_ARGS__);
+#define REQUEST(name, ...) void name (__VA_ARGS__);
 
-#define SERVICE_PORT(name, ret, ...) ret name (__VA_ARGS__);
+#define REQUEST_READY(name, ...) bool name(__VA_ARGS__);
 
-#define SERVICE_COND_IMPL(name, ...) bool _##name##_cond (__VA_ARGS__)
+#define SERVICE(name, ...) void name (__VA_ARGS__)
 
-#define SERVICE_LOGIC_IMPL(name, ...) void _##name##_impl (__VA_ARGS__)
+#define SERVICE_READY(name, cond, ...) bool name(__VA_ARGS__)
 
-#define SERVICE_LOGIC_IMPL_PRIO(name, priority, ...) void _##name##_impl (__VA_ARGS__)
+#define SERVICE_PRIO(name, priority, ...) void name (__VA_ARGS__)
+
+#define SERVICE_PRIO_READY(name, priority, cond, ...) bool name(__VA_ARGS__)
+
 
 #define TICK_IMPL() void tick()
 
 #define CHILD_INSTANCE(module, name, ...) void * name = nullptr;
-
-#define CHILD_INSTANCE_PRIO(module, name, order, ...) void * name = nullptr;
 
 #define USE_CHILD_SERVICE_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
 

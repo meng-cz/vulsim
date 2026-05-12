@@ -17,12 +17,10 @@ uint64_t test_tick = 0;
 
 // Port
 
-REQUEST_PORT(read_s0, void, ARG(UInt<ADDR_WIDTH>) addr);
-REQUEST_PORT(refill_s0, void, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data);
+REQUEST(read_s0, ARG(UInt<ADDR_WIDTH>) addr);
+REQUEST(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data);
 
-SERVICE_PORT(readresp_s1, void, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data);
-
-SERVICE_LOGIC_IMPL(readresp_s1, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data) {
+SERVICE(readresp_s1, ARG(bool) hit, ARG(UInt<DATA_WIDTH>) data) {
     if (should_hit) {
         if (!hit) {
             printf("%ld: Error: expected a hit but got a miss.\n", test_tick);
