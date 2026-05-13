@@ -23,6 +23,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <inttypes.h>
 
@@ -50,6 +51,12 @@ struct ErrorMsg {
     explicit operator bool() const {
         return code != 0;
     }
+    string toString() const {
+        if (code == 0) {
+            return msg;
+        }
+        return "#" + std::to_string(code) + ": " + msg;
+    }
 };
 
 inline ErrorMsg EStr(uint32_t code, const string &msg) {
@@ -64,6 +71,52 @@ inline ErrorMsg &operator+=(ErrorMsg &a, const string &b) {
     a.msg += b;
     return a;
 }
+
+
+using ErrorContextStack = std::vector<string>;
+
+class VulException : public std::exception {
+public:
+    VulException(const ErrorMsg &err);
+
+    const char *what() const noexcept override {
+        return whatStr.c_str();
+    }
+
+    const ErrorMsg &getError() const {
+        return error;
+    }
+
+    const ErrorContextStack &getContext() const {
+        return context;
+    }
+
+private:
+    ErrorMsg error;
+    ErrorContextStack context;
+    string whatStr;
+
+    string buildWhat() const {
+        // [Context1]>[Context2]>...>[ContextN]> Error message
+        string res;
+        for (const auto &ctx : context) {
+            res += "> [" + ctx + "]";
+        }
+        res += ("> " + error.toString());
+        return res;
+    }
+};
+
+class VulErrorContextGuard {
+public:
+    VulErrorContextGuard(const string &newCtx);
+    ~VulErrorContextGuard();
+
+    VulErrorContextGuard(const VulErrorContextGuard &) = delete;
+    VulErrorContextGuard &operator=(const VulErrorContextGuard &) = delete;
+};
+
+
 
 constexpr uint32_t ErrLoadProject = 10000;
 constexpr uint32_t ErrNameCheck = 10001;

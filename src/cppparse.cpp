@@ -180,6 +180,14 @@ BlockResult findNextBraceBlock(const std::vector<std::string>& code, LinePositio
         return {{-1, -1}, ""};
     }
 
+    // 如果先出现了一个;，代表没有合法的大括号匹配
+    LinePosition semicolon_pos = findNext(code, start, ";");
+    if (semicolon_pos.line != -1) {
+        if (semicolon_pos.line < pos.line || (semicolon_pos.line == pos.line && semicolon_pos.column < pos.column)) {
+            return {{-1, -1}, ""};
+        }
+    }
+
     int depth = 0;
     bool in_string = false;
     bool in_char = false;

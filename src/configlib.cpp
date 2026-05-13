@@ -171,29 +171,20 @@ ErrorMsg VulConfigLib::insertMultiConfigItems(const vector<VulConfigItem> &items
     return "";
 }
 
-ErrorMsg insertStaticConfig(VulStaticConfigLib &config_lib, const ConfigName &name, const ConfigValue &value) {
+void insertStaticConfig(VulStaticConfigLib &config_lib, const ConfigName &name, const ConfigValue &value) {
     if (config_lib.find(name) != config_lib.end()) {
         config_lib.erase(name);
     }
-    ConfigRealValue real_value;
-    ErrorMsg err = calculateConstexprValue(value, config_lib, real_value);
-    if (!err.empty()) {
-        return EStr(err.code, string("Error calculating value for static config '") + name + "': " + err.msg);
-    }
+    ConfigRealValue real_value = calculateConstexprValue(value, config_lib);
     config_lib[name] = real_value;
-    return "";
 }
 
-ErrorMsg calculateConstexprValue(
-    const ConfigValue &value,
-    const VulStaticConfigLib &config_lib,
-    ConfigRealValue &out_real_value
-) {
+ConfigRealValue calculateConstexprValue(const ConfigValue &value, const VulStaticConfigLib &config_lib) {
     uint32_t errpos = 0;
     string err;
     auto tokens = config_parser::tokenizeConfigValueExpression(value, errpos, err);
     if (!tokens) {
-        return EStr(EItemConfValueTokenInvalid, string("Invalid token grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
+        throw VulException(EStr(EItemConfValueTokenInvalid, string("Invalid token grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value));
     }
     // replace Identifier tokens with their values
     for (auto &tok : *tokens) {
@@ -204,18 +195,17 @@ ErrorMsg calculateConstexprValue(
                 tok.type = config_parser::TokenType::Number;
                 tok.value = over_iter->second;
             } else {
-                return EStr(EItemConfRefNotFound, string("Undefined config identifier: ") + tok.text + string(": ") + value);
+                throw VulException(EStr(EItemConfRefNotFound, string("Undefined config identifier: ") + tok.text + string(": ") + value));
             }
         }
     }
     auto ast = config_parser::parseConfigValueExpression(*tokens, errpos, err);
     if (!ast) {
-        return EStr(EItemConfValueGrammerInvalid, string("Invalid grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
+        throw VulException(EStr(EItemConfValueGrammerInvalid, string("Invalid grammar at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value));
     }
     ConfigRealValue real_value = config_parser::evaluateConfigValueExpression(*ast, errpos, err);
     if (!err.empty()) {
-        return EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value);
+        throw VulException(EStr(EItemConfValueGrammerInvalid, string("Error evaluating config value at position ") + std::to_string(errpos) + string(": ") + err + string(": ") + value));
     }
-    out_real_value = real_value;
-    return "";
+    return real_value;
 }

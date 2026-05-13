@@ -1210,7 +1210,7 @@ void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance) {
 
 
 uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance, const LogicBlockCall &call) {
-    // TODO 顺着指针关系和req_connections成员找到这个call最终连接到的serv_logic_block的ID，返回这个ID（高32位为instance_id，低32位为block_id）。由于连接的单一性，一个call最多只能连接到一个serv_logic_block，如果找不到连接的serv_logic_block，抛出异常并退出
+    // 顺着指针关系和req_connections成员找到这个call最终连接到的serv_logic_block的ID，返回这个ID（高32位为instance_id，低32位为block_id）。由于连接的单一性，一个call最多只能连接到一个serv_logic_block，如果找不到连接的serv_logic_block，抛出异常并退出
 
     auto find_child_ptr_by_name = [](shared_ptr<VulStaticModuleInstance> &mod, const InstanceName &child_name) -> shared_ptr<VulStaticModuleInstance> {
         for (auto &child : mod->children) {
@@ -1238,11 +1238,12 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
         port = call.port;
         cur = find_child_ptr_by_name(cur, call.instance);
         if (cur == nullptr) {
-            throw std::runtime_error("Invalid LogicBlockCall: instance '" + call.instance + "' not found in instance '" + instance->instance_path.back() + "'");
+            throw VulException("Invalid LogicBlockCall: instance '" + call.instance + "' not found in instance '" + instance->instance_path.back() + "'");
         }
     }
 
     for (uint32_t hop = 0; hop < 4096; hop ++) {
+        VulErrorContextGuard hop_guard("Entering instance '" + cur->simClassName() + "' with port '" + port + "'");
         if (is_serv_call) {
             // impl as code block here, or connected to a child service
             auto lb_iter = cur->serv_logic_blocks.find(port);
@@ -1255,7 +1256,7 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
                     if (conn.req_instance == VulModule::TopInterface && conn.req_name == port) {
                         cur = find_child_ptr_by_name(cur, conn.serv_instance);
                         if (cur == nullptr) {
-                            throw std::runtime_error("Invalid Req-Serv connection: instance '" + conn.serv_instance + "' not found in instance '" + instance->instance_path.back() + "'");
+                            throw VulException("Invalid Req-Serv connection: instance '" + conn.serv_instance + "' not found in instance '" + instance->instance_path.back() + "'");
                         }
                         port = conn.serv_name;
                         found_conn = true;
@@ -1263,7 +1264,7 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
                     }
                 }
                 if (!found_conn) {
-                    throw std::runtime_error("No connected service found for LogicBlockCall to service '" + port + "' in instance '" + instance->instance_path.back() + "'");
+                    throw VulException("No connected service found for LogicBlockCall to service '" + port + "' in instance '" + instance->instance_path.back() + "'");
                 }
             }
             continue;
@@ -1285,7 +1286,7 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
                     // connected to another child's service
                     cur = find_child_ptr_by_name(parent, conn.serv_instance);
                     if (cur == nullptr) {
-                        throw std::runtime_error("Invalid Req-Serv connection: instance '" + conn.serv_instance + "' not found in instance '" + parent->instance_path.back() + "'");
+                        throw VulException("Invalid Req-Serv connection: instance '" + conn.serv_instance + "' not found in instance '" + parent->instance_path.back() + "'");
                     }
                     port = conn.serv_name;
                     is_serv_call = true;
@@ -1295,13 +1296,15 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
             }
         }
         if (!found_conn) {
-            throw std::runtime_error("No connected service found for LogicBlockCall to request '" + port + "' in instance '" + instance->instance_path.back() + "'");
+            throw VulException("No connected service found for LogicBlockCall to request '" + port + "' in instance '" + instance->instance_path.back() + "'");
         }
     }
-    throw std::runtime_error("Exceeded maximum hop count while finding connected logic block for LogicBlockCall to '" + port + "' in instance '" + instance->instance_path.back() + "'. Possible cyclic connections.");
+    throw VulException("Exceeded maximum hop count while finding connected logic block for LogicBlockCall to '" + port + "' in instance '" + instance->instance_path.back() + "'. Possible cyclic connections.");
 }
 
 void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
+
+    VulErrorContextGuard top_guard("Setting up update sequence for instance '" + top->simClassName() + "'");
 
     unordered_set<uint64_t> all_logic_block_ids;
     unordered_map<uint64_t, unordered_set<uint64_t>> logic_block_call_graph;
@@ -1315,8 +1318,11 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
 
         instance_id_map[cur_inst->instance_id] = cur_inst;
 
+        VulErrorContextGuard inst_guard("Parsing connection from instance '" + cur_inst->simClassName() + "' (IID: " + std::to_string(cur_inst->instance_id) + ")");
+
         for (const auto &serv_lb_entry : cur_inst->serv_logic_blocks) {
             const auto &serv_lb = serv_lb_entry.second;
+            VulErrorContextGuard lb_guard("Parsing service logic block '" + serv_lb_entry.first + "' (BID: " + std::to_string(serv_lb.block_id) + ")");
             uint64_t lb_id = ((uint64_t)cur_inst->instance_id << 32) | serv_lb.block_id;
             all_logic_block_ids.insert(lb_id);
             for (const auto &req_call : serv_lb.call_requests) {
@@ -1325,6 +1331,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             }
         }
         for (const auto &tick_lb : cur_inst->tick_blocks) {
+            VulErrorContextGuard lb_guard("Parsing tick logic block (BID: 0)");
             uint64_t lb_id = ((uint64_t)cur_inst->instance_id << 32);
             all_logic_block_ids.insert(lb_id);
             for (const auto &req_call : tick_lb.call_requests) {
@@ -1359,6 +1366,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         return instance_path_str + ".<unknown>";
     };
 
+    VulErrorContextGuard graph_guard("Checking logic block call graph");
     unordered_map<VulInstanceID, vector<uint64_t>> instance_tick_to_lb_call_graph;
     // logic_block_call_graph 是 {tick_code_blocks, serv_logic_blocks} 之间的调用关系图，instance_tick_to_lb_call_graph 是从实例的 tick_code_block 到被所有可能被递归调用的 logic_block 的调用关系图
     for (const auto &inst_entry : instance_id_map) {
@@ -1381,7 +1389,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
                     if (!loop_str.empty()) loop_str += " -> ";
                     loop_str += debug_lb_name_by_id(lb_id);
                 }
-                throw std::runtime_error("Cyclic call or repeated call detected in logic block call graph: " + loop_str);
+                throw VulException("Cyclic call or repeated call detected in logic block call graph: " + loop_str);
             }
             visited.insert(cur_lb_id);
             const auto &called_lbs_set = logic_block_call_graph.find(cur_lb_id);
@@ -1406,11 +1414,13 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
                 string called_inst1 = debug_lb_name_by_id(static_cast<uint64_t>(iter->second) << 32);
                 string called_inst2 = debug_lb_name_by_id(static_cast<uint64_t>(inst_id) << 32);
                 string lb_name = debug_lb_name_by_id(lb_id);
-                throw std::runtime_error("Logic block '" + lb_name + "' is called by multiple instances: '" + called_inst1 + "' and '" + called_inst2 + "'. This is not allowed because it cannot be implemented in hardware.");
+                throw VulException("Logic block '" + lb_name + "' is called by multiple instances: '" + called_inst1 + "' and '" + called_inst2 + "'. This is not allowed because it cannot be implemented in hardware.");
             }
             logic_block_id_to_instance_id[lb_id] = inst_id;
         }
     }
+
+    VulErrorContextGuard order_guard("Determining instance update order");
 
     unordered_map<VulInstanceID, unordered_set<VulInstanceID>> instance_order_graph;
     bfs_queue.clear();
@@ -1421,6 +1431,8 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         VulInstanceID cur_inst_id = cur_inst->instance_id;
         map<int32_t, vector<VulInstanceID>> priority_to_callee_instances;
         priority_to_callee_instances[0].push_back(cur_inst_id); // tick block has default priority 0
+
+        VulErrorContextGuard inst_guard("Processing instance '" + cur_inst->simClassName() + "' (IID: " + std::to_string(cur_inst_id) + ") for update order");
 
         for (const auto &serv_lb_entry : cur_inst->serv_logic_blocks) {
             const auto &serv_lb = serv_lb_entry.second;
@@ -1436,7 +1448,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             VulInstanceID callee_inst_id = callee_inst_iter->second;
             if (callee_inst_id == cur_inst_id) {
                 string lb_name = debug_lb_name_by_id(lb_id);
-                throw std::runtime_error("Logic block '" + lb_name + "' is called by its own tick block.");
+                throw VulException("Logic block '" + lb_name + "' is called by its own tick block.");
             }
             priority_to_callee_instances[serv_lb.priority].push_back(callee_inst_id);
         }
@@ -1476,13 +1488,13 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         const auto &latter_inst_ids = entry.second;
         auto former_inst_iter = instance_id_map.find(former_inst_id);
         if (former_inst_iter == instance_id_map.end()) {
-            throw std::runtime_error("Instance ID " + std::to_string(former_inst_id) + " not found in instance_id_map");
+            throw VulException("Instance ID " + std::to_string(former_inst_id) + " not found in instance_id_map");
         }
         shared_ptr<VulStaticModuleInstance> former_inst_ptr = former_inst_iter->second;
         for (const auto &latter_inst_id : latter_inst_ids) {
             auto latter_inst_iter = instance_id_map.find(latter_inst_id);
             if (latter_inst_iter == instance_id_map.end()) {
-                throw std::runtime_error("Instance ID " + std::to_string(latter_inst_id) + " not found in instance_id_map");
+                throw VulException("Instance ID " + std::to_string(latter_inst_id) + " not found in instance_id_map");
             }
             shared_ptr<VulStaticModuleInstance> latter_inst_ptr = latter_inst_iter->second;
             
@@ -1505,7 +1517,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             }
             while (former_ancestor.get() != latter_ancestor.get()) {
                 if (former_ancestor == nullptr || latter_ancestor == nullptr) {
-                    throw std::runtime_error("Cannot find common ancestor for instance IDs " + std::to_string(former_inst_id) + " and " + std::to_string(latter_inst_id));
+                    throw VulException("Cannot find common ancestor for instance IDs " + std::to_string(former_inst_id) + " and " + std::to_string(latter_inst_id));
                 }
                 former_last_id = former_ancestor->instance_id;
                 latter_last_id = latter_ancestor->instance_id;
@@ -1513,7 +1525,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
                 latter_ancestor = latter_ancestor->parent;
             }
             if (former_ancestor == nullptr) {
-                throw std::runtime_error("Cannot find common ancestor for instance IDs " + std::to_string(former_inst_id) + " and " + std::to_string(latter_inst_id));
+                throw VulException("Cannot find common ancestor for instance IDs " + std::to_string(former_inst_id) + " and " + std::to_string(latter_inst_id));
             }
 
             shared_ptr<VulStaticModuleInstance> common_ancestor = former_ancestor;
@@ -1598,7 +1610,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         }
 
         if (cur_inst->update_seq.size() != update_nodes.size()) {
-            throw std::runtime_error("Cyclic update constraints found in instance update order graph for instance ID " + std::to_string(cur_inst_id));
+            throw VulException("Cyclic update constraints found in instance update order graph for instance ID " + std::to_string(cur_inst_id));
         }
     }
 

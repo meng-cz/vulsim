@@ -2085,6 +2085,8 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         const auto &inst = inst_entry.second;
         const auto &inst_name = inst_entry.first;
 
+        VulErrorContextGuard context_guard("processing child instance " + inst_name);
+
         shared_ptr<VulStaticModuleInstance> inst_mod_ptr;
         for (auto &mod_ptr : mod.children) {
             if (mod_ptr->instance_path.back() == inst_name) {
@@ -2093,7 +2095,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
         }
         if (!inst_mod_ptr) {
-            throw std::runtime_error("Instance module not found for instance: " + inst_name);
+            throw VulException("Child instance not found");
         }
 
         decl_include_field.push_back("#include \"" + inst_mod_ptr->simDeclPath() + "\"\n");
@@ -2141,7 +2143,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                 }
             }
             if (!found_conn) {
-                throw std::runtime_error("No connection found for request " + req_name + " of instance " + inst_name + " in module " + mod.module_name);
+                throw VulException("No connection found for request " + req_name + " of instance " + inst_name);
             }
             if (conn.serv_instance.empty() || conn.serv_instance == VulModule::TopInterface) {
                 // passed to local request/service, directly call the function

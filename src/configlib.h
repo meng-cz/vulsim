@@ -52,13 +52,9 @@ typedef string ConfigValue;
  */
 using VulStaticConfigLib = std::map<ConfigName, ConfigRealValue>;
 
-ErrorMsg insertStaticConfig(VulStaticConfigLib &config_lib, const ConfigName &name, const ConfigValue &value);
+void insertStaticConfig(VulStaticConfigLib &config_lib, const ConfigName &name, const ConfigValue &value);
 
-ErrorMsg calculateConstexprValue(
-    const ConfigValue &value,
-    const VulStaticConfigLib &config_lib,
-    ConfigRealValue &out_real_value
-);
+ConfigRealValue calculateConstexprValue(const ConfigValue &value, const VulStaticConfigLib &config_lib);
 
 
 typedef struct {
