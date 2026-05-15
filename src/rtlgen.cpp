@@ -96,7 +96,71 @@ struct RegisterPorts {
     uint32_t wrport_num = 1; // 寄存器写端口数量，默认为1
 };
 
-using simgen::replaceLog2CeilChar;
+string replaceLog2CeilChar(const ConfigValue &v) {
+    static const string kLog2CeilFunctionName = "log2ceil";
+    // replace @ with log2ceil function call
+    if (v.find('@') == string::npos) {
+        return v; // no '@' found, return original
+    }
+    string out;
+    size_t n = v.size();
+    size_t i = 0;
+    while (i < n) {
+        if (v[i] != '@') {
+            out.push_back(v[i]);
+            ++i;
+            continue;
+        }
+
+        // found '@'
+        size_t k = i + 1;
+        // skip spaces immediately after '@'
+        while (k < n && std::isspace(static_cast<unsigned char>(v[k]))) ++k;
+
+        // if nothing follows, replace with an empty-call
+        if (k >= n) {
+            out += kLog2CeilFunctionName + "()";
+            i = n;
+            break;
+        }
+
+        // if next is '(', reuse it as function call bracket
+        if (v[k] == '(') {
+            out += kLog2CeilFunctionName; // keep the original '(' in next iterations
+            i = k; // continue processing from the '('
+            continue;
+        }
+
+        // identifier: [A-Za-z_][A-Za-z0-9_]*
+        if (std::isalpha(static_cast<unsigned char>(v[k])) || v[k] == '_') {
+            size_t t = k + 1;
+            while (t < n && (std::isalnum(static_cast<unsigned char>(v[t])) || v[t] == '_')) ++t;
+            out += kLog2CeilFunctionName + "(" + v.substr(k, t - k) + ")";
+            i = t;
+            continue;
+        }
+
+        // number literal: decimal or hex (0x...)
+        if (std::isdigit(static_cast<unsigned char>(v[k]))) {
+            size_t t = k;
+            if (t + 1 < n && v[t] == '0' && (v[t + 1] == 'x' || v[t + 1] == 'X')) {
+                t += 2;
+                while (t < n && std::isxdigit(static_cast<unsigned char>(v[t]))) ++t;
+            } else {
+                while (t < n && std::isdigit(static_cast<unsigned char>(v[t]))) ++t;
+            }
+            out += kLog2CeilFunctionName + "(" + v.substr(k, t - k) + ")";
+            i = t;
+            continue;
+        }
+
+        // fallback: just insert function name and continue after spaces
+        out += kLog2CeilFunctionName;
+        i = k;
+    }
+
+    return out;
+}
 
 bool is_loop_start(const string& line) {
     for (size_t i = 0; i + 2 < line.size(); i++) {
