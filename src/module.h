@@ -588,20 +588,127 @@ struct VulStaticInstanceDecl {
     VulStaticConfigLib parameter_overrides;
 };
 
+struct VulStaticTypeSignature {
+    BMemberType type;
+    ConfigRealValue uint_length; // only for uint types
+
+    string toString() const {
+        if (uint_length > 0) {
+            return "UInt<" + std::to_string(uint_length) + ">";
+        } else {
+            return type;
+        }
+    }
+    inline bool operator==(const VulStaticTypeSignature &other) const {
+        if (uint_length > 0 || other.uint_length > 0) {
+            return type == other.type && uint_length == other.uint_length;
+        }
+        return type == other.type;
+    }
+    VulStaticBundleMember toBundleMember(const string &name) const {
+        VulStaticBundleMember member;
+        member.name = name;
+        member.type = type;
+        member.uint_length = uint_length;
+        return member;
+    }
+};
+
+
+
+struct VulStaticArg {
+    ArgName     name;
+    VulStaticTypeSignature type;
+};
+
+struct VulStaticReqServ {
+    ReqServName name;
+    vector<VulStaticArg> args;
+    vector<VulStaticArg> rets;
+    bool has_handshake;
+
+    inline bool match(const VulStaticReqServ &a) const {
+        if (a.has_handshake != has_handshake) return false;
+        if (a.args.size() != args.size()) return false;
+        for (size_t i = 0; i < a.args.size(); ++i) {
+            if (a.args[i].type != args[i].type) return false;
+        }
+        if (a.rets.size() != rets.size()) return false;
+        for (size_t i = 0; i < a.rets.size(); ++i) {
+            if (a.rets[i].type != rets[i].type) return false;
+        }
+        return true;
+    }
+
+    inline string signatureArgNameList() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += args[i].name;
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += rets[i].name;
+        }
+        return sig;
+    }
+
+    inline string signatureArgTypeOnly() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += string("const ") + args[i].type.toString() + " & ";
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += rets[i].type.toString() + " & ";
+        }
+        return sig;
+    }
+
+    inline string signatureArgOnly() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += (string("const ") + args[i].type.toString() + " & ") + args[i].name;
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += (rets[i].type.toString() + " & " + rets[i].name);
+        }
+        return sig;
+    }
+
+    inline string returnType() const {
+        return (has_handshake ? "bool" : "void");
+    }
+
+    inline string signatureNoRetType(const string name_prefix = "") const {
+        return  name_prefix + name + "(" + signatureArgOnly() + ")";
+    }
+
+    inline string signatureFull(const string name_prefix = "") const {
+        return (has_handshake ? "bool " : "void ") + signatureNoRetType(name_prefix);
+    }
+};
+
 struct VulStaticRegister {
-    VulStaticBundleMember signature;
+    BMemberName name;
+    VulStaticTypeSignature signature;
+    vector<ConfigRealValue> dims; // only for array types
     ConfigRealValue ports;
     vector<string> reset_codelines;
 };
 
 struct VulStaticWire {
-    VulStaticBundleMember signature;
+    BMemberName name;
+    VulStaticTypeSignature signature;
     vector<string> reset_codelines;
 };
 
 struct VulStaticBRAM {
     InstanceName name;
-    VulStaticBundleMember data_type;
+    VulStaticTypeSignature data_type;
     ConfigRealValue addr_width;
     ConfigRealValue read_ports;
     ConfigRealValue write_ports;
@@ -668,8 +775,8 @@ struct VulStaticModuleInstance {
     VulStaticConfigLib local_consts;
     VulStaticBundleLib local_bundles;
 
-    unordered_map<ReqServName, VulReqServ>      requests;
-    unordered_map<ReqServName, VulReqServ>      services;
+    unordered_map<ReqServName, VulStaticReqServ>      requests;
+    unordered_map<ReqServName, VulStaticReqServ>      services;
 
     vector<VulStaticRegister> registers;
     vector<VulStaticWire> wires;
@@ -685,7 +792,7 @@ struct VulStaticModuleInstance {
     vector<VulReqServConnection>  req_connections;
 
     unordered_set<ReqServName> exported_services; // services that are connected to parent instance, and should not be connected or called within the module itself
-    vector<VulInstanceID> update_seq; // topological order of instance update
+    vector<VulInstanceID> update_seq; // topological order of instance update in simulation
 };
 
 void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance);
@@ -697,8 +804,8 @@ struct VulStaticTestHarnessModule {
 
     VulStaticConfigLib top_config_overrides;
 
-    unordered_map<ReqServName, VulReqServ>      requests;
-    unordered_map<ReqServName, VulReqServ>      services;
+    unordered_map<ReqServName, VulStaticReqServ>      requests;
+    unordered_map<ReqServName, VulStaticReqServ>      services;
 
     vector<CCodeLine> test_codelines;
     unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines;

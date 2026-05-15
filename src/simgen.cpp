@@ -1933,10 +1933,10 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     // generate request declarations
     for (const auto &req_entry : mod.requests) {
         const auto &req = req_entry.second;
-        string rettype = _genReqServFuncReturnType(req);
-        string argtypes = _genReqServFuncArgsTypes(req);
-        string argnames = _genReqServFuncArgsNames(req);
-        string arglists = _genReqServFuncArgsList(req);
+        string rettype = req.returnType();
+        string argtypes = req.signatureArgTypeOnly();
+        string argnames = req.signatureArgNameList();
+        string arglists = req.signatureArgOnly();
 
         decl_private_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ");\n");
         decl_private_field.push_back("\n");
@@ -1951,9 +1951,10 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     // generate service declarations
     for (const auto &serv_entry : mod.services) {
         const auto &serv = serv_entry.second;
-        string rettype = _genReqServFuncReturnType(serv);
-        string argnames = _genReqServFuncArgsNames(serv);
-        string arglists = _genReqServFuncArgsList(serv);
+        string rettype = serv.returnType();
+        string argtypes = serv.signatureArgTypeOnly();
+        string argnames = serv.signatureArgNameList();
+        string arglists = serv.signatureArgOnly();
 
         decl_public_field.push_back(rettype + " " + serv_entry.first + "(" + arglists + ");\n");
 
@@ -1996,9 +1997,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         if (sig.uint_length > 0) {
             base_type = UIntClassName + "<" + std::to_string(sig.uint_length) + ">";
         }
-        if (!sig.dims.empty()) {
+        if (!reg.dims.empty()) {
             type_str += StorageNextArrayClassName + "<" + base_type;
-            for (const auto &dim : sig.dims) {
+            for (const auto &dim : reg.dims) {
                 type_str += "," + std::to_string(dim);
             }
             if (reg.ports > 1) {
@@ -2006,10 +2007,10 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
             type_str += ">";
 
-            decl_private_field.push_back(type_str + " " + sig.name + ";\n");
+            decl_private_field.push_back(type_str + " " + reg.name + ";\n");
             decl_private_field.push_back("template <uint32_t P = 0>\n");
-            decl_private_field.push_back("void " + sig.name + "_setnext(const uint64_t idx, const " + base_type + " &value) {\n");
-            decl_private_field.push_back(CodeTab + sig.name + ".setnext<P>(idx, value);\n");
+            decl_private_field.push_back("void " + reg.name + "_setnext(const uint64_t idx, const " + base_type + " &value) {\n");
+            decl_private_field.push_back(CodeTab + reg.name + ".setnext<P>(idx, value);\n");
             decl_private_field.push_back("}\n");
             decl_private_field.push_back("\n");
         } else {
@@ -2019,32 +2020,36 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                 type_str = StorageNextClassName + "<" + base_type + ">";
             }
 
-            decl_private_field.push_back(type_str + " " + sig.name + ";\n");
+            decl_private_field.push_back(type_str + " " + reg.name + ";\n");
             decl_private_field.push_back("template <uint32_t P = 0>\n");
-            decl_private_field.push_back("void " + sig.name + "_setnext(const " + base_type + " &value) {\n");
-            decl_private_field.push_back(CodeTab + sig.name + ".setnext<P>(value);\n");
+            decl_private_field.push_back("void " + reg.name + "_setnext(const " + base_type + " &value) {\n");
+            decl_private_field.push_back(CodeTab + reg.name + ".setnext<P>(value);\n");
             decl_private_field.push_back("}\n");
-            decl_private_field.push_back("const " + base_type + " &" + sig.name + "_get() const {\n");
-            decl_private_field.push_back(CodeTab + "return " + sig.name + ".get();\n");
+            decl_private_field.push_back("const " + base_type + " &" + reg.name + "_get() const {\n");
+            decl_private_field.push_back(CodeTab + "return " + reg.name + ".get();\n");
             decl_private_field.push_back("}\n");
             decl_private_field.push_back("\n");
         }
-
+        VulStaticBundleMember sig_as_member;
+        sig_as_member.name = reg.name;
+        sig_as_member.type = reg.signature.type;
+        sig_as_member.uint_length = reg.signature.uint_length;
+        sig_as_member.dims = reg.dims;
         impl_reg_reset_field.push_back("{\n");
-        impl_reg_reset_field.push_back(_genStaticMemberTypeStr(sig) + " " + sig.name + ";\n");
+        impl_reg_reset_field.push_back(_genStaticMemberTypeStr(sig_as_member) + " " + reg.name + ";\n");
         impl_reg_reset_field.insert(impl_reg_reset_field.end(), reg.reset_codelines.begin(), reg.reset_codelines.end());
-        impl_reg_reset_field.push_back("this->" + sig.name + ".reset(" + sig.name + ");\n");
+        impl_reg_reset_field.push_back("this->" + reg.name + ".reset(" + reg.name + ");\n");
         impl_reg_reset_field.push_back("}\n");
 
-        impl_commit_field.push_back(sig.name + "." + ApplyTickFunctionName + "();\n");
+        impl_commit_field.push_back(reg.name + "." + ApplyTickFunctionName + "();\n");
     }
 
     // generate wire
     for (const auto &wire : mod.wires) {
         const auto &sig = wire.signature;
-        string type_str = _genStaticMemberTypeStr(sig);
+        string type_str = sig.toString();
 
-        decl_private_field.push_back(type_str + " " + sig.name + ";\n");
+        decl_private_field.push_back(type_str + " " + wire.name + ";\n");
         decl_private_field.push_back("\n");
 
         impl_commit_field.push_back("{\n");
@@ -2062,11 +2067,11 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         string bram_class = "";
         if (bram.read_ports == 0 || bram.write_ports == 0) {
             bram_class = BlockRAM1RWClassName + "<" +
-                _genStaticMemberTypeStr(bram.data_type) + ", " +
+                bram.data_type.toString() + ", " +
                 std::to_string(bram.addr_width) + ">";
         } else {
             bram_class = BlockRAMClassName + "<" +
-            _genStaticMemberTypeStr(bram.data_type) + ", " +
+            bram.data_type.toString() + ", " +
             std::to_string(bram.addr_width) + ", " + 
             std::to_string(bram.read_ports) + ", " +
             std::to_string(bram.write_ports) + ">";
@@ -2139,9 +2144,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                 throw std::runtime_error("Service " + serv_name + " not found in module "+ inst_mod_ptr->module_name + " but required by " + mod.module_name);
             }
             const auto &serv = serv_iter->second;
-            string rettype = _genReqServFuncReturnType(serv);
-            string arglists = _genReqServFuncArgsList(serv);
-            string argname = _genReqServFuncArgsNames(serv);
+            string rettype = serv.returnType();
+            string arglists = serv.signatureArgOnly();
+            string argname = serv.signatureArgNameList();
             decl_private_field.push_back(rettype + " " + inst_name + "_" + serv_name + "(" + arglists + ") {\n");
             string call_prefix = (rettype == "void" ? "" : "return ");
             decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "(" + argname + ");\n");
@@ -2152,9 +2157,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         for (const auto &req_entry : inst_mod_ptr->requests) {
             const auto &req_name = req_entry.first;
             const auto &req = req_entry.second;
-            string rettype = _genReqServFuncReturnType(req);
-            string arglists = _genReqServFuncArgsList(req);
-            string argname = _genReqServFuncArgsNames(req);
+            string rettype = req.returnType();
+            string arglists = req.signatureArgOnly();
+            string argname = req.signatureArgNameList();
             decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
             string call_prefix = (rettype == "void" ? "" : "return ");
             // find the connected service
@@ -2363,10 +2368,10 @@ vector<string> genStaticTestHarnessHpp(
 
     for (const auto &req_entry : test_module.requests) {
         const auto &req = req_entry.second;
-        string rettype = _genReqServFuncReturnType(req);
-        string argtypes = _genReqServFuncArgsTypes(req);
-        string argnames = _genReqServFuncArgsNames(req);
-        string arglists = _genReqServFuncArgsList(req);
+        string rettype = req.returnType();
+        string argtypes = req.signatureArgTypeOnly();
+        string argnames = req.signatureArgNameList();
+        string arglists = req.signatureArgOnly();
         member_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ") {\n");
         string return_prefix = (rettype == "void" ? "" : "return ");
         member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + req_entry.first + "(" + argnames + ");\n");
@@ -2376,10 +2381,10 @@ vector<string> genStaticTestHarnessHpp(
 
     for (const auto &serve : test_module.services) {
         const auto &serv = serve.second;
-        string rettype = _genReqServFuncReturnType(serv);
-        string argtypes = _genReqServFuncArgsTypes(serv);
-        string argnames = _genReqServFuncArgsNames(serv);
-        string arglists = _genReqServFuncArgsList(serv);
+        string rettype = serv.returnType();
+        string argtypes = serv.signatureArgTypeOnly();
+        string argnames = serv.signatureArgNameList();
+        string arglists = serv.signatureArgOnly();
 
         public_member_field.push_back(rettype + " __wrapper_" + top_module.instance_path.back() + "_" + serve.first + "(" + arglists + ") {\n");
         if (serv.has_handshake) {
@@ -2397,7 +2402,7 @@ vector<string> genStaticTestHarnessHpp(
         // find the service declaration to get argument list
         auto serv_iter = test_module.services.find(serv_name);
         if (serv_iter != test_module.services.end()) {
-            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            string arglists = serv_iter->second.signatureArgOnly();
             member_field.push_back("void __impl_" + serv_name + "(" + arglists + ") {\n");
         } else {
             member_field.push_back("void __impl_" + serv_name + "() {\n");
@@ -2417,7 +2422,7 @@ vector<string> genStaticTestHarnessHpp(
         // find the service declaration to get argument list
         auto serv_iter = test_module.services.find(serv_name);
         if (serv_iter != test_module.services.end() && serv_iter->second.has_handshake) {
-            string arglists = _genReqServFuncArgsList(serv_iter->second);
+            string arglists = serv_iter->second.signatureArgOnly();
             member_field.push_back("bool __cond_" + serv_name + "(" + arglists + ") {\n");
             for (const auto &line : code_lines) {
                 if (line.ends_with("\n")) {

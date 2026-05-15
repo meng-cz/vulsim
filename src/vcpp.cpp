@@ -968,6 +968,47 @@ VulProject parseVcppProject(
     return project;
 }
 
+inline void parse_reg_uint_type(const string& type_str, const VulStaticConfigLib &configlib, VulStaticTypeSignature &signature) {
+    // parse UInt<N> to extract N
+    const string prefix = "UInt<";
+    const string suffix = ">";
+    if (type_str.substr(0, prefix.size()) == prefix && type_str.size() > prefix.size() + suffix.size() && type_str.substr(type_str.size() - suffix.size()) == suffix) {
+        string num_str = type_str.substr(prefix.size(), type_str.size() - prefix.size() - suffix.size());
+        ConfigRealValue value = calculateConstexprValue(num_str, configlib);
+        signature.type = "UInt";
+        signature.uint_length = value;
+    } else {
+        signature.type = type_str;
+        signature.uint_length = 0;
+    }
+};
+
+void _parseReqServArgs(
+    const vector<string> & macro_args,
+    const uint64_t begin_idx,
+    const VulStaticConfigLib &configlib,
+    VulStaticReqServ & reqserv
+) {
+    for (size_t i = begin_idx; i < macro_args.size(); ++i) {
+        VulStaticArg arg;
+        vector<string> parts = split(macro_args[i], ' ');
+        if (parts.size() != 2) {
+            throw VulException("Invalid argument format in REQ_PORT/SERV_PORT: " + macro_args[i]);
+        }
+        arg.name = parts[1];
+        // parse ARG(type) or RESP(type) for parts[0]
+        string type_str = trim(parts[0]);
+        if (type_str.substr(0, 4) == "ARG(" && type_str.back() == ')') {
+            parse_reg_uint_type(type_str.substr(4, type_str.size() - 5), configlib, arg.type);
+            reqserv.args.push_back(arg);
+        } else if (type_str.substr(0, 5) == "RESP(" && type_str.back() == ')') {
+            parse_reg_uint_type(type_str.substr(5, type_str.size() - 6), configlib, arg.type);
+            reqserv.rets.push_back(arg);
+        } else {
+            throw VulException("Invalid argument type format in REQ_PORT/SERV_PORT: " + parts[0]);
+        }
+    }
+}
 
 void _parseStaticModule(
     const std::vector<std::string>& code,
@@ -1017,20 +1058,7 @@ void _parseStaticModule(
             module.local_bundles.push_back(std::move(static_bundle));
         }
     }
-    auto parse_reg_uint_type = [](const string& type_str, const VulStaticConfigLib &configlib, VulStaticBundleMember &signature) {
-        // parse UInt<N> to extract N
-        const string prefix = "UInt<";
-        const string suffix = ">";
-        if (type_str.substr(0, prefix.size()) == prefix && type_str.size() > prefix.size() + suffix.size() && type_str.substr(type_str.size() - suffix.size()) == suffix) {
-            string num_str = type_str.substr(prefix.size(), type_str.size() - prefix.size() - suffix.size());
-            ConfigRealValue value = calculateConstexprValue(num_str, configlib);
-            signature.type = "UInt";
-            signature.uint_length = value;
-        } else {
-            signature.type = type_str;
-            signature.uint_length = 0;
-        }
-    };
+    
     {
         // parse register
         VulErrorContextGuard _err{"parsing registers"};
@@ -1038,7 +1066,7 @@ void _parseStaticModule(
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[1] + " " + item.args[0]};
             VulStaticRegister reg;
-            reg.signature.name = item.args[0];
+            reg.name = item.args[0];
             parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
             reg.ports = 1;
             BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
@@ -1051,10 +1079,10 @@ void _parseStaticModule(
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[1] + "<" + item.args[3] + ">" + " " + item.args[0] + "[" + item.args[2] + "]"};
             VulStaticRegister reg;
-            reg.signature.name = item.args[0];
+            reg.name = item.args[0];
             parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
             ConfigRealValue array_size = calculateConstexprValue(item.args[2], local_configlib);
-            reg.signature.dims.push_back(array_size);
+            reg.dims.push_back(array_size);
             array_size = calculateConstexprValue(item.args[3], local_configlib);
             reg.ports = (array_size > 1) ? array_size : 1;
             BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
@@ -1067,7 +1095,7 @@ void _parseStaticModule(
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[1] + "<" + item.args[2] + ">" + " " + item.args[0]};
             VulStaticRegister reg;
-            reg.signature.name = item.args[0];
+            reg.name = item.args[0];
             parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
             ConfigRealValue portnum = calculateConstexprValue(item.args[2], local_configlib);
             reg.ports = (portnum > 1) ? portnum : 1;
@@ -1085,7 +1113,7 @@ void _parseStaticModule(
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[1] + " " + item.args[0]};
             VulStaticWire reg;
-            reg.signature.name = item.args[0];
+            reg.name = item.args[0];
             parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
             BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
             if (block.end_pos.line != -1) {
@@ -1100,19 +1128,19 @@ void _parseStaticModule(
         auto matches = matchMacros(code, "REQUEST()");
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[0]};
-            VulReqServ req;
+            VulStaticReqServ req;
             req.name = item.args[0];
             req.has_handshake = false;
-            _parseReqServArgs(item.args, 1, req);
+            _parseReqServArgs(item.args, 1, configlib, req);
             module.requests[req.name] = req;
         }
         matches = matchMacros(code, "REQUEST_READY()");
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[0]};
-            VulReqServ req;
+            VulStaticReqServ req;
             req.name = item.args[0];
             req.has_handshake = true;
-            _parseReqServArgs(item.args, 1, req);
+            _parseReqServArgs(item.args, 1, configlib, req);
             module.requests[req.name] = req;
         }
     }
@@ -1158,10 +1186,10 @@ void _parseStaticModule(
         }
         for (const auto& item : unified_matches) {
             VulErrorContextGuard _err{item.args[0]};
-            VulReqServ serv;
+            VulStaticReqServ serv;
             serv.name = item.args[0];
             serv.has_handshake = (item.args[1] != "");
-            _parseReqServArgs(item.args, 3, serv);
+            _parseReqServArgs(item.args, 3, configlib, serv);
             module.services[serv.name] = serv;
             VulLogicBlock lb;
             lb.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
@@ -1379,38 +1407,24 @@ VulStaticTestHarnessModule _parseStaticTestHarnessModule(
         }
     }
     {
-        // parse req/serv ports
-        VulErrorContextGuard _err{"parsing request-service ports"};
-        auto matches = matchMacros(code, "REQUEST_PORT()");
-        for (const auto& item : matches) {
-            VulReqServ req = _parseReqServPort(item.args);
-            module.requests[req.name] = req;
-        }
-        matches = matchMacros(code, "SERVICE_PORT()");
-        for (const auto& item : matches) {
-            VulReqServ serv = _parseReqServPort(item.args);
-            module.services[serv.name] = serv;
-        }
-    }
-    {
         // parse req
         VulErrorContextGuard _err{"parsing requests"};
         auto matches = matchMacros(code, "REQUEST()");
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[0]};
-            VulReqServ req;
+            VulStaticReqServ req;
             req.name = item.args[0];
             req.has_handshake = false;
-            _parseReqServArgs(item.args, 1, req);
+            _parseReqServArgs(item.args, 1, configlib, req);
             module.requests[req.name] = req;
         }
         matches = matchMacros(code, "REQUEST_READY()");
         for (const auto& item : matches) {
             VulErrorContextGuard _err{item.args[0]};
-            VulReqServ req;
+            VulStaticReqServ req;
             req.name = item.args[0];
             req.has_handshake = true;
-            _parseReqServArgs(item.args, 1, req);
+            _parseReqServArgs(item.args, 1, configlib, req);
             module.requests[req.name] = req;
         }
     }
@@ -1438,10 +1452,10 @@ VulStaticTestHarnessModule _parseStaticTestHarnessModule(
         }
         for (const auto& item : unified_matches) {
             VulErrorContextGuard _err{item.args[0]};
-            VulReqServ serv;
+            VulStaticReqServ serv;
             serv.name = item.args[0];
             serv.has_handshake = (item.args[1] != "");
-            _parseReqServArgs(item.args, 3, serv);
+            _parseReqServArgs(item.args, 3, configlib, serv);
             module.services[serv.name] = serv;
             if (serv.has_handshake) {
                 vector<string> cond_lines;
@@ -1538,16 +1552,18 @@ VulStaticProject parseVcppStaticProject(
         }
     }
 
-    path main_path(main_file_path);
-    if (!exists(main_path) || !is_regular_file(main_path)) {
-        std::cerr << "Error: Main file does not exist or is not a regular file: " << main_file_path << std::endl;
-        assert(0);
-    }
-    {
-        VulErrorContextGuard _err{"reading test harness module from " + main_path.string()};
-        auto main_lines = readFileLines(main_path.string());
-        auto main_strip = stripComments(main_lines);
-        project.test_harness = _parseStaticTestHarnessModule(main_strip.lines, project.global_configlib);
+    if (!main_file_path.empty()) {
+        path main_path(main_file_path);
+        if (!exists(main_path) || !is_regular_file(main_path)) {
+            std::cerr << "Error: Main file does not exist or is not a regular file: " << main_file_path << std::endl;
+            assert(0);
+        }
+        {
+            VulErrorContextGuard _err{"reading test harness module from " + main_path.string()};
+            auto main_lines = readFileLines(main_path.string());
+            auto main_strip = stripComments(main_lines);
+            project.test_harness = _parseStaticTestHarnessModule(main_strip.lines, project.global_configlib);
+        }
     }
 
     unordered_map<ModuleName, path> module_file_path_cache;
@@ -1670,6 +1686,10 @@ VulStaticProject parseVcppStaticProject(
     }
     printf("Total instances: %d\n", module_count);
     
+    if (main_file_path.empty()) {
+        printf("No main file provided, skipping simulation setup.\n");
+        return project;
+    }
 
     printf("Setting up simulation hierarchy and update sequence...\n");
 
