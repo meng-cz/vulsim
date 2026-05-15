@@ -19,7 +19,8 @@
 - [4. VulCPP Main 模块（Test Harness）定义](./doc/vulcpp/4-Main.md)
 - [5. VulCPP 无符号任意宽度整数类型 UInt](./doc/vulcpp/5-uint.md)
 - [6. VulCPP 通用块内存组件 BRAM](./doc/vulcpp/6-bram.md)
-- [7. VulCPP 波形追踪与调试](./doc/vulcpp/7-debugging.md)
+- [7. VulCPP 通用队列组件 QUEUE](./doc/vulcpp/7-queue.md)
+- [8. VulCPP 波形追踪与调试](./doc/vulcpp/8-debugging.md)
 
 ## 构建
 
@@ -45,7 +46,7 @@ make -j8
 
 ```bash
 # 生成仿真代码
-./vulsimgen -t ../example/prodcon/TopModule.hpp -m ../example/prodcon/Main.cpp -l ../vullib/ -o sim_out
+./vulsimgen -t example/prodcon/TopModule.hpp -m example/prodcon/Main.cpp -l vullib -o sim_out
 # -t: 指定顶层硬件设计模块的头文件路径
 # -m: 指定 Main 模块的头文件路径
 # -l: 指定 VulCPP 库文件的路径
