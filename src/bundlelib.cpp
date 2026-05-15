@@ -451,10 +451,19 @@ VulStaticBundle staticalizeBundle(const VulBundleItem &item, const VulStaticConf
         static_member.name = member.name;
         static_member.type = member.type;
         VulErrorContextGuard _err{"staticalizing member " + member.name};
-        // 计算 uint 长度
+        // 计算 uint 长度，同时判断 type 是否是 UInt<N>
+        trim(static_member.type);
+        string uint_length_str = "";
         if (!member.uint_length.empty()) {
-            VulErrorContextGuard _err{"calculating uint length " + member.uint_length};
-            ConfigRealValue uint_len_value = calculateConstexprValue(member.uint_length, config_lib);
+            uint_length_str = member.uint_length;
+        } else if (static_member.type.starts_with("UInt<") && static_member.type.ends_with(">")) {
+            uint_length_str = static_member.type.substr(5, static_member.type.size() - 6);
+            static_member.type = "UInt";
+        }
+
+        if (!uint_length_str.empty()) {
+            VulErrorContextGuard _err{"calculating uint length " + uint_length_str};
+            ConfigRealValue uint_len_value = calculateConstexprValue(uint_length_str, config_lib);
             static_member.uint_length = uint_len_value;
         } else {
             static_member.uint_length = 0;
@@ -517,7 +526,7 @@ uint32_t get_basic_width(const std::string& type) {
     bits = parse_int_type(type, "uint");
     if (bits != 0) return bits;
 
-    throw std::runtime_error("Unsupported type: " + type);
+    throw VulException("Unsupported type: " + type);
 }
 
 void flatten_member(
