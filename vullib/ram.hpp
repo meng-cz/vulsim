@@ -37,31 +37,180 @@ using std::array;
 using std::string;
 using std::vector;
 
-template <uint32_t DataWidth, uint32_t AddrWidth>
-class VulBRAMImpl {
+
+template <typename DataT, uint32_t AddrWidth>
+class VulBRAM1RW {
+public:
+    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
+
+    using AddrType = UInt<AddrWidth>;
+
+protected:
+
+    std::array<DataT, 1ULL << AddrWidth> memory_;
+
+    AddrType addr_;
+    DataT write_data_;
+    DataT read_data_;
+    bool write_en_;
+
+public:
+    VulBRAM1RW() : write_en_(false) {}
+
+    VulBRAM1RW(const string &path, bool hex) : write_en_(false) {}
+
+    void req(const AddrType &addr, const DataT &write_data, bool write_en) {
+        addr_ = addr;
+        write_data_ = write_data;
+        write_en_ = write_en;
+    }
+
+    const DataT& readdata() const {
+        return read_data_;
+    }
+
+    void apply_next_tick() {
+        if (write_en_) {
+            memory_[addr_.get_u64()] = write_data_;
+        }
+        read_data_ = memory_[addr_.get_u64()];
+    }
+};
+
+template <typename DataT, uint32_t AddrWidth, uint32_t ReadPorts, uint32_t WritePorts>
+class VulBRAM {
 public:
 
-    VulBRAMImpl() {
-        memory_.fill(DataType(0));
-    }
-    VulBRAMImpl(const std::string &init_path, bool is_hex) {
-        if (is_hex) {
-            init_from_readmemh(init_path);
-        } else {
-            init_from_readmemb(init_path);
+    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
+    static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
+    static_assert(WritePorts > 0, "WritePorts must be greater than 0");
+    static_assert(WritePorts < 64, "WritePorts must be less than 64");
+
+    using AddrType = UInt<AddrWidth>;
+
+protected:
+
+    std::array<DataT, 1ULL << AddrWidth> memory_;
+
+    array<AddrType, ReadPorts> read_addresses_;
+    array<DataT, ReadPorts> read_data_;
+
+    array<AddrType, WritePorts> write_addresses_;
+    array<DataT, WritePorts> write_data_;
+    uint64_t write_enables_; // 每个位对应一个写端口，1表示该端口有效
+
+    template<int I, int N>
+    inline void unroll_loop(auto&& f) {
+        if constexpr (I < N) {
+            f(std::integral_constant<int, I>{});
+            unroll_loop<I + 1, N>(f);
         }
     }
 
+public:
+    VulBRAM() : write_enables_(0) {}
+
+    VulBRAM(const string &path, bool hex) : write_enables_(0) {}
+
+    template <uint32_t PortIndex>
+    void readreq(const AddrType &addr) {
+        static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        read_addresses_[PortIndex] = addr;
+    }
+
+    template <uint32_t PortIndex>
+    const DataT& readdata() const {
+        static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        return read_data_[PortIndex];
+    }
+
+    template <uint32_t PortIndex>
+    void write(const AddrType &addr, const DataT &data) {
+        static_assert(PortIndex < WritePorts, "Write port index out of range");
+        write_addresses_[PortIndex] = addr;
+        write_data_[PortIndex] = data;
+        write_enables_ |= 1ULL << PortIndex;
+    }
+
+    void apply_next_tick() {
+        unroll_loop<0, ReadPorts>([&](auto i) {
+            read_data_[i] = memory_[read_addresses_[i].get_u64()];
+        });
+        if (write_enables_ != 0) {
+            unroll_loop<0, WritePorts>([&](auto i) {
+                if (write_enables_ & (1ULL << i)) {
+                    memory_[write_addresses_[i].get_u64()] = write_data_[i];
+                }
+            });
+            write_enables_ = 0;
+        }
+    }
+
+protected:
+
+};
+
+template <uint32_t DataWidth, uint32_t AddrWidth, uint32_t ReadPorts>
+class VulROM {
+
+public:
+
     static_assert(DataWidth > 0, "DataWidth must be greater than 0");
     static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
+    static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
 
     using DataType = UInt<DataWidth>;
     using AddrType = UInt<AddrWidth>;
 
+protected:
+
     array<DataType, 1ULL << AddrWidth> memory_;
 
+    array<AddrType, ReadPorts> read_addresses_;
+    array<DataType, ReadPorts> read_data_;
+
+    template<int I, int N>
+    inline void unroll_loop(auto&& f) {
+        if constexpr (I < N) {
+            f(std::integral_constant<int, I>{});
+            unroll_loop<I + 1, N>(f);
+        }
+    }
+
+public:
+
+    VulROM(const string &path, bool hex = true) {
+        if (hex) {
+            init_from_readmemh(path);
+        } else {
+            init_from_readmemb(path);
+        }
+    }
+
+    template <uint32_t PortIndex>
+    void readreq(const AddrType &addr) {
+        static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        read_addresses_[PortIndex] = addr;
+    }
+
+    template <uint32_t PortIndex>
+    const DataType readdata() const {
+        static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        return read_data_[PortIndex];
+    }
+
+    void apply_next_tick() {
+        unroll_loop<0, ReadPorts>([&](auto i) {
+            read_data_[i] = memory_[read_addresses_[i].get_u64()];
+        });
+    }
+
+
 protected:
-    
+
     static inline uint8_t hex_val(char c) {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
         if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
@@ -194,228 +343,112 @@ protected:
     }
 
     void init_from_readmemb(
-    const std::string &path,
-    bool strict_width = false   // 若 token 位数 > DataWidth 是否报错
-) {
-    std::ifstream fin(path);
-    if (!fin) {
-        throw std::runtime_error("Cannot open file: " + path);
-    }
+        const std::string &path,
+        bool strict_width = false   // 若 token 位数 > DataWidth 是否报错
+    ) {
+        std::ifstream fin(path);
+        if (!fin) {
+            throw std::runtime_error("Cannot open file: " + path);
+        }
 
-    constexpr size_t DEPTH = 1ULL << AddrWidth;
+        constexpr size_t DEPTH = 1ULL << AddrWidth;
 
-    size_t cur_addr = 0;
-    std::string line;
+        size_t cur_addr = 0;
+        std::string line;
 
-    while (std::getline(fin, line)) {
-        line = strip_comment(line);
-        line = trim(line);
-        if (line.empty()) continue;
+        while (std::getline(fin, line)) {
+            line = strip_comment(line);
+            line = trim(line);
+            if (line.empty()) continue;
 
-        std::istringstream iss(line);
-        std::string token;
+            std::istringstream iss(line);
+            std::string token;
 
-        while (iss >> token) {
-            token = trim(token);
-            if (token.empty()) continue;
+            while (iss >> token) {
+                token = trim(token);
+                if (token.empty()) continue;
 
-            // 地址跳转：@<hex>
-            if (token[0] == '@') {
-                std::string addr_str = token.substr(1);
-                if (addr_str.empty())
-                    throw std::runtime_error("Invalid @ address");
+                // 地址跳转：@<hex>
+                if (token[0] == '@') {
+                    std::string addr_str = token.substr(1);
+                    if (addr_str.empty())
+                        throw std::runtime_error("Invalid @ address");
 
-                size_t addr = std::stoull(addr_str, nullptr, 16);
-                if (addr >= DEPTH)
-                    throw std::runtime_error("Address out of range");
+                    size_t addr = std::stoull(addr_str, nullptr, 16);
+                    if (addr >= DEPTH)
+                        throw std::runtime_error("Address out of range");
 
-                cur_addr = addr;
-                continue;
-            }
-
-            // 去掉下划线
-            std::string bits;
-            bits.reserve(token.size());
-            for (char c : token) {
-                if (c != '_') bits.push_back(c);
-            }
-            if (bits.empty()) continue;
-
-            // 校验只包含 0/1
-            for (char c : bits) {
-                if (c != '0' && c != '1') {
-                    throw std::runtime_error("Invalid binary digit in token: " + bits);
+                    cur_addr = addr;
+                    continue;
                 }
-            }
 
-            const size_t nbits = bits.size();
-            if (strict_width && nbits > DataWidth) {
-                throw std::runtime_error("Data width overflow (binary token too wide)");
-            }
-            if (cur_addr >= DEPTH) {
-                throw std::runtime_error("Memory overflow");
-            }
-
-            DataType d; // 如需默认清零，请确保 UInt 默认构造为 0
-
-            // 从 LSB 开始打包（与 Verilog 一致：右侧为低位）
-            // 按 64bit 分块写入 UInt
-            size_t bit_pos = 0;   // 当前写入到 d 的 bit 位置（LSB 起）
-            uint64_t chunk = 0;
-            int bit_in_chunk = 0; // 已填入 chunk 的 bit 数
-
-            // 从字符串末尾（LSB）向前处理
-            for (int i = (int)bits.size() - 1; i >= 0; --i) {
-                if (bits[i] == '1') {
-                    chunk |= (uint64_t(1) << bit_in_chunk);
+                // 去掉下划线
+                std::string bits;
+                bits.reserve(token.size());
+                for (char c : token) {
+                    if (c != '_') bits.push_back(c);
                 }
-                bit_in_chunk++;
+                if (bits.empty()) continue;
 
-                if (bit_in_chunk == 64) {
+                // 校验只包含 0/1
+                for (char c : bits) {
+                    if (c != '0' && c != '1') {
+                        throw std::runtime_error("Invalid binary digit in token: " + bits);
+                    }
+                }
+
+                const size_t nbits = bits.size();
+                if (strict_width && nbits > DataWidth) {
+                    throw std::runtime_error("Data width overflow (binary token too wide)");
+                }
+                if (cur_addr >= DEPTH) {
+                    throw std::runtime_error("Memory overflow");
+                }
+
+                DataType d; // 如需默认清零，请确保 UInt 默认构造为 0
+
+                // 从 LSB 开始打包（与 Verilog 一致：右侧为低位）
+                // 按 64bit 分块写入 UInt
+                size_t bit_pos = 0;   // 当前写入到 d 的 bit 位置（LSB 起）
+                uint64_t chunk = 0;
+                int bit_in_chunk = 0; // 已填入 chunk 的 bit 数
+
+                // 从字符串末尾（LSB）向前处理
+                for (int i = (int)bits.size() - 1; i >= 0; --i) {
+                    if (bits[i] == '1') {
+                        chunk |= (uint64_t(1) << bit_in_chunk);
+                    }
+                    bit_in_chunk++;
+
+                    if (bit_in_chunk == 64) {
+                        size_t lo = bit_pos;
+                        if (lo < DataWidth) {
+                            size_t hi = std::min(bit_pos + 63, (size_t)DataWidth - 1);
+                            UInt<64> tmp(chunk);
+                            d(hi, lo) = tmp;
+                        }
+                        bit_pos += 64;
+                        chunk = 0;
+                        bit_in_chunk = 0;
+                    }
+                }
+
+                // 处理最后不足 64bit 的部分
+                if (bit_in_chunk > 0) {
                     size_t lo = bit_pos;
                     if (lo < DataWidth) {
-                        size_t hi = std::min(bit_pos + 63, (size_t)DataWidth - 1);
+                        size_t hi = std::min(bit_pos + (size_t)bit_in_chunk - 1,
+                                            (size_t)DataWidth - 1);
                         UInt<64> tmp(chunk);
                         d(hi, lo) = tmp;
                     }
-                    bit_pos += 64;
-                    chunk = 0;
-                    bit_in_chunk = 0;
                 }
+
+                memory_[cur_addr] = d;
+                cur_addr++;
             }
-
-            // 处理最后不足 64bit 的部分
-            if (bit_in_chunk > 0) {
-                size_t lo = bit_pos;
-                if (lo < DataWidth) {
-                    size_t hi = std::min(bit_pos + (size_t)bit_in_chunk - 1,
-                                         (size_t)DataWidth - 1);
-                    UInt<64> tmp(chunk);
-                    d(hi, lo) = tmp;
-                }
-            }
-
-            memory_[cur_addr] = d;
-            cur_addr++;
-        }
-    }
-}
-
-};
-
-
-template <uint32_t DataWidth, uint32_t AddrWidth>
-class VulBRAM1RW {
-public:
-    static_assert(DataWidth > 0, "DataWidth must be greater than 0");
-    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
-
-    using DataType = UInt<DataWidth>;
-    using AddrType = UInt<AddrWidth>;
-
-protected:
-
-    VulBRAMImpl<DataWidth, AddrWidth> block_;
-
-    AddrType addr_;
-    DataType write_data_;
-    DataType read_data_;
-    bool write_en_;
-
-public:
-    VulBRAM1RW() : write_en_(false) {}
-
-    VulBRAM1RW(const string &path, bool hex) : write_en_(false), block_(path, hex) {}
-
-    void req(const AddrType &addr, const DataType &write_data, bool write_en) {
-        addr_ = addr;
-        write_data_ = write_data;
-        write_en_ = write_en;
-    }
-
-    const DataType readdata() const {
-        return read_data_;
-    }
-
-    void apply_next_tick() {
-        if (write_en_) {
-            block_.memory_[addr_.get_u64()] = write_data_;
-        }
-        read_data_ = block_.memory_[addr_.get_u64()];
-    }
-};
-
-template <uint32_t DataWidth, uint32_t AddrWidth, uint32_t ReadPorts, uint32_t WritePorts>
-class VulBRAM {
-public:
-
-    static_assert(DataWidth > 0, "DataWidth must be greater than 0");
-    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
-    static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
-    static_assert(WritePorts > 0, "WritePorts must be greater than 0");
-    static_assert(WritePorts < 64, "WritePorts must be less than 64");
-
-    using DataType = UInt<DataWidth>;
-    using AddrType = UInt<AddrWidth>;
-
-protected:
-
-    VulBRAMImpl<DataWidth, AddrWidth> block_;
-
-    array<AddrType, ReadPorts> read_addresses_;
-    array<DataType, ReadPorts> read_data_;
-
-    array<AddrType, WritePorts> write_addresses_;
-    array<DataType, WritePorts> write_data_;
-    uint64_t write_enables_; // 每个位对应一个写端口，1表示该端口有效
-
-    template<int I, int N>
-    inline void unroll_loop(auto&& f) {
-        if constexpr (I < N) {
-            f(std::integral_constant<int, I>{});
-            unroll_loop<I + 1, N>(f);
         }
     }
 
-public:
-    VulBRAM() : write_enables_(0) {}
-
-    VulBRAM(const string &path, bool hex) : write_enables_(0), block_(path, hex) {}
-
-    template <uint32_t PortIndex>
-    void readreq(const AddrType &addr) {
-        static_assert(PortIndex < ReadPorts, "Read port index out of range");
-        read_addresses_[PortIndex] = addr;
-    }
-
-    template <uint32_t PortIndex>
-    const DataType readdata() const {
-        static_assert(PortIndex < ReadPorts, "Read port index out of range");
-        return read_data_[PortIndex];
-    }
-
-    template <uint32_t PortIndex>
-    void write(const AddrType &addr, const DataType &data) {
-        static_assert(PortIndex < WritePorts, "Write port index out of range");
-        write_addresses_[PortIndex] = addr;
-        write_data_[PortIndex] = data;
-        write_enables_ |= 1ULL << PortIndex;
-    }
-
-    void apply_next_tick() {
-        if (write_enables_ != 0) {
-            unroll_loop<0, WritePorts>([&](auto i) {
-                if (write_enables_ & (1ULL << i)) {
-                    block_.memory_[write_addresses_[i].get_u64()] = write_data_[i];
-                }
-            });
-            write_enables_ = 0;
-        }
-        unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = block_.memory_[read_addresses_[i].get_u64()];
-        });
-    }
-
-protected:
 
 };

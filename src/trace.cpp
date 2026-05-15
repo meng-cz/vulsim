@@ -300,6 +300,8 @@ vector<VulTracedModule> parseTraceOptions(const VulProject &project, const vecto
 
 VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<VulTraceMatcher> &trace_matchers) {
 
+    VulErrorContextGuard context_guard("parsing trace options");
+
     VulTraceTable trace_table;
 
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
@@ -313,6 +315,11 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
             bfs_queue.push_back(child);
         }
 
+        VulErrorContextGuard instance_context_guard("processing instance " + instance_ptr->simClassName());
+
+        VulStaticBundleLib local_bundlelib = instance_ptr->local_bundles;
+        local_bundlelib.insert(local_bundlelib.end(), project.global_bundlelib.begin(), project.global_bundlelib.end());
+
         vector<SignalPath> applied_signal_path_matchers;
         for (const auto &matcher : trace_matchers) {
             string instance_path = instance_ptr->concatInstancePath("::", true);
@@ -325,7 +332,7 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
         for (const auto &reg : instance_ptr->registers) {
             vector<FlatField> flat_fields;
             uint32_t offset = 0;
-            flatten_member(reg.signature, project.global_bundlelib, reg.signature.name, offset, flat_fields);
+            flatten_member(reg.signature, local_bundlelib, reg.signature.name, offset, flat_fields);
             for (const auto &f : flat_fields) {
                 all_signals.push_back(VulTracedSignal{f.name, f.width});
             }

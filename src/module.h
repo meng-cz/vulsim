@@ -601,12 +601,18 @@ struct VulStaticWire {
 
 struct VulStaticBRAM {
     InstanceName name;
-    ConfigRealValue data_width;
+    VulStaticBundleMember data_type;
     ConfigRealValue addr_width;
     ConfigRealValue read_ports;
     ConfigRealValue write_ports;
+};
+
+struct VulStaticDigitalROM {
+    InstanceName name;
+    ConfigRealValue data_width;
+    ConfigRealValue addr_width;
+    ConfigRealValue read_ports;
     string init_path;
-    bool init_hex;
 };
 
 struct VulStaticQueue {
@@ -668,6 +674,7 @@ struct VulStaticModuleInstance {
     vector<VulStaticRegister> registers;
     vector<VulStaticWire> wires;
     vector<VulStaticBRAM> brams;
+    vector<VulStaticDigitalROM> roms;
     vector<VulStaticQueue> queues;
 
     unordered_map<ReqServName, VulLogicBlock> serv_logic_blocks;

@@ -43,6 +43,7 @@ const string StorageNextArrayClassName = "VulStorageNextArray";
 const string PipeClassName = "VulPipe";
 const string BlockRAMClassName = "VulBRAM";
 const string BlockRAM1RWClassName = "VulBRAM1RW";
+const string ROMClassName = "VulROM";
 const string QueueClassName = "VulQueue";
 const string QueueMPClassName = "VulQueueMP";
 
@@ -2057,31 +2058,33 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     vector<string> bram_resources_files;
     // generate bram
     for (const auto &bram : mod.brams) {
+        VulErrorContextGuard context_guard("processing bram " + bram.name);
         string bram_class = "";
         if (bram.read_ports == 0 || bram.write_ports == 0) {
             bram_class = BlockRAM1RWClassName + "<" +
-                std::to_string(bram.data_width) + ", " +
+                _genStaticMemberTypeStr(bram.data_type) + ", " +
                 std::to_string(bram.addr_width) + ">";
         } else {
             bram_class = BlockRAMClassName + "<" +
-            std::to_string(bram.data_width) + ", " +
+            _genStaticMemberTypeStr(bram.data_type) + ", " +
             std::to_string(bram.addr_width) + ", " + 
             std::to_string(bram.read_ports) + ", " +
             std::to_string(bram.write_ports) + ">";
         }
-        string bram_constr_param = "";
-        if (!bram.init_path.empty()) {
-            // strip " from path if exists
-            string init_path = bram.init_path;
-            if (init_path.size() >= 2 && init_path.front() == '"' && init_path.back() == '"') {
-                init_path = init_path.substr(1, init_path.size() - 2);
-            }
-            bram_constr_param = "\"" + init_path + "\", " + (bram.init_hex ? "true" : "false");
-            bram_resources_files.push_back(init_path);
-        }
 
-        decl_private_field.push_back(bram_class + " " + bram.name + "{" + bram_constr_param + "};\n");
+        decl_private_field.push_back(bram_class + " " + bram.name + ";\n");
         impl_commit_field.push_back(CodeTab + bram.name + "." + ApplyTickFunctionName + "();\n");
+    }
+    // generate rom
+    for (const auto &rom : mod.roms) {
+        VulErrorContextGuard context_guard("processing rom " + rom.name);
+        string rom_class = ROMClassName + "<" +
+            std::to_string(rom.data_width) + ", " +
+            std::to_string(rom.addr_width) + ", " + 
+            std::to_string(rom.read_ports) + ">";
+
+        decl_private_field.push_back(rom_class + " " + rom.name + "{\"" + rom.init_path + "\"};\n");
+        impl_commit_field.push_back(CodeTab + rom.name + "." + ApplyTickFunctionName + "();\n");
     }
 
     // generate queues

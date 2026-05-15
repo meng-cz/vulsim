@@ -203,8 +203,7 @@ vector<VulBundleItem> _parseBundles(const std::vector<std::string>& code) {
         const std::string& name = args.args[0];
         auto block = findNextBraceBlock(code, args.pos, '{', '}');
         if (block.end_pos.line == -1) {
-            std::cerr << "Error: STRUCT " << name << " has no body" << std::endl;
-            assert(0);
+            throw VulException("STRUCT " + name + " has no body");
         }
         vector<std::string> member_lines = split(block.content, ';');
         VulBundleItem item;
@@ -1295,90 +1294,42 @@ void _parseStaticModule(
     {
         // parse BRAM
         VulErrorContextGuard _err{"parsing BRAMs"};
-        vector<VulBlockRAM> brams;
         auto matches = matchMacros(code, "BRAM($,$,$,$,$)");
         for (const auto& item : matches) {
-            VulBlockRAM bram;
+            VulErrorContextGuard _err{"parsing BRAM " + item.args[0]};
+            VulStaticBRAM bram;
             bram.name = item.args[0];
-            bram.data_width = item.args[1];
-            bram.addr_width = item.args[2];
-            bram.read_ports = item.args[3];
-            bram.write_ports = item.args[4];
-            bram.init_path = "";
-            bram.init_hex = false;
-            brams.push_back(bram);
-        }
-        matches = matchMacros(code, "BRAM_INIT_H($,$,$,$,$,$)");
-        for (const auto& item : matches) {
-            VulBlockRAM bram;
-            bram.name = item.args[0];
-            bram.data_width = item.args[1];
-            bram.addr_width = item.args[2];
-            bram.read_ports = item.args[3];
-            bram.write_ports = item.args[4];
-            bram.init_path = item.args[5];
-            bram.init_hex = true;
-            brams.push_back(bram);
-        }
-        matches = matchMacros(code, "BRAM_INIT_B($,$,$,$,$,$)");
-        for (const auto& item : matches) {
-            VulBlockRAM bram;
-            bram.name = item.args[0];
-            bram.data_width = item.args[1];
-            bram.addr_width = item.args[2];
-            bram.read_ports = item.args[3];
-            bram.write_ports = item.args[4];
-            bram.init_path = item.args[5];
-            bram.init_hex = false;
-            brams.push_back(bram);
+            parse_reg_uint_type(item.args[1], local_configlib, bram.data_type);
+            bram.addr_width = calculateConstexprValue(item.args[2], local_configlib);
+            bram.read_ports = calculateConstexprValue(item.args[3], local_configlib);
+            bram.write_ports = calculateConstexprValue(item.args[4], local_configlib);
+            module.brams.push_back(bram);
         }
         matches = matchMacros(code, "BRAM_1RW($,$,$)");
         for (const auto& item : matches) {
-            VulBlockRAM bram;
+            VulErrorContextGuard _err{"parsing BRAM " + item.args[0]};
+            VulStaticBRAM bram;
             bram.name = item.args[0];
-            bram.data_width = item.args[1];
-            bram.addr_width = item.args[2];
-            bram.read_ports = "0";
-            bram.write_ports = "0";
-            bram.init_path = "";
-            bram.init_hex = false;
-            brams.push_back(bram);
+            parse_reg_uint_type(item.args[1], local_configlib, bram.data_type);
+            bram.addr_width = calculateConstexprValue(item.args[2], local_configlib);
+            bram.read_ports = 0;
+            bram.write_ports = 0;
+            module.brams.push_back(bram);
         }
-        matches = matchMacros(code, "BRAM_1RW_INIT_H($,$,$,$)");
+    }
+    {
+        // parse ROM
+        VulErrorContextGuard _err{"parsing ROMs"};
+        auto matches = matchMacros(code, "ROM($,$,$,$,$)");
         for (const auto& item : matches) {
-            VulBlockRAM bram;
-            bram.name = item.args[0];
-            bram.data_width = item.args[1];
-            bram.addr_width = item.args[2];
-            bram.read_ports = "0";
-            bram.write_ports = "0";
-            bram.init_path = item.args[3];
-            bram.init_hex = true;
-            brams.push_back(bram);
-        }
-        matches = matchMacros(code, "BRAM_1RW_INIT_B($,$,$,$)");
-        for (const auto& item : matches) {
-            VulBlockRAM bram;
-            bram.name = item.args[0];
-            bram.data_width = item.args[1];
-            bram.addr_width = item.args[2];
-            bram.read_ports = "0";
-            bram.write_ports = "0";
-            bram.init_path = item.args[3];
-            bram.init_hex = false;
-            brams.push_back(bram);
-        }
-        for (auto& bram : brams) {
-            VulErrorContextGuard _err{"parsing BRAM " + bram.name};
-            VulStaticBRAM static_bram;
-            static_bram.name = bram.name;
-            static_bram.init_path = bram.init_path;
-            static_bram.init_hex = bram.init_hex;
-            static_bram.data_width = calculateConstexprValue(bram.data_width, local_configlib);
-            static_bram.addr_width = calculateConstexprValue(bram.addr_width, local_configlib);
-            static_bram.read_ports = calculateConstexprValue(bram.read_ports, local_configlib);
-            static_bram.write_ports = calculateConstexprValue(bram.write_ports, local_configlib);
-            module.brams.push_back(std::move(static_bram));
+            VulErrorContextGuard _err{"parsing ROM " + item.args[0]};
+            VulStaticDigitalROM rom;
+            rom.name = item.args[0];
+            rom.data_width = calculateConstexprValue(item.args[1], local_configlib);
+            rom.addr_width = calculateConstexprValue(item.args[2], local_configlib);
+            rom.read_ports = calculateConstexprValue(item.args[3], local_configlib);
+            rom.init_path = item.args[4];
+            module.roms.push_back(rom);
         }
     }
     {

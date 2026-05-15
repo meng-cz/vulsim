@@ -14,10 +14,15 @@ STRUCT(ReadStageReg) {
     bool valid = false;
 };
 
+STRUCT(TagEntry) {
+    UInt<TAG_WIDTH> tag;
+    bool valid;
+};
+
 // Register
 
-BRAM(tag_array, TAG_WIDTH + 1, INDEX_WIDTH, 1, 1);
-BRAM(data_array, DATA_WIDTH, INDEX_WIDTH, 1, 1);
+BRAM(tag_array, TagEntry, INDEX_WIDTH, 1, 1);
+BRAM(data_array, UInt<DATA_WIDTH>, INDEX_WIDTH, 1, 1);
 
 REGISTER(read_stage, ReadStageReg) {
     read_stage.addr = 0;
@@ -46,9 +51,9 @@ SERVICE(read_s0, ARG(UInt<ADDR_WIDTH>) addr)  {
 SERVICE(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data) {
     UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
     UInt<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
-    UInt<TAG_WIDTH + 1> tag_entry;
-    tag_entry(TAG_WIDTH, 1) = tag;
-    tag_entry(0) = 1; // valid bit
+    TagEntry tag_entry;
+    tag_entry.tag = tag;
+    tag_entry.valid = true;
     tag_array.write<0>(index, tag_entry);
     data_array.write<0>(index, data);
 }
@@ -60,9 +65,9 @@ TICK_IMPL() {
     UInt<DATA_WIDTH> read_data;
     if (read_stage.get().valid) {
         UInt<TAG_WIDTH> tag = read_stage.get().addr(ADDR_WIDTH - 1, INDEX_WIDTH);
-        UInt<TAG_WIDTH + 1> tag_entry = tag_array.readdata<0>();
-        UInt<TAG_WIDTH> read_tag = tag_entry(TAG_WIDTH, 1);
-        bool valid = tag_entry(0);
+        TagEntry tag_entry = tag_array.readdata<0>();
+        UInt<TAG_WIDTH> read_tag = tag_entry.tag;
+        bool valid = tag_entry.valid;
         if (valid && read_tag == tag) {
             hit = true;
             read_data = data_array.readdata<0>();
