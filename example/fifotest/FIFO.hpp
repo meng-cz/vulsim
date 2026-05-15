@@ -16,9 +16,9 @@ REGISTER(cycle, uint32_t) {
 }
 
 TICK_IMPL() {
-    cycle_setnext(cycle_get() + 1);
-    if (cycle_get() % 2 == 0) {
-        q.enqnext(cycle_get());
+    cycle.setnext(cycle + 1);
+    if (cycle % 2 == 0) {
+        q.enqnext(cycle);
     }
 }
 

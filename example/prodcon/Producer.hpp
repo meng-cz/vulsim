@@ -25,9 +25,9 @@ REQUEST_READY(send, ARG(uint8_t) d);
 // Logic block
 
 TICK_IMPL() {
-    cycle_setnext(cycle + 1);
+    cycle.setnext(cycle + 1);
     if (send(cycle)) {
-        count_setnext(count + 1);
+        count.setnext(count + 1);
     }
 }
 

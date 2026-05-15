@@ -36,7 +36,7 @@ SERVICE(read_s0, ARG(UInt<ADDR_WIDTH>) addr)  {
     ReadStageReg s0;
     s0.addr = addr;
     s0.valid = true;
-    read_stage_setnext(s0);
+    read_stage.setnext(s0);
     UInt<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
     tag_array.readreq<0>(index);
     data_array.readreq<0>(index);
@@ -58,8 +58,8 @@ SERVICE(refill_s0, ARG(UInt<ADDR_WIDTH>) addr, ARG(UInt<DATA_WIDTH>) data) {
 TICK_IMPL() {
     bool hit = false;
     UInt<DATA_WIDTH> read_data;
-    if (read_stage_get().valid) {
-        UInt<TAG_WIDTH> tag = read_stage_get().addr(ADDR_WIDTH - 1, INDEX_WIDTH);
+    if (read_stage.get().valid) {
+        UInt<TAG_WIDTH> tag = read_stage.get().addr(ADDR_WIDTH - 1, INDEX_WIDTH);
         UInt<TAG_WIDTH + 1> tag_entry = tag_array.readdata<0>();
         UInt<TAG_WIDTH> read_tag = tag_entry(TAG_WIDTH, 1);
         bool valid = tag_entry(0);
@@ -72,7 +72,7 @@ TICK_IMPL() {
     if (!read_inputed) {
         ReadStageReg s0;
         s0.valid = false;
-        read_stage_setnext(s0);
+        read_stage.setnext(s0);
     }
 }
 

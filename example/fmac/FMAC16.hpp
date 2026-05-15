@@ -50,11 +50,11 @@ SERVICE(input, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init
         return result;
     };
 
-    A1_setnext(unpack(a));
-    B1_setnext(unpack(b));
-    C1_setnext(unpack(c));
-    init1_setnext(init);
-    last1_setnext(last);
+    A1.setnext(unpack(a));
+    B1.setnext(unpack(b));
+    C1.setnext(unpack(c));
+    init1.setnext(init);
+    last1.setnext(last);
 }
 
 REGISTER(P2, UnpackedMulResult) { P2.sign = false; P2.exp = 0; P2.frac_unnorm = 0; }
@@ -65,14 +65,14 @@ REGISTER(last2, bool) { last2 = false; }
 TICK_IMPL() {
     // Stage 2: Multiplication
     UnpackedMulResult mul_result;
-    mul_result.sign = A1_get().sign ^ B1_get().sign;
-    mul_result.exp = A1_get().exp + B1_get().exp;
-    mul_result.frac_unnorm = (A1_get().frac * B1_get().frac);
+    mul_result.sign = A1.get().sign ^ B1.get().sign;
+    mul_result.exp = A1.get().exp + B1.get().exp;
+    mul_result.frac_unnorm = (A1.get().frac * B1.get().frac);
 
-    P2_setnext(mul_result);
-    C2_setnext(A1_get());
-    init2_setnext(init1_get());
-    last2_setnext(last1_get());
+    P2.setnext(mul_result);
+    C2.setnext(A1.get());
+    init2.setnext(init1.get());
+    last2.setnext(last1.get());
 }
 
 REGISTER(P3Fix, UInt<96>) { P3Fix = 0; }
@@ -82,24 +82,24 @@ REGISTER(last3, bool) { last3 = false; }
 
 TICK_IMPL() {
     // Stage 3: transform to 96-bits 48-shifted fixed-point format
-    uint8_t shiftP = (P2_get().exp + 48).get_u8();
-    UInt<96> unsignedP = UInt<96>(P2_get().frac_unnorm) << shiftP;
-    if (P2_get().sign) {
-        P3Fix_setnext(~unsignedP + 1); // Two's complement for negative numbers
+    uint8_t shiftP = (P2.get().exp + 48).get_u8();
+    UInt<96> unsignedP = UInt<96>(P2.get().frac_unnorm) << shiftP;
+    if (P2.get().sign) {
+        P3Fix.setnext(~unsignedP + 1); // Two's complement for negative numbers
     } else {
-        P3Fix_setnext(unsignedP);
+        P3Fix.setnext(unsignedP);
     }
 
-    uint8_t shiftC = (C2_get().exp + 48).get_u8();
-    UInt<96> unsignedC = UInt<96>(C2_get().frac) << shiftC;
-    if (C2_get().sign) {
-        C3Fix_setnext(~unsignedC + 1); // Two's complement for negative numbers
+    uint8_t shiftC = (C2.get().exp + 48).get_u8();
+    UInt<96> unsignedC = UInt<96>(C2.get().frac) << shiftC;
+    if (C2.get().sign) {
+        C3Fix.setnext(~unsignedC + 1); // Two's complement for negative numbers
     } else {
-        C3Fix_setnext(unsignedC);
+        C3Fix.setnext(unsignedC);
     }
 
-    init3_setnext(init2_get());
-    last3_setnext(last2_get());
+    init3.setnext(init2.get());
+    last3.setnext(last2.get());
 }
 
 REGISTER(accS, UInt<96>) { accS = 0; }
@@ -109,16 +109,16 @@ REGISTER(last4, bool) { last4 = false; }
 TICK_IMPL() {
     // Stage 4: Accumulation
 
-    UInt<96> X = (init3_get() ? C3Fix_get() : accS_get());
-    UInt<96> Y = (init3_get() ? 0 : accC_get());
-    UInt<96> Z = P3Fix_get();
+    UInt<96> X = (init3.get() ? C3Fix.get() : accS.get());
+    UInt<96> Y = (init3.get() ? 0 : accC.get());
+    UInt<96> Z = P3Fix.get();
 
     UInt<96> sum_bits = X ^ Y ^ Z;
     UInt<96> carry_bits = ((X & Y) | (X & Z) | (Y & Z)) << 1;
 
-    accS_setnext(sum_bits);
-    accC_setnext(carry_bits);
-    last4_setnext(last3_get());
+    accS.setnext(sum_bits);
+    accC.setnext(carry_bits);
+    last4.setnext(last3.get());
 }
 
 REGISTER(valid5, bool) { valid5 = false; }
@@ -135,14 +135,14 @@ REGISTER(carry5seg3C, bool) { carry5seg3C = false; }
 
 TICK_IMPL() {
     // Stage 5: Carry-Select Adder for final sum: Stage 1
-    valid5_setnext(last4_get());
-    if (last4_get()) {
-        UInt<33> s1 = accS_get()(31, 0);
-        UInt<33> c1 = accC_get()(31, 0);
-        UInt<33> s2 = accS_get()(63, 32);
-        UInt<33> c2 = accC_get()(63, 32);
-        UInt<33> s3 = accS_get()(95, 64);
-        UInt<33> c3 = accC_get()(95, 64);
+    valid5.setnext(last4.get());
+    if (last4.get()) {
+        UInt<33> s1 = accS.get()(31, 0);
+        UInt<33> c1 = accC.get()(31, 0);
+        UInt<33> s2 = accS.get()(63, 32);
+        UInt<33> c2 = accC.get()(63, 32);
+        UInt<33> s3 = accS.get()(95, 64);
+        UInt<33> c3 = accC.get()(95, 64);
 
         UInt<33> res1 = s1 + c1;
         UInt<33> res2 = s2 + c2;
@@ -150,17 +150,17 @@ TICK_IMPL() {
         UInt<33> res3 = s3 + c3;
         UInt<33> res3C = s3 + c3 + UInt<33>(1);
 
-        sum5seg1_setnext(res1(31, 0));
-        sum5seg2_setnext(res2(31, 0));
-        sum5seg2C_setnext(res2C(31, 0));
-        sum5seg3_setnext(res3(31, 0));
-        sum5seg3C_setnext(res3C(31, 0));
+        sum5seg1.setnext(res1(31, 0));
+        sum5seg2.setnext(res2(31, 0));
+        sum5seg2C.setnext(res2C(31, 0));
+        sum5seg3.setnext(res3(31, 0));
+        sum5seg3C.setnext(res3C(31, 0));
 
-        carry5seg1_setnext(res1(32));
-        carry5seg2_setnext(res2(32));
-        carry5seg2C_setnext(res2C(32));
-        carry5seg3_setnext(res3(32));
-        carry5seg3C_setnext(res3C(32));
+        carry5seg1.setnext(res1(32));
+        carry5seg2.setnext(res2(32));
+        carry5seg2C.setnext(res2C(32));
+        carry5seg3.setnext(res3(32));
+        carry5seg3C.setnext(res3C(32));
     }
 }
 
@@ -170,20 +170,20 @@ REGISTER(sign6, bool) { sign6 = false; }
 
 TICK_IMPL() {
     // Stage 6: Carry-Select Adder for final sum: Stage 2
-    valid6_setnext(valid5_get());
-    if (valid5_get()) {
+    valid6.setnext(valid5.get());
+    if (valid5.get()) {
         UInt<96> sum;
-        bool seg1_carry = carry5seg1_get();
-        bool seg2_carry = (seg1_carry ? carry5seg2C_get() : carry5seg2_get());
-        sum(31, 0) = sum5seg1_get();
-        sum(63, 32) = (seg1_carry ? sum5seg2C_get() : sum5seg2_get());
-        sum(95, 64) = (seg2_carry ? sum5seg3C_get() : sum5seg3_get());
+        bool seg1_carry = carry5seg1.get();
+        bool seg2_carry = (seg1_carry ? carry5seg2C.get() : carry5seg2.get());
+        sum(31, 0) = sum5seg1.get();
+        sum(63, 32) = (seg1_carry ? sum5seg2C.get() : sum5seg2.get());
+        sum(95, 64) = (seg2_carry ? sum5seg3C.get() : sum5seg3.get());
         if (sum(95)) {
-            absVal6_setnext(~sum + 1);
-            sign6_setnext(true);
+            absVal6.setnext(~sum + 1);
+            sign6.setnext(true);
         } else {
-            absVal6_setnext(sum);
-            sign6_setnext(false);
+            absVal6.setnext(sum);
+            sign6.setnext(false);
         }
     }
 }
@@ -198,25 +198,25 @@ REGISTER(expField7, UInt<8>) { expField7 = 0; }
 
 TICK_IMPL() {
     // Stage 7: leading-one detection and exponent calculation
-    valid7_setnext(valid6_get());
-    if (valid6_get()) {
-        sign7_setnext(sign6_get());
-        iszero7_setnext(absVal6_get() == 0);
-        mag7_setnext(absVal6_get());
+    valid7.setnext(valid6.get());
+    if (valid6.get()) {
+        sign7.setnext(sign6.get());
+        iszero7.setnext(absVal6.get() == 0);
+        mag7.setnext(absVal6.get());
 
         uint8_t msb_pos = 0;
-        if (absVal6_get() != 0) {
+        if (absVal6.get() != 0) {
             for (int i = 95; i >= 0; --i) {
-                if (absVal6_get()(i)) {
+                if (absVal6.get()(i)) {
                     msb_pos = i;
                     break;
                 }
             }
         }
 
-        msbpos7_setnext(msb_pos);
-        expUnbias7_setnext(msb_pos - 48);
-        expField7_setnext(msb_pos + 79);
+        msbpos7.setnext(msb_pos);
+        expUnbias7.setnext(msb_pos - 48);
+        expField7.setnext(msb_pos + 79);
     }
 }
 
@@ -231,46 +231,46 @@ REGISTER(sticky8, bool) { sticky8 = false; }
 
 TICK_IMPL() {
     // Stage 8: Rounding
-    valid8_setnext(valid7_get());
-    if (valid7_get()) {
-        sign8_setnext(sign7_get());
-        iszero8_setnext(iszero7_get());
-        expField8_setnext(expField7_get());
+    valid8.setnext(valid7.get());
+    if (valid7.get()) {
+        sign8.setnext(sign7.get());
+        iszero8.setnext(iszero7.get());
+        expField8.setnext(expField7.get());
         
-        if (iszero7_get()) {
-            expField8_setnext(0);
-            mant8_setnext(0);
-            guard8_setnext(false);
-            round8_setnext(false);
-            sticky8_setnext(false);
-        } else if (msbpos7_get() >= 23) {
-            UInt<7> shift = msbpos7_get() - UInt<7>(23);
-            UInt<96> shifted_mag = mag7_get() >> shift.get_u16();
-            mant8_setnext(shifted_mag(22, 0));
+        if (iszero7.get()) {
+            expField8.setnext(0);
+            mant8.setnext(0);
+            guard8.setnext(false);
+            round8.setnext(false);
+            sticky8.setnext(false);
+        } else if (msbpos7.get() >= 23) {
+            UInt<7> shift = msbpos7.get() - UInt<7>(23);
+            UInt<96> shifted_mag = mag7.get() >> shift.get_u16();
+            mant8.setnext(shifted_mag(22, 0));
             if (shift == 0) {
-                guard8_setnext(false);
-                round8_setnext(false);
-                sticky8_setnext(false);
+                guard8.setnext(false);
+                round8.setnext(false);
+                sticky8.setnext(false);
             } else if (shift == 1) {
-                guard8_setnext(shifted_mag(0));
-                round8_setnext(false);
-                sticky8_setnext(false);
+                guard8.setnext(shifted_mag(0));
+                round8.setnext(false);
+                sticky8.setnext(false);
             } else if (shift == 2) {
-                guard8_setnext(shifted_mag(1));
-                round8_setnext(shifted_mag(0));
-                sticky8_setnext(false);
+                guard8.setnext(shifted_mag(1));
+                round8.setnext(shifted_mag(0));
+                sticky8.setnext(false);
             } else {
-                guard8_setnext(shifted_mag((shift - 1).get_u16()));
-                round8_setnext(shifted_mag((shift - 2).get_u16()));
-                sticky8_setnext(mag7_get()((shift - 3).get_u16(), 0) != UInt<96>(0));
+                guard8.setnext(shifted_mag((shift - 1).get_u16()));
+                round8.setnext(shifted_mag((shift - 2).get_u16()));
+                sticky8.setnext(mag7.get()((shift - 3).get_u16(), 0) != UInt<96>(0));
             }
         } else {
-            UInt<7> shift = UInt<7>(23) - msbpos7_get();
-            UInt<96> shifted_mag = mag7_get() << shift.get_u16();
-            mant8_setnext(shifted_mag(22, 0));
-            guard8_setnext(false);
-            round8_setnext(false);
-            sticky8_setnext(false);
+            UInt<7> shift = UInt<7>(23) - msbpos7.get();
+            UInt<96> shifted_mag = mag7.get() << shift.get_u16();
+            mant8.setnext(shifted_mag(22, 0));
+            guard8.setnext(false);
+            round8.setnext(false);
+            sticky8.setnext(false);
         }
 
     }
@@ -278,13 +278,13 @@ TICK_IMPL() {
 
 TICK_IMPL() {
     // Stage 9: Output formatting
-    if (valid8_get()) {
-        if (iszero8_get()) {
+    if (valid8.get()) {
+        if (iszero8.get()) {
             output(UInt<32>(0));
         } else {
-            bool round_up = guard8_get() && (round8_get() || sticky8_get() || (mant8_get()(0)));
-            UInt<25> mant25 = (UInt<25>(mant8_get()) + (round_up ? 1 : 0));
-            UInt<8> exp = expField8_get();
+            bool round_up = guard8.get() && (round8.get() || sticky8.get() || (mant8.get()(0)));
+            UInt<25> mant25 = (UInt<25>(mant8.get()) + (round_up ? 1 : 0));
+            UInt<8> exp = expField8.get();
             if (mant25(24)) {
                 // Rounding caused overflow in mantissa
                 mant25 = mant25 >> 1;
@@ -295,7 +295,7 @@ TICK_IMPL() {
                     exp = exp + 1;
                 }
             }
-            output((UInt<32>(sign8_get()) << 31) | (UInt<32>(exp) << 23) | UInt<32>(mant25(22, 0)));
+            output((UInt<32>(sign8.get()) << 31) | (UInt<32>(exp) << 23) | UInt<32>(mant25(22, 0)));
         }
     }
 }

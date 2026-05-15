@@ -22,13 +22,13 @@ REGISTER_MUL(state, uint32_t, 2) {
 REQUEST(output, ARG(AESData) data);
 
 SERVICE_READY(input, (state == 0 || state >= 10) && !inputed, ARG(AESData) data, ARG(AESKey) key) {
-    k_setnext<0>(key);
+    k.setnext<0>(key);
     AESData indata;
     for (uint32_t i = 0; i < 16; i++) {
         indata[i] = data[i] ^ key[i];
     }
-    d_setnext<0>(indata);
-    state_setnext<0>(1);
+    d.setnext<0>(indata);
+    state.setnext<0>(1);
 }
 
 // Logic block
@@ -120,11 +120,11 @@ TICK_IMPL() {
 
     if (state == 10) {
         output(data);
-        state_setnext<1>(0);
+        state.setnext<1>(0);
     } else {
-        d_setnext<1>(data);
-        k_setnext<1>(round_key);
-        state_setnext<1>(state + 1);
+        d.setnext<1>(data);
+        k.setnext<1>(round_key);
+        state.setnext<1>(state + 1);
     }
 }
 

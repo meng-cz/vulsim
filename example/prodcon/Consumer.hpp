@@ -23,13 +23,13 @@ REGISTER(sum, uint8_t) {
 REQUEST(output, ARG(uint8_t) s);
 
 SERVICE_READY(recv, (cycle & 1) == 0, ARG(uint8_t) d) {
-    sum_setnext(sum + d);
+    sum.setnext(sum + d);
     output(sum);
 }
 
 // tick
 
 TICK_IMPL() {
-    cycle_setnext(cycle + 1);
+    cycle.setnext(cycle + 1);
 }
 

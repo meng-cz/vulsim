@@ -48,24 +48,13 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) \
-        const type name; \
-        const type & name##_get(); \
-        void name##_setnext(const type& next) {}; \
-        void __##name##_reset(type& name)
+#define REGISTER(name, type) VulStorageNext<type> name; void __##name##_reset(type& name)
 
-#define REGISTER_MUL(name, type, portnum) \
-        const type name; \
-        const type & name##_get(); \
-        template<uint32_t P=0> void name##_setnext(const type& next) { static_assert(P < portnum, "Port index out of bounds"); }; \
-        void __##name##_reset(type& name)
+#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; void __##name##_reset(type& name)
 
-#define REGISTER_ARRAY1(name, type, size, portnum) \
-        const type name[size]; \
-        template<uint32_t P=0> void name##_setnext(const uint64_t idx, const type& next) { static_assert(P < portnum, "Port index out of bounds"); }; \
-        void __##name##_reset(type name[size])
+#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void __##name##_reset(type name[size])
 
-#define WIRE(name, type) type name; void name##_reset(type& name)
+#define WIRE(name, type) type name; void __##name##_reset(type& name)
 
 #define ARG(type) const type &
 

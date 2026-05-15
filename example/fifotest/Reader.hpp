@@ -12,8 +12,8 @@ REGISTER(cycle, uint32_t) {
 }
 
 TICK_IMPL() {
-    cycle_setnext(cycle_get() + 1);
-    if ((cycle_get() >> 1) % 2 == 0) {
+    cycle.setnext(cycle + 1);
+    if ((cycle >> 1) % 2 == 0) {
         uint32_t enq_data = 0;
         if (deq(enq_data)) {
             output(enq_data);
