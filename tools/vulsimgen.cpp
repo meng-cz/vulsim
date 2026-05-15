@@ -428,6 +428,7 @@ int simgenStatic(const SimGenArgs &args) {
             "storage.hpp",
             "uint.hpp",
             "ram.hpp",
+            "queue.hpp",
             "vcdrecord.hpp",
         };
         std::filesystem::path lib_path(lib_dir);

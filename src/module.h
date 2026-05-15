@@ -609,6 +609,14 @@ struct VulStaticBRAM {
     bool init_hex;
 };
 
+struct VulStaticQueue {
+    InstanceName name;
+    BMemberType type;
+    ConfigRealValue depth;
+    ConfigRealValue enq_width;
+    ConfigRealValue deq_width;
+};
+
 struct VulStaticModuleInstance {
 
     shared_ptr<VulStaticModuleInstance> parent;
@@ -660,6 +668,7 @@ struct VulStaticModuleInstance {
     vector<VulStaticRegister> registers;
     vector<VulStaticWire> wires;
     vector<VulStaticBRAM> brams;
+    vector<VulStaticQueue> queues;
 
     unordered_map<ReqServName, VulLogicBlock> serv_logic_blocks;
     vector<VulTickBlock> tick_blocks;

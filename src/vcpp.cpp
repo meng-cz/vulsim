@@ -1175,7 +1175,7 @@ void _parseStaticModule(
             if (block.end_pos.line == -1) {
                 throw VulException("SERVICE_IMPL for service " + serv.name + " has no body");
             }
-            lb.cond_codelines = split(block.content, '\n');
+            lb.codelines = split(block.content, '\n');
             module.serv_logic_blocks[serv.name] = lb;
         }
     }
@@ -1379,6 +1379,31 @@ void _parseStaticModule(
             static_bram.read_ports = calculateConstexprValue(bram.read_ports, local_configlib);
             static_bram.write_ports = calculateConstexprValue(bram.write_ports, local_configlib);
             module.brams.push_back(std::move(static_bram));
+        }
+    }
+    {
+        // parse QUEUEs
+        VulErrorContextGuard _err{"parsing queues"};
+        auto matches = matchMacros(code, "QUEUE($,$,$)");
+        for (const auto& item : matches) {
+            VulErrorContextGuard _err{"parsing QUEUE " + item.args[0]};
+            VulStaticQueue queue;
+            queue.name = item.args[0];
+            queue.type = item.args[1];
+            queue.depth = calculateConstexprValue(item.args[2], local_configlib);
+            queue.enq_width = queue.deq_width = 1; // default width = 1
+            module.queues.push_back(std::move(queue));
+        }
+        matches = matchMacros(code, "QUEUE_MP($,$,$,$,$)");
+        for (const auto& item : matches) {
+            VulErrorContextGuard _err{"parsing QUEUE_MP " + item.args[0]};
+            VulStaticQueue queue;
+            queue.name = item.args[0];
+            queue.type = item.args[1];
+            queue.depth = calculateConstexprValue(item.args[2], local_configlib);
+            queue.enq_width = calculateConstexprValue(item.args[3], local_configlib);
+            queue.deq_width = calculateConstexprValue(item.args[4], local_configlib);
+            module.queues.push_back(std::move(queue));
         }
     }
 }

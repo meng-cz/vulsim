@@ -26,6 +26,7 @@
 #include "pipe.hpp"
 #include "storage.hpp"
 #include "ram.hpp"
+#include "queue.hpp"
 
 uint32_t trace_registe_signal(const std::string &signal_name, uint32_t signal_width);
 

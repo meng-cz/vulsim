@@ -100,7 +100,7 @@ private:
         // [Context1]>[Context2]>...>[ContextN]> Error message
         string res;
         for (const auto &ctx : context) {
-            res += "> [" + ctx + "]";
+            res += "> [" + ctx + "]\n";
         }
         res += ("> " + error.toString());
         return res;

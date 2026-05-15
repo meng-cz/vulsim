@@ -65,7 +65,7 @@ public:
 protected:
     T data_;
     T next_;
-    uint32_t pending_write_ports_ = 0;
+    uint32_t pending_write_ports_ = WRPortNum;
 };
 
 template<typename T>
@@ -106,7 +106,7 @@ class VulStorageNext {
 public:
     template <uint32_t P = 0>
     void setnext(const T &value) {
-        impl_.setnext<P>(value);
+        impl_.template setnext<P>(value);
     }
     void apply_next_tick() {
         impl_.apply_next_tick();

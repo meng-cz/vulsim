@@ -43,6 +43,8 @@ const string StorageNextArrayClassName = "VulStorageNextArray";
 const string PipeClassName = "VulPipe";
 const string BlockRAMClassName = "VulBRAM";
 const string BlockRAM1RWClassName = "VulBRAM1RW";
+const string QueueClassName = "VulQueue";
+const string QueueMPClassName = "VulQueueMP";
 
 
 enum class PipeImplType {
@@ -2004,8 +2006,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             type_str += ">";
 
             decl_private_field.push_back(type_str + " " + sig.name + ";\n");
-            decl_private_field.push_back("void " + sig.name + "_setnext(const uint64_t idx, const " + base_type + " &value, const uint32_t port = 0) {\n");
-            decl_private_field.push_back(CodeTab + sig.name + ".setnext(idx, value, port);\n");
+            decl_private_field.push_back("template <uint32_t P = 0>\n");
+            decl_private_field.push_back("void " + sig.name + "_setnext(const uint64_t idx, const " + base_type + " &value) {\n");
+            decl_private_field.push_back(CodeTab + sig.name + ".setnext<P>(idx, value);\n");
             decl_private_field.push_back("}\n");
             decl_private_field.push_back("\n");
         } else {
@@ -2016,8 +2019,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
 
             decl_private_field.push_back(type_str + " " + sig.name + ";\n");
-            decl_private_field.push_back("void " + sig.name + "_setnext(const " + base_type + " &value, const uint32_t port = 0) {\n");
-            decl_private_field.push_back(CodeTab + sig.name + ".setnext(value, port);\n");
+            decl_private_field.push_back("template <uint32_t P = 0>\n");
+            decl_private_field.push_back("void " + sig.name + "_setnext(const " + base_type + " &value) {\n");
+            decl_private_field.push_back(CodeTab + sig.name + ".setnext<P>(value);\n");
             decl_private_field.push_back("}\n");
             decl_private_field.push_back("const " + base_type + " &" + sig.name + "_get() const {\n");
             decl_private_field.push_back(CodeTab + "return " + sig.name + ".get();\n");
@@ -2078,6 +2082,24 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
         decl_private_field.push_back(bram_class + " " + bram.name + "{" + bram_constr_param + "};\n");
         impl_commit_field.push_back(CodeTab + bram.name + "." + ApplyTickFunctionName + "();\n");
+    }
+
+    // generate queues
+    for (const auto &queue : mod.queues) {
+        VulErrorContextGuard context_guard("processing queue " + queue.name);
+        if (queue.depth == 0) {
+            throw VulException("Queue must have positive depth");
+        }
+        if (queue.deq_width == 0 || queue.enq_width == 0) {
+            throw VulException("Queue must have positive enq_width and deq_width");
+        }
+        string queue_param = queue.type + ", " + std::to_string(queue.depth);
+        if (queue.deq_width > 1 || queue.enq_width > 1) {
+            queue_param += ", " + std::to_string(queue.enq_width) + ", " + std::to_string(queue.deq_width);
+        }
+        string queue_class = QueueClassName + "<" + queue_param + ">";
+        decl_private_field.push_back(queue_class + " " + queue.name + ";\n");
+        impl_commit_field.push_back(CodeTab + queue.name + "." + ApplyTickFunctionName + "();\n");
     }
 
     // generate instances

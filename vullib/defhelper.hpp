@@ -32,6 +32,7 @@
 #include <uint.hpp>
 #include <ram.hpp>
 #include <storage.hpp>
+#include <queue.hpp>
 
 #include <array>
 
@@ -47,11 +48,22 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) VulStorageNext<type> name; const type & name##_get(); void name##_setnext(const type& next) {name.setnext(next);}; void name##_reset(type& name)
+#define REGISTER(name, type) \
+        const type name; \
+        const type & name##_get(); \
+        void name##_setnext(const type& next) {}; \
+        void __##name##_reset(type& name)
 
-#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; const type & name##_get(); template<uint32_t P=0> void name##_setnext(const type& next) {name.setnext<P>(next);}; void name##_reset(type& name)
+#define REGISTER_MUL(name, type, portnum) \
+        const type name; \
+        const type & name##_get(); \
+        template<uint32_t P=0> void name##_setnext(const type& next) { static_assert(P < portnum, "Port index out of bounds"); }; \
+        void __##name##_reset(type& name)
 
-#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; template<uint32_t P=0> void name##_setnext(const uint64_t idx, const type& next) {name.setnext<P>(idx, next);}; void name##_reset(type name[size])
+#define REGISTER_ARRAY1(name, type, size, portnum) \
+        const type name[size]; \
+        template<uint32_t P=0> void name##_setnext(const uint64_t idx, const type& next) { static_assert(P < portnum, "Port index out of bounds"); }; \
+        void __##name##_reset(type name[size])
 
 #define WIRE(name, type) type name; void name##_reset(type& name)
 
@@ -63,13 +75,13 @@
 
 #define REQUEST_READY(name, ...) bool name(__VA_ARGS__);
 
-#define SERVICE(name, ...) void name (__VA_ARGS__)
+#define SERVICE(name, ...) void __##name (__VA_ARGS__)
 
-#define SERVICE_READY(name, cond, ...) bool name(__VA_ARGS__)
+#define SERVICE_READY(name, cond, ...) bool __##name(__VA_ARGS__)
 
-#define SERVICE_PRIO(name, priority, ...) void name (__VA_ARGS__)
+#define SERVICE_PRIO(name, priority, ...) void __##name (__VA_ARGS__)
 
-#define SERVICE_PRIO_READY(name, priority, cond, ...) bool name(__VA_ARGS__)
+#define SERVICE_PRIO_READY(name, priority, cond, ...) bool __##name(__VA_ARGS__)
 
 
 #define TICK_IMPL() void tick()
@@ -98,3 +110,6 @@
 
 #define BRAM_1RW_INIT_B(name, datawidth, addrwidth, path) VulBRAM1RW<datawidth, addrwidth> name(path, false);
 
+#define QUEUE(name, type, depth) VulQueue<type, depth> name;
+
+#define QUEUE_MP(name, type, depth, enqwidth, deqwidth) VulQueueMP<type, depth, enqwidth, deqwidth> name;
