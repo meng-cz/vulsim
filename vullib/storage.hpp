@@ -262,7 +262,7 @@ public:
 
     template <uint32_t P = 0>
     void setnext(const uint32_t index, const T &value) {
-        impl_.setnext<P>(index, value);
+        impl_.template setnext<P>(index, value);
     }
     void apply_next_tick() {
         impl_.apply_next_tick();
