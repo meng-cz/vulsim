@@ -4,10 +4,6 @@
 
 #include "header.hpp"
 
-// Port
-
-SERVICE_PORT(output, void, ARG(uint8_t) s);
-
 // Variables
 
 GLOBAL() {
@@ -16,7 +12,7 @@ GLOBAL() {
 
 // Functions
 
-SERVICE_LOGIC_IMPL(output, ARG(uint8_t) s) {
+SERVICE(output, ARG(uint8_t) s) {
     printf("%ld: Output: %u\n", tick_count, s);
 }
 
