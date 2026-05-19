@@ -26,6 +26,7 @@
 #include <array>
 #include <vector>
 #include <string>
+#include "type.h"
 
 namespace cppparse {
 
