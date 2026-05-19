@@ -35,6 +35,10 @@
 
 namespace simgen {
 
+string genCurrentTimeString();
+
+vector<string> genStaticBundle(const VulStaticBundle &bundle);
+
 vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib);
 
 vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib);

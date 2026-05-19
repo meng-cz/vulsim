@@ -12,10 +12,18 @@
 #include <string>
 
 inline static void writeLinesToFile(const std::vector<std::string> &lines, const std::string &filepath) {
+    const std::filesystem::path target_path(filepath);
+    const std::filesystem::path parent_dir = target_path.parent_path();
+    if (!parent_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent_dir, ec);
+        if (ec) {
+            throw VulException("Failed to create directory: " + parent_dir.string() + ", reason: " + ec.message());
+        }
+    }
     std::ofstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Error: Failed to open file for writing: " << filepath << std::endl;
-        return;
+        throw VulException("Failed to open file for writing: " + filepath);
     }
     for (const auto &line : lines) {
         file << line;
@@ -35,6 +43,12 @@ int main(int argc, char * argv[]) {
     parser.add_argument("-o", "--out")
         .help("sets the output directory for generated code (default: ./rtlout)")
         .default_value(std::string("./rtlout"));
+    parser.add_argument("-l", "--lib")
+        .help("sets the directory for runtime library files (default: ./vullib)")
+        .default_value(std::string("./vullib"));
+    parser.add_argument("-p", "--project")
+        .help("sets the project directory (default: parent directory of the top module file)")
+        .default_value(std::string(""));
 
     try {
         parser.parse_args(argc, argv);
@@ -46,15 +60,20 @@ int main(int argc, char * argv[]) {
 
     string top_file = parser.get<std::string>("--top");
     string out_dir = parser.get<std::string>("--out");
+    string proj_dir = parser.get<std::string>("--project");
+    string lib_dir = parser.get<std::string>("--lib");
 
     std::filesystem::path top_path(top_file);
     if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
         std::cerr << "Error: Top module file does not exist: " << top_file << std::endl;
         return 1;
     }
-    std::filesystem::path proj_dir = top_path.parent_path();
+    if (proj_dir.empty()) {
+        proj_dir = top_path.parent_path().string();
+    }
 
-    VulProject project = parseVcppProject(proj_dir.string(), top_path.filename().string(), "");
+    VulErrorContextGuard _err{"generating project from " + proj_dir};
+    VulStaticProject project = parseVcppStaticProject(proj_dir, top_path.string(), "");
 
     std::filesystem::path out_path(out_dir);
     if (!std::filesystem::exists(out_path)) {
@@ -77,81 +96,56 @@ int main(int argc, char * argv[]) {
         }
     }
 
-    // prepare data for RTL generation
-    unordered_map<ConfigName, ConfigRealValue> calculated_configlib;
-    BundleTable bundle_table;
+    // gen module
+    std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
+    bfs_queue.push_back(project.top_module_instance);
+    while (!bfs_queue.empty()) {
+        auto mod_instance = bfs_queue.front();
+        bfs_queue.pop_front();
+        for (const auto &child : mod_instance->children) {
+            bfs_queue.push_back(child);
+        }
 
-    for (const auto &conf_entry : project.configlib->config_items) {
-        const string &conf_name = conf_entry.first;
-        const ConfigRealValue &real_value = conf_entry.second.real_value;
-        calculated_configlib[conf_name] = real_value;
-    }
-    for (const auto &bundle_entry : project.bundlelib->bundles) {
-        const string &bundle_name = bundle_entry.first;
-        VulBundleItem item = bundle_entry.second.item;
-        ErrorMsg err = calculateBundleConstexprValue(item, *project.configlib);
-        if (err.error()) {
-            std::cerr << "Error calculating constexpr value for bundle " << bundle_name << ": " << err.msg << std::endl;
-            return 1;
-        }
-        bundle_table[bundle_name] = item;
-    }
-    
-    for (const auto &module_entry : project.modulelib->modules) {
-        const string &module_name = module_entry.first;
-        std::cout << "Generating HLS Main Function for module: " << module_name << std::endl;
-        shared_ptr<VulModule> mod_ptr = dynamic_pointer_cast<VulModule>(module_entry.second);
-        if (!mod_ptr) {
-            std::cerr << "Error: Module is not a VulModule: " << module_name << std::endl;
-            return 1;
-        }
-        unordered_map<ConfigName, ConfigValue> config_overrides;
-        unordered_map<ConfigName, ConfigRealValue> local_calculated_configlib = calculated_configlib;
-        BundleTable local_bundle_table = bundle_table;
-        for (const auto &local_conf_entry : mod_ptr->local_consts) {
-            const string &conf_name = local_conf_entry.first;
-            const ConfigValue &conf_value = local_conf_entry.second.value;
-            ConfigRealValue real_value;
-            unordered_set<ConfigName> seen_configs;
-            ErrorMsg err = project.configlib->calculateConfigExpression(conf_value, local_calculated_configlib, real_value, seen_configs);
-            if (err.error()) {
-                std::cerr << "Error calculating config expression for local const " << conf_name << " in module " << module_name << ": " << err.msg << std::endl;
-                return 1;
+        VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
+
+        auto codes = rtlgen::genModuleRTL(*mod_instance, project.global_configlib, project.global_bundlelib);
+        writeLinesToFile(codes.logic_hls_codes, (out_path / (mod_instance->rtlHlsPath())).string());
+        writeLinesToFile(codes.rtl_skeleten_codes, (out_path / (mod_instance->rtlSvPath())).string());
+        for (const auto &res_file : codes.resource_files) {
+            std::filesystem::path src_file = std::filesystem::path(proj_dir) / res_file;
+            if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
+                throw VulException("Resource file does not exist: " + src_file.string() + ", used in module: " + mod_instance->module_name);
             }
-            config_overrides[conf_name] = conf_value;
-            local_calculated_configlib[conf_name] = real_value;
+            std::filesystem::path dst_file = out_path / res_file;
+            std::filesystem::create_directories(dst_file.parent_path());
+            std::filesystem::copy_file(src_file, dst_file);
         }
-        for (const auto &local_bundle_entry : mod_ptr->local_bundles) {
-            const string &bundle_name = local_bundle_entry.first;
-            VulBundleItem item = local_bundle_entry.second;
-            ErrorMsg err = calculateBundleConstexprValue(item, *project.configlib, local_calculated_configlib);
-            if (err.error()) {
-                std::cerr << "Error calculating constexpr value for local bundle " << bundle_name << " in module " << module_name << ": " << err.msg << std::endl;
-                return 1;
-            }
-            local_bundle_table[bundle_name] = item;
-        }
-
-        vector<string> hls_code_lines;
-        ErrorMsg err = rtlgen::genHLSMainFunc(
-            *mod_ptr,
-            local_bundle_table,
-            config_overrides,
-            local_calculated_configlib,
-            project,
-            hls_code_lines
-        );
-        if (err.error()) {
-            std::cerr << "Error generating HLS main function for module " << module_name << ": " << err.msg << std::endl;
-            return 1;
-        }
-
-        std::filesystem::path module_out_path = out_path / (rtlgen::LogicSubModuleName(module_name) + ".cpp");
-        writeLinesToFile(hls_code_lines, module_out_path.string());
     }
-    
+
+    // copy vullib files to output directory
+    {
+        VulErrorContextGuard _err("copying vul library files");
+
+        vector<std::string> runtime_files = {
+            "common.h",
+            "uint.hpp",
+            "ram_generic.sv",
+            "queue.sv",
+        };
+        std::filesystem::path lib_path(lib_dir);
+        if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
+            throw VulException("Library directory does not exist: " + lib_dir);
+        }
+        for (const auto &filename : runtime_files) {
+            std::filesystem::path src_file = lib_path / filename;
+            if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
+                throw VulException("Runtime library file does not exist: " + src_file.string());
+            }
+            std::filesystem::path dst_file = out_path / filename;
+            std::filesystem::copy_file(src_file, dst_file);
+        }
+    }
 
     return 0;
-
 }
 

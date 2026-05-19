@@ -23,6 +23,7 @@
 #pragma once
 
 #include "common.h"
+#include "uint.hpp"
 #include <array>
 
 template<typename T, uint32_t Depth>
@@ -32,11 +33,11 @@ public:
     VulQueue() = default;
 
     bool enqready() const {
-        return !enq_pending_ && size_ < Depth;
+        return size_ < Depth;
     }
 
     bool deqvalid() const {
-        return deq_buf_valid_ && !deq_pending_;
+        return deq_buf_valid_;
     }
 
     bool enqnext(const T &value) {
@@ -109,45 +110,41 @@ class VulQueueMP {
     static_assert(EnqWidth >= 1, "EnqWidth must be at least 1");
     static_assert(DeqWidth >= 1, "DeqWidth must be at least 1");
 public:
+    static constexpr uint32_t EnqCntWidth = log2ceil(EnqWidth + 1);
+    static constexpr uint32_t DeqCntWidth = log2ceil(DeqWidth + 1);
+    static constexpr uint32_t DepthWidth = log2ceil(Depth + 1);
+
+    using EnqCntUInt = UInt<EnqCntWidth>;
+    using DeqCntUInt = UInt<DeqCntWidth>;
+    using DepthCntUInt = UInt<DepthWidth>;
+
     VulQueueMP() = default;
 
-    uint32_t enqreqdy() const {
-        if (enq_called_this_tick_) {
-            return 0;
-        }
-        const uint32_t free_slots = Depth - size_;
-        return free_slots < EnqWidth ? free_slots : EnqWidth;
+    EnqCntUInt enqreqdy() const {
+        const uint32_t free_slots = Depth - size_.get_u32();
+        return free_slots < EnqWidth ? EnqCntUInt(free_slots) : EnqCntUInt(EnqWidth);
     }
 
-    uint32_t deqvalid() const {
-        if (deq_called_this_tick_) {
-            return 0;
-        }
+    DeqCntUInt deqvalid() const {
         return deq_valid_num_;
     }
 
-    uint32_t enqnext(const std::array<T, EnqWidth> &values, const uint32_t num = EnqWidth) {
-        if (enq_called_this_tick_) {
-            return 0;
-        }
-        const uint32_t req = num < EnqWidth ? num : EnqWidth;
-        const uint32_t rdy = enqreqdy();
-        const uint32_t accepted = req < rdy ? req : rdy;
-        for (uint32_t i = 0; i < accepted; ++i) {
+    EnqCntUInt enqnext(const std::array<T, EnqWidth> &values, const EnqCntUInt num = EnqWidth) {
+        const EnqCntUInt req = num < EnqCntUInt(EnqWidth) ? num : EnqCntUInt(EnqWidth);
+        const EnqCntUInt rdy = enqreqdy();
+        const EnqCntUInt accepted = req < rdy ? req : rdy;
+        const uint32_t accepted_u32 = accepted.get_u32();
+        for (uint32_t i = 0; i < accepted_u32; ++i) {
             enq_buf_[i] = values[i];
         }
         enq_pending_num_ = accepted;
-        enq_called_this_tick_ = true;
         return accepted;
     }
 
-    const std::array<T, DeqWidth>& deqnext(const uint32_t num = DeqWidth) {
-        if (!deq_called_this_tick_) {
-            const uint32_t req = num < DeqWidth ? num : DeqWidth;
-            const uint32_t valid = deqvalid();
-            deq_pending_num_ = req < valid ? req : valid;
-            deq_called_this_tick_ = true;
-        }
+    const std::array<T, DeqWidth>& deqnext(const DeqCntUInt num = DeqWidth) {
+        const DeqCntUInt req = num < DeqCntUInt(DeqWidth) ? num : DeqCntUInt(DeqWidth);
+        const DeqCntUInt valid = deqvalid();
+        deq_pending_num_ = req < valid ? req : valid;
         return deq_buf_;
     }
 
@@ -163,33 +160,39 @@ public:
             clr_pending_ = false;
         }
 
-        uint32_t pop_num = deq_pending_num_ < size_ ? deq_pending_num_ : size_;
+        uint32_t pop_num = deq_pending_num_.get_u32();
+        const uint32_t size_u32 = size_.get_u32();
+        if (pop_num > size_u32) {
+            pop_num = size_u32;
+        }
         while (pop_num > 0) {
             if (++head_ == Depth) {
                 head_ = 0;
             }
-            --size_;
+            size_ = size_ - DepthCntUInt(1);
             --pop_num;
         }
 
-        uint32_t can_push = Depth - size_;
-        uint32_t push_num = enq_pending_num_ < can_push ? enq_pending_num_ : can_push;
+        const uint32_t can_push = Depth - size_.get_u32();
+        uint32_t push_num = enq_pending_num_.get_u32();
+        if (push_num > can_push) {
+            push_num = can_push;
+        }
         for (uint32_t i = 0; i < push_num; ++i) {
             data_[tail_] = enq_buf_[i];
             if (++tail_ == Depth) {
                 tail_ = 0;
             }
-            ++size_;
+            size_ = size_ + DepthCntUInt(1);
         }
 
         enq_pending_num_ = 0;
         deq_pending_num_ = 0;
-        enq_called_this_tick_ = false;
-        deq_called_this_tick_ = false;
 
-        deq_valid_num_ = size_ < DeqWidth ? size_ : DeqWidth;
+        deq_valid_num_ = size_.get_u32() < DeqWidth ? DeqCntUInt(size_.get_u32()) : DeqCntUInt(DeqWidth);
         uint32_t idx = head_;
-        for (uint32_t i = 0; i < deq_valid_num_; ++i) {
+        const uint32_t deq_valid_num_u32 = deq_valid_num_.get_u32();
+        for (uint32_t i = 0; i < deq_valid_num_u32; ++i) {
             deq_buf_[i] = data_[idx];
             if (++idx == Depth) {
                 idx = 0;
@@ -201,16 +204,14 @@ private:
     std::array<T, Depth> data_{};
     uint32_t head_ = 0;
     uint32_t tail_ = 0;
-    uint32_t size_ = 0;
+    DepthCntUInt size_ = 0;
 
     std::array<T, EnqWidth> enq_buf_{};
-    uint32_t enq_pending_num_ = 0;
-    bool enq_called_this_tick_ = false;
+    EnqCntUInt enq_pending_num_ = 0;
 
     std::array<T, DeqWidth> deq_buf_{};
-    uint32_t deq_valid_num_ = 0;
-    uint32_t deq_pending_num_ = 0;
-    bool deq_called_this_tick_ = false;
+    DeqCntUInt deq_valid_num_ = 0;
+    DeqCntUInt deq_pending_num_ = 0;
 
     bool clr_pending_ = false;
 };

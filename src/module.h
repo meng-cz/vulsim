@@ -368,7 +368,7 @@ struct VulBlockRAM {
 class VulModule : public VulModuleBase {
 public:
 
-    inline static const InstanceName TopInterface = string("__top__");
+    inline static const InstanceName TopInterface = string("");
 
     virtual bool isExternalModule() const override { return false; }
 
@@ -724,7 +724,7 @@ struct VulStaticDigitalROM {
 
 struct VulStaticQueue {
     InstanceName name;
-    BMemberType type;
+    VulStaticTypeSignature type;
     ConfigRealValue depth;
     ConfigRealValue enq_width;
     ConfigRealValue deq_width;
@@ -761,6 +761,20 @@ struct VulStaticModuleInstance {
             path += "/" + inst;
         }
         return path.substr(1) + ".impl.hpp";
+    }
+    inline string rtlHlsPath() const {
+        string path = "";
+        for (const auto &inst : instance_path) {
+            path += "/" + inst;
+        }
+        return path.substr(1) + ".logic.cpp";
+    }
+    inline string rtlSvPath() const {
+        string path = "";
+        for (const auto &inst : instance_path) {
+            path += "/" + inst;
+        }
+        return path.substr(1) + ".sv";
     }
     inline string concatInstancePath(const string &sep, bool include_topsim = false) const {
         string path = "";

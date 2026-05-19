@@ -182,12 +182,12 @@ protected:
 
 public:
 
-    VulROM(const string &path, bool hex = true) {
-        if (hex) {
-            init_from_readmemh(path);
-        } else {
-            init_from_readmemb(path);
-        }
+    VulROM(const string &readmemh_path) {
+        // if (hex) {
+            init_from_readmemh(readmemh_path);
+        // } else {
+        //     init_from_readmemb(path);
+        // }
     }
 
     template <uint32_t PortIndex>

@@ -129,6 +129,10 @@ vector<string> _genStaticBundle(const VulStaticBundle &bundle) {
     return out_lines;
 }
 
+vector<string> genStaticBundle(const VulStaticBundle &bundle) {
+    return _genStaticBundle(bundle);
+}
+
 vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib) {
     vector<string> out_lines = genHeaderPrelude();
 
@@ -347,7 +351,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         if (queue.deq_width == 0 || queue.enq_width == 0) {
             throw VulException("Queue must have positive enq_width and deq_width");
         }
-        string queue_param = queue.type + ", " + std::to_string(queue.depth);
+        string queue_param = queue.type.toString() + ", " + std::to_string(queue.depth);
         if (queue.deq_width > 1 || queue.enq_width > 1) {
             queue_param += ", " + std::to_string(queue.enq_width) + ", " + std::to_string(queue.deq_width);
         }

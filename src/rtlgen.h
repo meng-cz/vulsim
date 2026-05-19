@@ -32,33 +32,21 @@
 
 namespace rtlgen {
 
-using BundleTable = std::unordered_map<BundleName, VulBundleItem>;
-
 inline string LogicSubModuleName(const ModuleName &module_name) {
     return "LogicSubModule_" + module_name;
 }
-inline string RegisterSubModuleName(const ModuleName &module_name) {
-    return "RegisterSubModule_" + module_name;
-}
 
-ErrorMsg genHLSMainFunc(
-    const VulModule &module,
-    const BundleTable &bundle_table,
-    const unordered_map<ConfigName, ConfigValue> &config_overrides,
-    const unordered_map<ConfigName, ConfigRealValue> &calculated_configlib,
-    const VulProject &project,
-    vector<string> &out_lines
+struct RTLGenResult {
+    vector<string> logic_hls_codes;
+    vector<string> rtl_skeleten_codes;
+    vector<string> resource_files; // additional resource files needed by ROM
+};
+
+RTLGenResult genModuleRTL(
+    const VulStaticModuleInstance &module,
+    const VulStaticConfigLib &configlib,
+    const VulStaticBundleLib &bundlelib
 );
-
-ErrorMsg genModuleRTLSkeletonWithReg(
-    const VulModule &module,
-    const BundleTable &bundle_table,
-    const unordered_map<ConfigName, ConfigValue> &param_override,
-    const VulProject &project,
-    vector<string> &out_lines
-);
-
-
 
 
 } // namespace rtlgen

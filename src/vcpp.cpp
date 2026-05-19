@@ -1368,7 +1368,7 @@ void _parseStaticModule(
             VulErrorContextGuard _err{"parsing QUEUE " + item.args[0]};
             VulStaticQueue queue;
             queue.name = item.args[0];
-            queue.type = item.args[1];
+            parse_reg_uint_type(item.args[1], local_configlib, queue.type);
             queue.depth = calculateConstexprValue(item.args[2], local_configlib);
             queue.enq_width = queue.deq_width = 1; // default width = 1
             module.queues.push_back(std::move(queue));
@@ -1378,7 +1378,7 @@ void _parseStaticModule(
             VulErrorContextGuard _err{"parsing QUEUE_MP " + item.args[0]};
             VulStaticQueue queue;
             queue.name = item.args[0];
-            queue.type = item.args[1];
+            parse_reg_uint_type(item.args[1], local_configlib, queue.type);
             queue.depth = calculateConstexprValue(item.args[2], local_configlib);
             queue.enq_width = calculateConstexprValue(item.args[3], local_configlib);
             queue.deq_width = calculateConstexprValue(item.args[4], local_configlib);
@@ -1520,6 +1520,8 @@ VulStaticProject parseVcppStaticProject(
 
     using namespace std::filesystem;
 
+    bool is_sim = !main_file_path.empty();
+
     path proj_dir(project_dir);
     if (!exists(proj_dir) || !is_directory(proj_dir)) {
         throw VulException("Project directory does not exist or is not a directory: " + project_dir);
@@ -1612,7 +1614,11 @@ VulStaticProject parseVcppStaticProject(
         throw VulException("Top file does not exist or is not a regular file: " + top_file_path);
     }
     top_instance->module_name = top_path.stem().string();
-    top_instance->instance_path = {"sim", "top"};
+    if (is_sim) {
+        top_instance->instance_path = {"sim", "top"};
+    } else {
+        top_instance->instance_path = {"top"};
+    }
     top_instance->filepath = top_path.string();
     todo_queue.push_back({top_instance, project.test_harness.top_config_overrides});
 
@@ -1686,7 +1692,7 @@ VulStaticProject parseVcppStaticProject(
     }
     printf("Total instances: %d\n", module_count);
     
-    if (main_file_path.empty()) {
+    if (!is_sim) {
         printf("No main file provided, skipping simulation setup.\n");
         return project;
     }

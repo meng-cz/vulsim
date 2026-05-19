@@ -61,9 +61,9 @@ using int128 = __int128_t;
 using uint128 = __uint128_t;
 
 constexpr uint32_t log2ceil(uint32_t n) {
-    return (n <= 1) ? 0 : 32u - std::countl_zero(n - 1);
+    return (n <= 1) ? 0 : 1 + log2ceil((n + 1) >> 1);
 }
 constexpr uint64_t log2ceil(uint64_t n) {
-    return (n <= 1) ? 0 : 64u - std::countl_zero(n - 1UL);
+    return (n <= 1) ? 0 : 1 + log2ceil((n + 1) >> 1);
 }
 
