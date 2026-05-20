@@ -39,8 +39,10 @@ public:
     template <uint32_t P = 0>
     void setnext(const T &value) {
         static_assert(P < WRPortNum);
-        next_ = value;
-        pending_write_ports_ = P;
+        if (P < pending_write_ports_) {
+            next_ = value;
+            pending_write_ports_ = P;
+        }
     }
 
     T get() const {
