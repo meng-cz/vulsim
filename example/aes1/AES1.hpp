@@ -21,7 +21,7 @@ REGISTER_MUL(state, uint32_t, 2) {
 
 REQUEST(output, ARG(AESData) data);
 
-SERVICE_READY(input, (state == 0 || state >= 10) && !inputed, ARG(AESData) data, ARG(AESKey) key) {
+SERVICE_READY(input, (state == 0 || state >= 10), ARG(AESData) data, ARG(AESKey) key) {
     k.setnext<0>(key);
     AESData indata;
     for (uint32_t i = 0; i < 16; i++) {

@@ -175,4 +175,6 @@ SIMULATION() {
     expected_data = expected_data_next;
     sim_execute();
     sim_commit();
+
+    printf("Simulation finished after %lu ticks.\n", test_tick);
 }
