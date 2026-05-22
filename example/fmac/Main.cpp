@@ -13,26 +13,26 @@
 GLOBAL() {
 
 // variables here are visibal to both SERVICE and SIMULATION, and maintain their state across ticks.
-std::vector<UInt<32>> expect_results;
+std::vector<Int<32>> expect_results;
 uint64_t total_tests = 0;
 
 }
 
-REQUEST(input, ARG(UInt<16>) a, ARG(UInt<16>) b, ARG(UInt<16>) c, ARG(bool) init, ARG(bool) last);
+REQUEST(input, ARG(Int<16>) a, ARG(Int<16>) b, ARG(Int<16>) c, ARG(bool) init, ARG(bool) last);
 
-SERVICE(output, ARG(UInt<32>) sum) {
+SERVICE(output, ARG(Int<32>) sum) {
     if (!expect_results.empty()) {
-        UInt<32> expected = expect_results.front();
+        Int<32> expected = expect_results.front();
         expect_results.erase(expect_results.begin());
         if (sum != expected) {
-            printf("%ld: Error: expected 0x%08x but got 0x%08x\n", total_tests, expected.get_u32(), sum.get_u32());
+            printf("%ld: Error: expected 0x%08x but got 0x%08x\n", total_tests, expected.to<uint32_t>(), sum.to<uint32_t>());
             sim_exit();
         } else {
-            // printf("Got correct result: 0x%08x\n", sum.get_u32());
+            // printf("Got correct result: 0x%08x\n", sum.to<uint32_t>());
             total_tests++;
         }
     } else {
-        printf("%ld: Error: got unexpected output 0x%08x\n", total_tests, sum.get_u32());
+        printf("%ld: Error: got unexpected output 0x%08x\n", total_tests, sum.to<uint32_t>());
         sim_exit();
     }
 }
@@ -92,7 +92,7 @@ SIMULATION() {
         for (size_t i = 0; i < a_vec.size(); ++i) {
             bool init = (i == 0);
             bool last = (i + 1 == a_vec.size());
-            input(UInt<16>(a_vec[i]), UInt<16>(b_vec[i]), UInt<16>(c_init), init, last);
+            input(Int<16>(a_vec[i]), Int<16>(b_vec[i]), Int<16>(c_init), init, last);
             acc += static_cast<double>(fp16_to_fp32(a_vec[i])) * static_cast<double>(fp16_to_fp32(b_vec[i]));
             if (last) {
                 push_expect_from_acc(acc);

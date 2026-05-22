@@ -3,236 +3,306 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <type_traits>
 
 namespace {
 
-using u128 = unsigned __int128;
-
-template <uint32_t BitWidth>
-u128 width_mask() {
-    if constexpr (BitWidth >= 128) {
-        return ~u128(0);
-    } else {
-        return (u128(1) << BitWidth) - 1;
-    }
+template <uint32_t W>
+void expect_eq(const Int<W>& got, const Int<W>& expected) {
+    assert(got == expected);
 }
 
-template <uint32_t BitWidth>
-u128 to_u128(const UInt<BitWidth>& value) {
-    u128 result = 0;
-    constexpr uint32_t words = UInt<BitWidth>::NUM_WORDS < 2 ? UInt<BitWidth>::NUM_WORDS : 2;
-    for (uint32_t i = 0; i < words; ++i) {
-        result |= u128(value.get_data()[i]) << (i * 64);
-    }
-    return result & width_mask<BitWidth>();
+void test_type_constants() {
+    static_assert(Int<1>::WORD_BITS == 64);
+    static_assert(Int<64>::NUM_WORDS == 1);
+    static_assert(Int<65>::NUM_WORDS == 2);
+    static_assert(Int<130>::NUM_WORDS == 3);
+    static_assert(Int<64>::IDX_WIDTH == 6);
+    static_assert(Int<130>::IDX_WIDTH == 8);
 }
 
-template <uint32_t BitWidth>
-void expect_value(const UInt<BitWidth>& value, u128 expected) {
-    assert(to_u128(value) == (expected & width_mask<BitWidth>()));
+void test_constructors_and_to() {
+    Int<8> a;
+    Int<8> b = true;
+    Int<8> c = 0x1234;
+    Int<16> d = Int<8>(0xAB);
+    Int<16> e = Int<8>(-1).sint();
+    Int<4> f = -1;
+
+    expect_eq(a, Int<8>(0));
+    expect_eq(b, Int<8>(1));
+    expect_eq(c, Int<8>(0x34));
+    expect_eq(d, Int<16>(0x00AB));
+    expect_eq(e, Int<16>(0xFFFF));
+    expect_eq(f, Int<4>(0xF));
+
+    Int<128> g = int64_t(-1);
+    assert(g.data[0] == ~uint64_t(0));
+    assert(g.data[1] == ~uint64_t(0));
+
+    Int<8> x = 0xFF;
+    assert(x.to<uint32_t>() == 255U);
+    assert(x.to<int32_t>() == -1);
+
+    Int<72> h = 0;
+    h(63, 0) = uint64_t(0x0123456789ABCDEFULL);
+    h(71, 64) = uint8_t(0xAB);
+    assert(h.to<uint64_t>() == uint64_t(0x0123456789ABCDEFULL));
 }
 
-template <uint32_t BitWidth>
-void expect_zero_extended(const UInt<BitWidth>& value, uint32_t from_width) {
-    for (uint32_t bit = from_width; bit < BitWidth; ++bit) {
-        assert(!static_cast<bool>(value(bit)));
-    }
+void test_signed_view_conversion() {
+    Int<8> neg8 = 0x80;
+    Int<16> ext16 = neg8.sint();
+    expect_eq(ext16, Int<16>(0xFF80));
+
+    Int<16> neg16 = 0xFF80;
+    Int<8> trunc8_neg = neg16.sint();
+    expect_eq(trunc8_neg, Int<8>(0x80));
+
+    Int<16> pos16 = 0x007F;
+    Int<8> trunc8_pos = pos16.sint();
+    expect_eq(trunc8_pos, Int<8>(0x7F));
 }
 
-void test_default_and_integer_construction() {
-    UInt<1> one_bit_default;
-    expect_value(one_bit_default, 0);
+void test_slice_and_bit_proxy() {
+    Int<32> a = 0;
+    a(31, 16) = 0x1234;
+    a(15, 0) = 0x5678;
 
-    UInt<7> seven_bit = 0xff;
-    expect_value(seven_bit, 0x7f);
+    Int<16> hi = a(31, 16);
+    uint8_t low8 = a(7, 0);
+    bool b3 = a(3);
 
-    UInt<64> sixty_four_bit = 0xfedcba9876543210ULL;
-    expect_value(sixty_four_bit, u128(0xfedcba9876543210ULL));
+    expect_eq(hi, Int<16>(0x1234));
+    assert(low8 == 0x78);
+    assert(b3);
 
-    UInt<65> sixty_five_bit = 0xffffffffffffffffULL;
-    expect_value(sixty_five_bit, u128(0xffffffffffffffffULL));
-    assert(sixty_five_bit.get_data()[1] == 0);
+    a(31, 16) = 0xABCD;
+    expect_eq(a, Int<32>(0xABCD5678));
+
+    a(7, 0) = 0x3C;
+    a(7, 4) = a(3, 0);
+    assert(static_cast<uint8_t>(a(7, 0)) == 0xCC);
+
+    a(0) = false;
+    assert(!static_cast<bool>(a(0)));
+    a(0) = true;
+    assert(static_cast<bool>(a(0)));
+
+    const Int<32> c = a;
+    const uint8_t byte0 = c(7, 0);
+    const bool bit0 = c(0);
+    assert(byte0 == static_cast<uint8_t>(a(7, 0)));
+    assert(bit0);
 }
 
-void test_cross_width_construction_and_assignment() {
-    UInt<16> narrow = 0xabcd;
-    UInt<32> wide = narrow;
-    expect_value(wide, 0xabcd);
-    expect_zero_extended(wide, 16);
+void test_range_to_range_overlap_assignment() {
+    Int<8> a = 0xD5; // 11010101
+    a(7, 1) = a(6, 0);
+    expect_eq(a, Int<8>(0xAB)); // 10101011
 
-    UInt<8> truncated = narrow;
-    expect_value(truncated, 0xcd);
+    a = 0xD5;
+    a(6, 0) = a(7, 1);
+    expect_eq(a, Int<8>(0xEA)); // 11101010
 
-    UInt<65> wide_boundary = 0xffffffffffffffffULL;
-    wide_boundary(64) = true;
-    UInt<32> trunc_boundary = wide_boundary;
-    expect_value(trunc_boundary, 0xffffffffULL);
+    a = 0xE5; // 11100101
+    a(5, 2) = a(3, 0);
+    expect_eq(a, Int<8>(0xD5)); // 11010101
 
-    UInt<96> extend_boundary = wide_boundary;
-    expect_value(extend_boundary, (u128(1) << 64) | u128(0xffffffffffffffffULL));
-    expect_zero_extended(extend_boundary, 65);
-
-    UInt<127> src127 = 0;
-    src127(126) = true;
-    src127(64) = true;
-    src127(5) = true;
-
-    UInt<128> dst128 = src127;
-    assert(static_cast<bool>(dst128(126)));
-    assert(static_cast<bool>(dst128(64)));
-    assert(static_cast<bool>(dst128(5)));
-    assert(!static_cast<bool>(dst128(127)));
-
-    UInt<31> assign_target = 0;
-    assign_target = UInt<65>(0x1ffffffffULL);
-    expect_value(assign_target, 0x7fffffffULL);
+    Int<32> src = 0x12345678;
+    Int<16> dst = 0;
+    dst(15, 0) = src(19, 4);
+    expect_eq(dst, Int<16>(0x4567));
 }
 
-template <uint32_t BitWidth>
-void test_arithmetic_and_bitwise_for_width(u128 lhs, u128 rhs, uint32_t shl, uint32_t shr) {
-    const u128 mask = width_mask<BitWidth>();
-    lhs &= mask;
-    rhs &= mask;
-    UInt<BitWidth> a = static_cast<uint64_t>(lhs);
-    UInt<BitWidth> b = static_cast<uint64_t>(rhs);
+void test_range_at_and_bit_at() {
+    Int<130> wide = 0;
+    wide(10, 3) = 0xA5;
 
-    if constexpr (BitWidth > 64) {
-        for (uint32_t bit = 64; bit < BitWidth && bit < 128; ++bit) {
-            if ((lhs >> bit) & 1) a(bit) = true;
-            if ((rhs >> bit) & 1) b(bit) = true;
-        }
-    }
+    Int<Int<130>::IDX_WIDTH> idx = 3;
+    Int<8> mid = wide.range_at<8>(idx);
+    bool dyn_bit = wide.bit_at(idx);
+    expect_eq(mid, Int<8>(0xA5));
+    assert(dyn_bit);
 
-    expect_value(a + b, (lhs + rhs) & mask);
-    expect_value(a - b, (lhs - rhs) & mask);
-    UInt<BitWidth> mul_trunc = a * b;
-    expect_value(mul_trunc, (lhs * rhs) & mask);
-
-    expect_value(a & b, lhs & rhs);
-    expect_value(a | b, lhs | rhs);
-    expect_value(a ^ b, lhs ^ rhs);
-    expect_value(~a, (~lhs) & mask);
-
-    expect_value(a << shl, (lhs << shl) & mask);
-    expect_value(a >> shr, (lhs >> shr) & mask);
-
-    assert((a == b) == (lhs == rhs));
-    assert((a != b) == (lhs != rhs));
-    assert((a < b) == (lhs < rhs));
-    assert((a <= b) == (lhs <= rhs));
-    assert((a > b) == (lhs > rhs));
-    assert((a >= b) == (lhs >= rhs));
+    Int<Int<130>::IDX_WIDTH> idx0 = 0;
+    wide.range_at<4>(idx0) = 0xF;
+    assert(static_cast<uint8_t>(wide(3, 0)) == 0xF);
+    wide.bit_at(idx0) = false;
+    assert(!static_cast<bool>(wide(0)));
 }
 
-void test_multiplication_full_width_and_cross_width() {
-    {
-        UInt<8> a = 0xff;
-        UInt<16> b = 0xabcd;
-        auto p = a * b;
-        static_assert(std::is_same_v<decltype(p), UInt<24>>);
-        expect_value(p, u128(0xff) * u128(0xabcd));
-    }
+void test_reduce_repeat_cat() {
+    Int<4> a = 0b1010;
+    assert(a.reduce_or());
+    assert(!a.reduce_and());
+    assert(!a.reduce_xor());
 
-    {
-        UInt<64> a = 0xffffffffffffffffULL;
-        UInt<64> b = 2;
-        auto p = a * b;
-        static_assert(std::is_same_v<decltype(p), UInt<128>>);
-        expect_value(p, (u128(0xffffffffffffffffULL) * 2));
-        assert(static_cast<bool>(p(64)));
-    }
+    Int<4> b = 0b1011;
+    assert(b.reduce_xor());
 
-    {
-        UInt<80> a = 0;
-        a(79) = true;
-        UInt<48> b = 0;
-        b(47) = true;
-        auto p = a * b;
-        static_assert(std::is_same_v<decltype(p), UInt<128>>);
-        assert(static_cast<bool>(p(126)));
-        assert(!static_cast<bool>(p(127)));
-    }
+    Int<70> all_ones = ~Int<70>(0);
+    assert(all_ones.reduce_and());
+    Int<70> not_all_ones = all_ones;
+    not_all_ones(69) = false;
+    assert(!not_all_ones.reduce_and());
+    assert(Int<70>(0).reduce_or() == false);
+
+    Int<4> n = 0b1100;
+    auto r = n.repeat<3>();
+    static_assert(std::is_same_v<decltype(r), Int<12>>);
+    expect_eq(r, Int<12>(0xCCC));
+
+    Int<8> h = 0xAB;
+    Int<8> l = 0xCD;
+    Int<16> x = h.cat(l);
+    expect_eq(x, Int<16>(0xABCD));
+
+    auto y = Cat(Int<8>(0x12), Int<8>(0x34), Int<8>(0x56));
+    static_assert(std::is_same_v<decltype(y), Int<24>>);
+    expect_eq(y, Int<24>(0x123456));
 }
 
-void test_arithmetic_and_bitwise() {
-    test_arithmetic_and_bitwise_for_width<8>(0xd3, 0x6e, 3, 2);
-    test_arithmetic_and_bitwise_for_width<16>(12345, 67890, 5, 7);
-    test_arithmetic_and_bitwise_for_width<31>(0x5abcdeffULL, 0x12345678ULL, 9, 11);
-    test_arithmetic_and_bitwise_for_width<32>(0x89abcdefULL, 0x10203040ULL, 4, 12);
-    test_arithmetic_and_bitwise_for_width<63>(u128(1) << 62, 0x123456789abcdefULL, 1, 17);
-    test_arithmetic_and_bitwise_for_width<64>(0xfedcba9876543210ULL, 0x0f1e2d3c4b5a6978ULL, 8, 19);
-    test_arithmetic_and_bitwise_for_width<65>((u128(1) << 64) | 0x123456789abcdef0ULL, 0xf0e1d2c3b4a59687ULL, 7, 13);
-    test_arithmetic_and_bitwise_for_width<96>((u128(1) << 95) | (u128(0x89abcdef01234567ULL) << 16) | 0x4321ULL,
-                                               (u128(0x1234567890abcdefULL) << 8) | 0x5aULL, 15, 20);
-    test_arithmetic_and_bitwise_for_width<127>((u128(1) << 126) | (u128(0x0123456789abcdefULL) << 32) | 0x76543210ULL,
-                                                (u128(0x0fedcba987654321ULL) << 48) | 0x13579bdfULL, 9, 27);
-    test_arithmetic_and_bitwise_for_width<128>((u128(0xfedcba9876543210ULL) << 64) | 0x0123456789abcdefULL,
-                                                (u128(0x0f1e2d3c4b5a6978ULL) << 64) | 0x8899aabbccddeeffULL, 16, 29);
+void test_arithmetic_ops() {
+    Int<8> a = 200;
+    Int<8> b = 100;
+
+    auto s = a + b;
+    static_assert(std::is_same_v<decltype(s), Int<9>>);
+    assert(s.to<uint16_t>() == 300U);
+
+    auto d = a - b;
+    static_assert(std::is_same_v<decltype(d), Int<8>>);
+    expect_eq(d, Int<8>(100));
+
+    auto n = -Int<8>(1);
+    expect_eq(n, Int<8>(0xFF));
+
+    auto s2 = a + 1;
+    auto s3 = 1 + a;
+    static_assert(std::is_same_v<decltype(s2), Int<9>>);
+    static_assert(std::is_same_v<decltype(s3), Int<9>>);
+    assert(s2.to<uint16_t>() == 201U);
+    assert(s3.to<uint16_t>() == 201U);
+
+    auto d2 = a - 50;
+    auto d3 = 250 - a;
+    expect_eq(d2, Int<8>(150));
+    expect_eq(d3, Int<8>(50));
+
+    Int<130> big = 0;
+    big(63, 0) = ~uint64_t(0);
+    auto big_add = big + Int<130>(1);
+    static_assert(std::is_same_v<decltype(big_add), Int<131>>);
+    assert(!Int<64>(big_add(63, 0)).reduce_or());
+    assert(static_cast<bool>(big_add(64)));
+
+    auto big_sub = Int<130>(0) - Int<130>(1);
+    assert(big_sub.reduce_and());
+
+    auto p0 = Int<8>(0xF0) * Int<8>(2);
+    static_assert(std::is_same_v<decltype(p0), Int<16>>);
+    assert(p0.to<uint16_t>() == 0x01E0U);
+
+    auto p1 = Int<8>(0xF0).sint() * Int<8>(2);
+    static_assert(std::is_same_v<decltype(p1), Int<16>>);
+    assert(p1.to<uint16_t>() == 0xFFE0U);
 }
 
-void test_slice_and_bit_access() {
-    UInt<32> example = 0x12345678;
-    UInt<16> high = example(31, 16);
-    UInt<16> low = example(15, 0);
-    expect_value(high, 0x1234);
-    expect_value(low, 0x5678);
-
-    example(31, 16) = 0xabcd;
-    expect_value(example, 0xabcd5678ULL);
-
-    assert(static_cast<bool>(example(3)));
-    example(3) = false;
-    assert(!static_cast<bool>(example(3)));
-    example(3) = true;
-    assert(static_cast<bool>(example(3)));
-
-    UInt<96> wide = 0;
-    wide(80, 48) = 0x1ffffffffULL;
-    UInt<33> middle = wide(80, 48);
-    expect_value(middle, 0x1ffffffffULL);
-
-    wide(63, 60) = 0xa;
-    UInt<4> nibble = wide(63, 60);
-    expect_value(nibble, 0xa);
-
-    wide(95) = true;
-    wide(47) = true;
-    assert(static_cast<bool>(wide(95)));
-    assert(static_cast<bool>(wide(47)));
-
-    const UInt<96>& const_wide = wide;
-    UInt<33> const_middle = const_wide(80, 48);
-    expect_value(const_middle, 0x1ffffafffULL);
-    UInt<4> const_nibble = const_wide(63, 60);
-    expect_value(const_nibble, 0xa);
-    assert(static_cast<bool>(const_wide(95)));
-    assert(static_cast<bool>(const_wide(47)));
+void test_bitwise_ops() {
+    Int<8> a = 0xA5;
+    Int<8> b = 0x3C;
+    expect_eq(a & b, Int<8>(0x24));
+    expect_eq(a | b, Int<8>(0xBD));
+    expect_eq(a ^ b, Int<8>(0x99));
+    expect_eq(~a, Int<8>(0x5A));
 }
 
-void test_shift_boundaries() {
-    UInt<65> value = 0;
-    value(64) = true;
-    value(0) = true;
-    expect_value(value << 64, u128(1) << 64);
-    expect_value(value >> 64, 1);
+void test_bitwise_with_range_proxy_ops() {
+    const Int<16> input = 0x02AA; // low 10 bits = 0b10_1010_1010
 
-    UInt<128> full = 0;
-    full(127) = true;
-    full(64) = true;
-    full(1) = true;
-    expect_value(full << 1, ((u128(1) << 127) | (u128(1) << 64) | 2) << 1);
-    expect_value(full >> 64, (u128(1) << 63) | 1);
+    // Must support expression style like:
+    // result.frac = (Int<10>(1) << 10) | input(9, 0);
+    Int<10> frac10 = (Int<10>(1) << 10) | input(9, 0);
+    expect_eq(frac10, Int<10>(0x2AA)); // left part overflows width-10 and becomes 0
+
+    // Practical hidden-1 pattern with sufficient destination width.
+    Int<11> frac11 = (Int<11>(1) << 10) | input(9, 0);
+    expect_eq(frac11, Int<11>(0x6AA));
+
+    Int<10> andv = Int<10>(0x3FF) & input(9, 0);
+    expect_eq(andv, Int<10>(0x2AA));
+
+    Int<10> xorv = input(9, 0) ^ Int<10>(0x155);
+    expect_eq(xorv, Int<10>(0x3FF));
+}
+
+void test_shift_ops() {
+    Int<8> a = 0b11110000;
+    expect_eq(a << 2, Int<8>(0b11000000));
+    expect_eq(a >> 2, Int<8>(0b00111100));
+    expect_eq(a.sint() >> 2, Int<8>(0b11111100));
+
+    expect_eq(a << 99, Int<8>(0));
+    expect_eq(a >> 99, Int<8>(0));
+    expect_eq(a >> Int<8>(99), Int<8>(0));
+
+    Int<8> neg = 0x80;
+    Int<8> pos = 0x7F;
+    expect_eq(neg.sint() >> 99, Int<8>(0xFF));
+    expect_eq(pos.sint() >> 99, Int<8>(0x00));
+
+    Int<130> wide = 0;
+    wide(0) = true;
+    wide(65) = true;
+    Int<130> sl = wide << 1;
+    Int<130> sr = wide >> 1;
+    assert(static_cast<bool>(sl(1)));
+    assert(static_cast<bool>(sl(66)));
+    assert(static_cast<bool>(sr(64)));
+    assert(!static_cast<bool>(sr(0)));
+}
+
+void test_comparison_ops() {
+    Int<8> u = 0xFF;
+    assert(u == 255);
+    assert(u != 254);
+    assert(!(u < 0));
+    assert(u > 0);
+    assert(u >= 255U);
+    assert(u <= 255U);
+
+    assert(u.sint() < 0);
+    assert(u.sint() <= -1);
+    assert(u.sint() > -2);
+    assert(Int<4>(0xF).sint() == Int<8>(-1).sint());
+
+    assert(Int<4>(0xF) == Int<8>(0x0F));
+    assert(Int<4>(0xF) < Int<8>(0x10));
+    assert(Int<4>(0x8).sint() < Int<8>(0).sint());
+
+    assert(-1 == Int<8>(0xFF).sint());
+    assert(0 < Int<8>(1));
+    assert(!(0 < Int<8>(0).sint()));
+    assert(0 <= Int<8>(0));
+    assert(2 >= Int<8>(1));
 }
 
 } // namespace
 
 int main() {
-    test_default_and_integer_construction();
-    test_cross_width_construction_and_assignment();
-    test_arithmetic_and_bitwise();
-    test_multiplication_full_width_and_cross_width();
-    test_slice_and_bit_access();
-    test_shift_boundaries();
+    test_type_constants();
+    test_constructors_and_to();
+    test_signed_view_conversion();
+    test_slice_and_bit_proxy();
+    test_range_to_range_overlap_assignment();
+    test_range_at_and_bit_at();
+    test_reduce_repeat_cat();
+    test_arithmetic_ops();
+    test_bitwise_ops();
+    test_bitwise_with_range_proxy_ops();
+    test_shift_ops();
+    test_comparison_ops();
 
     std::cout << "All tests passed!" << std::endl;
     return 0;
