@@ -34,7 +34,7 @@ const string CodeTab = "    ";
 const string TickFunctionName = "on_current_tick";
 const string ApplyTickFunctionName = "apply_next_tick";
 
-const string UIntClassName = "UInt";
+const string UIntClassName = "Int";
 const string StorageNextClassName = "VulStorageNext";
 const string StorageNextArrayClassName = "VulStorageNextArray";
 const string BlockRAMClassName = "VulBRAM";
