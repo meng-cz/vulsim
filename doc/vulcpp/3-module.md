@@ -49,12 +49,26 @@ REGISTER(myreg, MyStruct) {
 }
 ```
 
-展开后提供以下等价声明供行为代码调用：
+Register 提供下列 API 供行为代码调用：
 ```cpp
-const type name; // 当前周期寄存器的值，只读，仅对非结构体类型有效
-const type& name_get(); // 获取当前周期寄存器的值的引用，适用于结构体类型
-void name_setnext(type value); // 延迟赋值寄存器，在下个周期生效
+REGISTER(counter, uint8_t) {
+    counter = 0;
+}
+REGISTER(myreg, MyStruct) {
+    myreg.a = 0;
+    myreg.b = false;
+}
+TICK_IMPL() {
+    uint8_t val = counter; // 读取寄存器当前值
+    counter.setnext(val + 1); // 在下个周期将寄存器值更新为 val + 1
+    counter.setnext(val.get() + 1); // 等价于上面一行，get() 用于显式获取寄存器当前值
+    
+    MyStruct s = myreg; // 读取寄存器当前值
+    uint8_t a = myreg.get().a; // !!! 对于非基础类型的寄存器，必须显式使用 get() 来获取寄存器当前值
+    // a = myreg.a; // !!! 错误（C++语法错误，源于隐式类型转换不适用于.或[]运算符
+}
 ```
+
 
 ## REGISTER_MUL(name, type, portnum) { ... }
 
@@ -64,11 +78,7 @@ void name_setnext(type value); // 延迟赋值寄存器，在下个周期生效
 - `portnum`：寄存器的写端口数量，整数类型，必须大于0
 - `{ ... }`：寄存器的复位赋值代码块
 
-展开后提供以下等价声明供行为代码调用：
-```cpp
-const type name; // 当前周期寄存器的值，只读
-void name_setnext<Priority>(type value); // 延迟赋值寄存器，在下个周期生效，priority 参数用于仲裁多个写端口，值越小表示优先级越高
-```
+API 定义同 REGISTER，但每个写端口的 setnext 函数都需要指定一个 priority，用于仲裁多个写端口在同一周期写入时的优先级。
 
 当多个写端口在同一周期写入时，具有更低 priority 值的写入会覆盖具有更高 priority 值的写入。priority 的默认值为0，表示最高优先级。例如：
 
@@ -77,12 +87,12 @@ REGISTER_MUL(myreg, uint8_t, 2) {
     myreg = 0;
 }
 
-SERVICE_LOGIC_IMPL(serv1, ARG(uint8_t) a) {
-    myreg_setnext<0>(a); // serv1 的写端口优先级为 0，优先级高于 tick
+SERVICE(serv1, ARG(uint8_t) a) {
+    myreg.setnext<0>(a); // serv1 的写端口优先级为 0，优先级高于 tick
 }
 
 TICK_IMPL() {
-    myreg_setnext<1>(myreg + 1); // tick 的写端口优先级为 1
+    myreg.setnext<1>(myreg + 1); // tick 的写端口优先级为 1
 }
 ```
 
@@ -106,13 +116,19 @@ REGISTER_ARRAY1(myarray, uint8_t, 10, 1) {
 }
 ```
 
-展开后提供以下等价声明供行为代码调用：
+Register Array 提供下列 API 供行为代码调用：
 ```cpp
-const std::array<type, size> name; // 当前周期寄存器数组的值，只读
-void name_setnext(const uint64_t idx, type value); // 延迟赋值寄存器数组，在下个周期生效，idx 参数指定要写入的寄存器单元索引
-void name_setnext<Priority>(const uint64_t idx, type value); // 延迟赋值寄存器数组，在下个周期生效，idx 参数指定要写入的寄存器单元索引，priority 整数值用于仲裁多个写端口
-
+REGISTER_ARRAY1(myarray, uint8_t, 10, 1) {
+    for (int i = 0; i < 10; i++) {
+        myarray[i] = 0;
+    }
+}
+TICK_IMPL() {
+    uint8_t val = myarray[3]; // 读取寄存器数组中索引为 3 的寄存器单元的当前值
+    myarray.setnext<0>(4, val + 1); // 在下个周期将寄存器数组中索引为 4 的寄存器单元的值更新为 val + 1
+}
 ```
+
 ## WIRE(name, type) { ... }
 
 临时变量定义，类似于 verilog 中的 wire，仅在当前周期内生效：

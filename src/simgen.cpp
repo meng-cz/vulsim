@@ -258,10 +258,10 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             type_str += ">";
 
             decl_private_field.push_back(type_str + " " + reg.name + ";\n");
-            decl_private_field.push_back("template <uint32_t P = 0>\n");
-            decl_private_field.push_back("void " + reg.name + "_setnext(const uint64_t idx, const " + base_type + " &value) {\n");
-            decl_private_field.push_back(CodeTab + reg.name + ".setnext<P>(idx, value);\n");
-            decl_private_field.push_back("}\n");
+            // decl_private_field.push_back("template <uint32_t P = 0>\n");
+            // decl_private_field.push_back("void " + reg.name + "_setnext(const uint64_t idx, const " + base_type + " &value) {\n");
+            // decl_private_field.push_back(CodeTab + reg.name + ".setnext<P>(idx, value);\n");
+            // decl_private_field.push_back("}\n");
             decl_private_field.push_back("\n");
         } else {
             if (reg.ports > 1) {
@@ -271,13 +271,13 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
 
             decl_private_field.push_back(type_str + " " + reg.name + ";\n");
-            decl_private_field.push_back("template <uint32_t P = 0>\n");
-            decl_private_field.push_back("void " + reg.name + "_setnext(const " + base_type + " &value) {\n");
-            decl_private_field.push_back(CodeTab + reg.name + ".setnext<P>(value);\n");
-            decl_private_field.push_back("}\n");
-            decl_private_field.push_back("const " + base_type + " &" + reg.name + "_get() const {\n");
-            decl_private_field.push_back(CodeTab + "return " + reg.name + ".get();\n");
-            decl_private_field.push_back("}\n");
+            // decl_private_field.push_back("template <uint32_t P = 0>\n");
+            // decl_private_field.push_back("void " + reg.name + "_setnext(const " + base_type + " &value) {\n");
+            // decl_private_field.push_back(CodeTab + reg.name + ".setnext<P>(value);\n");
+            // decl_private_field.push_back("}\n");
+            // decl_private_field.push_back("const " + base_type + " &" + reg.name + "_get() const {\n");
+            // decl_private_field.push_back(CodeTab + "return " + reg.name + ".get();\n");
+            // decl_private_field.push_back("}\n");
             decl_private_field.push_back("\n");
         }
         VulStaticBundleMember sig_as_member;
