@@ -229,16 +229,43 @@ int simgenStatic(const SimGenArgs &args) {
     if (!build_script.is_open()) {
         throw VulException("Failed to create build script.");
     }
-    build_script << "#!/bin/bash\necho \"Building " << projname << "\"\n" << build_cmd << "\n";
+    build_script << "#!/bin/bash\necho \"Building " << projname << "\"\n";
+    build_script << "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n";
+    build_script << "pushd \"$SCRIPT_DIR\"\n";
+    build_script << build_cmd << "\n";
+    build_script << "popd\n";
     build_script.close();
 
     string build_cmd_o3 = "g++ -std=c++20 -O3 main.cpp -I. -o " + projname + "_O3";
-    std::ofstream build_script_o3((out_path / "build_O3.sh").string());
+    std::ofstream build_script_o3((out_path / "release.sh").string());
     if (!build_script_o3.is_open()) {
         throw VulException("Failed to create O3 build script.");
     }
-    build_script_o3 << "#!/bin/bash\necho \"Building " << projname << " with O3 optimization\"\n" << build_cmd_o3 << "\n";
+    build_script_o3 << "#!/bin/bash\necho \"Building " << projname << " with O3 optimization\"\n";
+    build_script_o3 << "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n";
+    build_script_o3 << "pushd \"$SCRIPT_DIR\"\n";
+    build_script_o3 << build_cmd_o3 << "\n";
+    build_script_o3 << "popd\n";
     build_script_o3.close();
+
+    string debug_cmd =
+        "g++ -std=c++20 -g -O1 "
+        "-fsanitize=address,undefined,leak "
+        "-fno-omit-frame-pointer "
+        "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion "
+        "-Wshadow -Wnull-dereference -Wdouble-promotion -Wformat=2 "
+        "-Wundef -Wuninitialized -Werror "
+        "main.cpp -I. -o " + projname + "_debug";
+    std::ofstream debug_script((out_path / "debug.sh").string());
+    if (!debug_script.is_open()) {
+        throw VulException("Failed to create debug build script.");
+    }
+    debug_script << "#!/bin/bash\necho \"Building " << projname << " for debug with sanitizers\"\n";
+    debug_script << "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n";
+    debug_script << "pushd \"$SCRIPT_DIR\"\n";
+    debug_script << debug_cmd << "\n";
+    debug_script << "popd\n";
+    debug_script.close();
 
     return 0;
 }
