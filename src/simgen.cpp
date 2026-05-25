@@ -458,13 +458,26 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             string signal_name = mod.concatInstancePath(".") + "." + sig.signal_path;
             string access_path = "";
             string regname = sig.signal_path;
-            size_t dot_pos = access_path.find('.');
-            if (dot_pos != string::npos) {
-                regname = sig.signal_path.substr(0, dot_pos);
-                access_path = sig.signal_path.substr(dot_pos);
+            const string &signal_path = sig.signal_path;
+            const size_t first_dot_pos = signal_path.find('.');
+            const size_t first_bracket_pos = signal_path.find('[');
+            size_t regname_end_pos = signal_path.size();
+            if (first_bracket_pos != string::npos && (first_dot_pos == string::npos || first_bracket_pos < first_dot_pos)) {
+                regname_end_pos = first_bracket_pos;
+            } else if (first_dot_pos != string::npos) {
+                regname_end_pos = first_dot_pos;
             }
-            if (!regname.ends_with("]")) {
-                regname += ".get()";
+            regname = signal_path.substr(0, regname_end_pos);
+            access_path = signal_path.substr(regname_end_pos);
+            bool is_reg_array = false;
+            for (const auto &reg : mod.registers) {
+                if (reg.name == regname) {
+                    is_reg_array = !reg.dims.empty();
+                    break;
+                }
+            }
+            if (!is_reg_array) {
+                regname = regname + ".get()"; // .和[]运算符不能被隐式类型转换
             }
             access_path = regname + access_path;
             if (sig.bit_width > 64) {
@@ -799,4 +812,3 @@ vector<string> genStaticTestMainHpp(shared_ptr<VulStaticModuleInstance> top_modu
 
 
 } // namespace simgen
-

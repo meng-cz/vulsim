@@ -44,7 +44,7 @@ public:
     static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
     static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
 
-    using AddrType = UInt<AddrWidth>;
+    using AddrType = Int<AddrWidth>;
 
 protected:
 
@@ -72,9 +72,9 @@ public:
 
     void apply_next_tick() {
         if (write_en_) {
-            memory_[addr_.get_u64()] = write_data_;
+            memory_[addr_.template to<uint64_t>()] = write_data_;
         }
-        read_data_ = memory_[addr_.get_u64()];
+        read_data_ = memory_[addr_.template to<uint64_t>()];
     }
 };
 
@@ -88,7 +88,7 @@ public:
     static_assert(WritePorts > 0, "WritePorts must be greater than 0");
     static_assert(WritePorts < 64, "WritePorts must be less than 64");
 
-    using AddrType = UInt<AddrWidth>;
+    using AddrType = Int<AddrWidth>;
 
 protected:
 
@@ -136,12 +136,12 @@ public:
 
     void apply_next_tick() {
         unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = memory_[read_addresses_[i].get_u64()];
+            read_data_[i] = memory_[read_addresses_[i].template to<uint64_t>()];
         });
         if (write_enables_ != 0) {
             unroll_loop<0, WritePorts>([&](auto i) {
                 if (write_enables_ & (1ULL << i)) {
-                    memory_[write_addresses_[i].get_u64()] = write_data_[i];
+                    memory_[write_addresses_[i].template to<uint64_t>()] = write_data_[i];
                 }
             });
             write_enables_ = 0;
@@ -162,8 +162,8 @@ public:
     static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
     static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
 
-    using DataType = UInt<DataWidth>;
-    using AddrType = UInt<AddrWidth>;
+    using DataType = Int<DataWidth>;
+    using AddrType = Int<AddrWidth>;
 
 protected:
 
@@ -204,7 +204,7 @@ public:
 
     void apply_next_tick() {
         unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = memory_[read_addresses_[i].get_u64()];
+            read_data_[i] = memory_[read_addresses_[i].template to<uint64_t>()];
         });
     }
 
@@ -314,7 +314,7 @@ protected:
                         size_t lo = bit_pos;
 
                         if (lo < DataWidth) {
-                            UInt<64> tmp(chunk);
+                            Int<64> tmp(chunk);
                             d(hi, lo) = tmp;
                         }
 
@@ -331,7 +331,7 @@ protected:
                     size_t lo = bit_pos;
 
                     if (lo < DataWidth) {
-                        UInt<64> tmp(chunk);
+                        Int<64> tmp(chunk);
                         d(hi, lo) = tmp;
                     }
                 }
@@ -405,10 +405,10 @@ protected:
                     throw std::runtime_error("Memory overflow");
                 }
 
-                DataType d; // 如需默认清零，请确保 UInt 默认构造为 0
+                DataType d; // 如需默认清零，请确保 Int 默认构造为 0
 
                 // 从 LSB 开始打包（与 Verilog 一致：右侧为低位）
-                // 按 64bit 分块写入 UInt
+                // 按 64bit 分块写入 Int
                 size_t bit_pos = 0;   // 当前写入到 d 的 bit 位置（LSB 起）
                 uint64_t chunk = 0;
                 int bit_in_chunk = 0; // 已填入 chunk 的 bit 数
@@ -424,7 +424,7 @@ protected:
                         size_t lo = bit_pos;
                         if (lo < DataWidth) {
                             size_t hi = std::min(bit_pos + 63, (size_t)DataWidth - 1);
-                            UInt<64> tmp(chunk);
+                            Int<64> tmp(chunk);
                             d(hi, lo) = tmp;
                         }
                         bit_pos += 64;
@@ -439,7 +439,7 @@ protected:
                     if (lo < DataWidth) {
                         size_t hi = std::min(bit_pos + (size_t)bit_in_chunk - 1,
                                             (size_t)DataWidth - 1);
-                        UInt<64> tmp(chunk);
+                        Int<64> tmp(chunk);
                         d(hi, lo) = tmp;
                     }
                 }

@@ -65,6 +65,10 @@ public:
         }
     }
 
+    constexpr std::array<uint64_t, NUM_WORDS> get_data() const {
+        return data;
+    }
+
     // constructors and assignment
 
     constexpr Int() : data{} {}
