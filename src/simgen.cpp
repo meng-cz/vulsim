@@ -23,6 +23,7 @@
 #include "simgen.h"
 
 #include <chrono>
+#include <deque>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -425,7 +426,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             if (!found_conn) {
                 throw VulException("No connection found for request " + req_name + " of instance " + inst_name);
             }
-            if (conn.serv_instance.empty() || conn.serv_instance == VulModule::TopInterface) {
+            if (conn.serv_instance.empty()) {
                 // passed to local request/service, directly call the function
                 decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "(" + argname + ");\n");
             } else {

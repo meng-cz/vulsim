@@ -25,15 +25,8 @@
 
 #include "project.h"
 
-VulProject parseVcppProject(
-    const string &dirpath,
-    const string &top_file,
-    const string &main_file
-);
-
 VulStaticProject parseVcppStaticProject(
     const string &dirpath,
     const string &top_file,
     const string &main_file
 );
-

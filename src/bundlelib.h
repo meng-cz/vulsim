@@ -92,8 +92,6 @@ public:
         }
         return t;
     }
-
-    bool fromDefinitionString(const string &def_str);
 };
 
 class VulBundleItem {
@@ -103,92 +101,7 @@ public:
     vector<VulBundleMember>         members;
     vector<VulBundleEnumMember>     enum_members;   // if not empty, other members must be empty
     bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
-
-    string checkAndExtractReferences(unordered_set<BundleName> &out_bundle_refs, unordered_set<ConfigName> &out_config_refs) const;
 };
-
-ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides);
-inline ErrorMsg calculateBundleConstexprValue(VulBundleItem &item, const VulConfigLib &config_lib) {
-    unordered_map<ConfigName, ConfigRealValue> dummy_overrides;
-    return calculateBundleConstexprValue(item, config_lib, dummy_overrides);
-}
-
-bool operator==(const VulBundleItem &a, const VulBundleItem &b);
-inline bool operator!=(const VulBundleItem &a, const VulBundleItem &b) {
-    return !(a == b);
-}
-
-class BundleTreeBidirectionalNode {
-public:
-    vector<shared_ptr<BundleTreeBidirectionalNode>>  parents;
-    vector<shared_ptr<BundleTreeBidirectionalNode>>  children;
-    BundleName  name;
-    Comment     comment;
-};
-
-class VulBundleLib {
-
-public:
-
-    const BundleTag DefaultTag = string("__default__");
-
-    /**
-     * @brief Check if a bundle name already exists in the bundle library.
-     * @param name The bundle name to check.
-     */
-    inline bool checkNameConflict(const BundleName &name) const {
-        return bundles.find(name) != bundles.end();
-    }
-
-    inline void clear() {
-        bundles.clear();
-    }
-
-    /**
-     * @brief Get the bundle definition for a given bundle name.
-     * @param bundle_name The name of the bundle to get.
-     * @param out_bundle_item Output parameter to hold the VulBundleItem definition.
-     * @param out_tags Output parameter to hold the tags associated with this bundle.
-     * @return An ErrorMsg indicating failure, empty if success.
-     */
-    inline ErrorMsg getBundleDefinition(const BundleName &bundle_name, VulBundleItem &out_bundle_item, unordered_set<BundleTag> &out_tags) const {
-        auto iter = bundles.find(bundle_name);
-        if (iter == bundles.end()) {
-            return EStr(EItemBundNameNotFound, string("Bundle definition not found: ") + bundle_name);
-        }
-        out_bundle_item = iter->second.item;
-        out_tags = iter->second.tags;
-        return "";
-    }
-
-    /**
-     * @brief Get all bundle definitions in topological order based on their references.
-     * @param out_sorted_bundles Output vector to hold the BundleName in topological order.
-     * @return An ErrorMsg indicating failure, empty if success.
-     */
-    ErrorMsg getAllBundlesTopoSort(vector<BundleName> &out_sorted_bundles) const;
-
-    ErrorMsg insertMultiBundles(const vector<VulBundleItem> &bundles, const unordered_set<BundleTag> & tags);
-
-    ErrorMsg insertMultiBundles(const vector<VulBundleItem> &bundles) {
-        return insertMultiBundles(bundles, {DefaultTag});
-    }
-
-    typedef struct {
-        VulBundleItem               item;
-        unordered_set<BundleTag>    tags;
-        unordered_set<BundleName>   references;
-        unordered_set<BundleName>   reverse_references;
-        unordered_set<ConfigName>   confs;
-    } BundleEntry;
-
-    unordered_map<BundleName, BundleEntry> bundles; // bundle name -> BundleEntry
-
-};
-
-using BundleTable = std::unordered_map<BundleName, VulBundleItem>;
-
-ErrorMsg resolveBundleTable(const VulBundleLib &bundle_lib, const VulConfigLib &config_lib, const unordered_map<ConfigName, ConfigRealValue> &overrides, BundleTable &out_bundle_table);
 
 VulStaticBundle staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib);
 
@@ -197,22 +110,6 @@ struct FlatField {
     uint32_t    offset;
     uint32_t    width;
 };
-
-void flatten_bundle(
-    const VulBundleItem& bundle,
-    const BundleTable& table,
-    const std::string& prefix,
-    uint32_t& offset,
-    std::vector<FlatField>& out
-);
-
-void flatten_member(
-    const VulBundleMember& m,
-    const BundleTable& table,
-    const std::string& prefix,
-    uint32_t& offset,
-    std::vector<FlatField>& out
-);
 
 void flatten_bundle(
     const VulStaticBundle& bundle,

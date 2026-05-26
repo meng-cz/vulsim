@@ -38,15 +38,7 @@ struct VulTracedSignal {
     uint32_t bit_width;
 };
 
-struct VulTracedModule {
-    ModuleName module_name;
-    vector<VulTracedSignal> traced_signals;
-    unordered_map<InstancePath, vector<bool>> traced_signals_of_instance;
-};
-
 VulTraceMatcher parseTraceMatcher(const string &matcher_str);
-
-vector<VulTracedModule> parseTraceOptions(const VulProject &project, const vector<VulTraceMatcher> &trace_matchers);
 
 using VulTraceTable = std::unordered_map<VulInstanceID, vector<VulTracedSignal>>;
 

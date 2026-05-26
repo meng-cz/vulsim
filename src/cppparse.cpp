@@ -1,5 +1,6 @@
 
 #include "cppparse.hpp"
+#include "stringop.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -8,6 +9,10 @@
 #include <assert.h>
 
 namespace cppparse {
+
+using stringop::trim;
+using stringop::skip_spaces;
+using stringop::split;
 
 
 std::vector<std::string> readFileLines(const std::string& filename) {
@@ -102,14 +107,14 @@ TrimResult stripComments(const std::vector<std::string>& input) {
         }
 
         // 去掉行尾空白（方便判断 \）
-        rtrim(processed);
+        stringop::rtrim_inplace(processed);
 
         // ===== 检查是否以 \ 结尾 =====
         bool has_backslash = false;
         if (!processed.empty() && processed.back() == '\\') {
             has_backslash = true;
             processed.pop_back(); // 去掉反斜线
-            rtrim(processed);
+            stringop::rtrim_inplace(processed);
         }
 
         // ===== 拼接逻辑 =====

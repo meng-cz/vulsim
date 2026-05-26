@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <deque>
 #include <vector>
 #include <string>
 

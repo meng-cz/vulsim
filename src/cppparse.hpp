@@ -30,44 +30,6 @@
 
 namespace cppparse {
 
-inline void rtrim(std::string& s) {
-    size_t end = s.find_last_not_of(" \t");
-    if (end == std::string::npos) s.clear();
-    else s.resize(end + 1);
-}
-
-inline std::string trim(const std::string& s) {
-    size_t l = s.find_first_not_of(" \t");
-    if (l == std::string::npos) return "";
-    size_t r = s.find_last_not_of(" \t");
-    return s.substr(l, r - l + 1);
-}
-
-inline size_t skip_spaces(const std::string& s, size_t pos) {
-    while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) {
-        ++pos;
-    }
-    return pos;
-}
-
-
-inline std::vector<std::string> split(const std::string& s, char delim) {
-    std::vector<std::string> result;
-    std::string current;
-
-    for (char c : s) {
-        if (c == delim) {
-            result.push_back(current);
-            current.clear();
-        } else {
-            current.push_back(c);
-        }
-    }
-
-    result.push_back(current); // 最后一段
-    return result;
-}
-
 struct TrimResult {
     std::vector<std::string> lines;   // 去注释后的代码
     std::vector<uint32_t> mapping;    // 新行号 -> 原始行号（1-based）
