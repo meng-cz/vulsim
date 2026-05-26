@@ -72,3 +72,12 @@ ConfigRealValue calculateConstexprValue(const ConfigValue &value, const VulStati
     }
     return real_value;
 }
+
+VulStaticConfigLib mergeStaticConfigLibs(const VulStaticConfigLib &global_lib, const VulStaticConfigLib &local_lib) {
+    VulStaticConfigLib merged_lib = global_lib;
+    for (const auto &[name, value] : local_lib) {
+        merged_lib[name] = value;
+    }
+    return merged_lib;
+}
+

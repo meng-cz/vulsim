@@ -46,6 +46,14 @@ typedef string GroupName;
 typedef string ConfigName;
 typedef string ConfigValue;
 
+struct VulTempConfig {
+    ConfigName name;
+    ConfigValue value;
+};
+
+using VulTempConfigLib = std::vector<VulTempConfig>;
+
+
 /**
  * 不再长期维护配置间的依赖关系，而是每次插入时直接计算并存储配置的实际整数值。
  * 用于命令行工具的单次解析-生成工具流，而非是一个长期维护与更新的配置库。
@@ -54,7 +62,21 @@ using VulStaticConfigLib = std::map<ConfigName, ConfigRealValue>;
 
 void insertStaticConfig(VulStaticConfigLib &config_lib, const ConfigName &name, const ConfigValue &value);
 
+inline void insertStaticConfig(VulStaticConfigLib &config_lib, const VulTempConfig &conf) {
+    insertStaticConfig(config_lib, conf.name, conf.value);
+}
+
+inline void insertStaticConfigs(VulStaticConfigLib &config_lib, const VulTempConfigLib &confs) {
+    for (const auto &conf : confs) {
+        insertStaticConfig(config_lib, conf.name, conf.value);
+    }
+}
+
 ConfigRealValue calculateConstexprValue(const ConfigValue &value, const VulStaticConfigLib &config_lib);
+
+VulStaticConfigLib mergeStaticConfigLibs(const VulStaticConfigLib &global_lib, const VulStaticConfigLib &local_lib);
+
+// TOBE CLEANUP:
 
 struct VulConfigItem {
     ConfigName name;

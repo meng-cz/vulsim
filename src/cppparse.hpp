@@ -66,4 +66,13 @@ BlockResult findNextBraceBlock(const std::vector<std::string>& code, LinePositio
 
 bool codeblockContainsFunctionCall(const std::vector<std::string>& code, const std::string& func_name);
 
+struct MacroEntry {
+    LinePosition pos;
+    std::string name;
+    std::vector<std::string> args;
+    std::vector<std::string> body;
+};
+
+std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code);
+
 } // namespace cppparse

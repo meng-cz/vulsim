@@ -42,8 +42,7 @@ typedef string ArgName;
 using InstanceName = string;
 using CCodeLine = string;
 
-class VulReqServConnection {
-public:
+struct VulReqServConnection {
     InstanceName    req_instance;
     ReqServName     req_name;       // should be ServiceName when req_instance is TopInterface
     InstanceName    serv_instance;
@@ -58,6 +57,144 @@ inline bool operator==(const VulReqServConnection &a, const VulReqServConnection
     return std::tie(a.req_instance, a.req_name, a.serv_instance, a.serv_name) ==
            std::tie(b.req_instance, b.req_name, b.serv_instance, b.serv_name);
 }
+
+
+struct VulTempRegister {
+    string name;
+    string type;
+    string portnum;
+    vector<string> dims;
+    vector<string> reset_codelines;
+};
+
+struct VulTempWire {
+    string name;
+    string type;
+    vector<string> reset_codelines;
+};
+
+struct VulTempReqServBase {
+    string name;
+    vector<pair<string, string>> args; // pair of arg name and arg type
+    vector<pair<string, string>> rets; // pair of ret name and ret type
+    bool has_handshake;
+
+    inline string signatureArgNameList() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += args[i].second;
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += rets[i].second;
+        }
+        return sig;
+    }
+
+    inline string signatureArgTypeOnly() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += string("const ") + args[i].first + " & ";
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += rets[i].first + " & ";
+        }
+        return sig;
+    }
+
+    inline string signatureArgOnly() const {
+        string sig;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i > 0) sig += ", ";
+            sig += (string("const ") + args[i].first + " & ") + args[i].second;
+        }
+        for (size_t i = 0; i < rets.size(); ++i) {
+            if (i > 0 || args.size() > 0) sig += ", ";
+            sig += (rets[i].first + " & " + rets[i].second);
+        }
+        return sig;
+    }
+
+    inline string returnType() const {
+        return (has_handshake ? "bool" : "void");
+    }
+
+    inline string signatureNoRetType(const string name_prefix = "") const {
+        return  name_prefix + name + "(" + signatureArgOnly() + ")";
+    }
+
+    inline string signatureFull(const string name_prefix = "") const {
+        return (has_handshake ? "bool " : "void ") + signatureNoRetType(name_prefix);
+    }
+};
+
+struct VulTempReq : public VulTempReqServBase {
+};
+
+struct VulTempServ : public VulTempReqServBase {
+    string priority;
+    string cond;
+    vector<string> codelines;
+};
+
+using VulTempTickBlock = vector<string>;
+
+struct VulTempInstance {
+    string name;
+    string module_name;
+    vector<pair<string, string>> parameter_overrides; // pair of parameter name and value
+    vector<string> referenced_services;
+};
+
+struct VulTempBRAM {
+    string name;
+    string data_type;
+    string addr_width;
+    string read_ports;
+    string write_ports;
+};
+
+struct VulTempDigitalROM {
+    string name;
+    string data_width;
+    string addr_width;
+    string read_ports;
+    string init_path;
+};
+
+struct VulTempQueue {
+    string name;
+    string type;
+    string depth;
+    string enq_width;
+    string deq_width;
+};
+
+struct VulTempModule {
+    string name;
+    string filepath;
+    vector<VulTempConfig> configs;
+    vector<VulTempConfig> params;
+    vector<VulTempBundle> bundles;
+    vector<VulTempReq> requests;
+    vector<VulTempServ> services;
+    vector<VulTempRegister> registers;
+    vector<VulTempWire> wires;
+    vector<VulTempBRAM> brams;
+    vector<VulTempDigitalROM> roms;
+    vector<VulTempQueue> queues;
+    vector<VulTempInstance> instances;
+    vector<VulTempTickBlock> tick_blocks;
+    vector<VulReqServConnection>  req_connections;
+};
+
+using VulTempModuleCache = std::unordered_map<string, VulTempModule>; // map from module name to its parsed temp module
+
+
+
 
 using VulInstanceID = uint32_t;
 using VulLogicBlockID = uint32_t;
@@ -87,34 +224,6 @@ struct VulStaticInstanceDecl {
     unordered_set<ReqServName> referenced_services;
     VulStaticConfigLib parameter_overrides;
 };
-
-struct VulStaticTypeSignature {
-    BMemberType type;
-    ConfigRealValue uint_length; // only for uint types
-
-    string toString() const {
-        if (uint_length > 0) {
-            return "UInt<" + std::to_string(uint_length) + ">";
-        } else {
-            return type;
-        }
-    }
-    inline bool operator==(const VulStaticTypeSignature &other) const {
-        if (uint_length > 0 || other.uint_length > 0) {
-            return type == other.type && uint_length == other.uint_length;
-        }
-        return type == other.type;
-    }
-    VulStaticBundleMember toBundleMember(const string &name) const {
-        VulStaticBundleMember member;
-        member.name = name;
-        member.type = type;
-        member.uint_length = uint_length;
-        return member;
-    }
-};
-
-
 
 struct VulStaticArg {
     ArgName     name;
@@ -192,6 +301,8 @@ struct VulStaticReqServ {
     }
 };
 
+VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulStaticConfigLib &config_lib);
+
 struct VulStaticRegister {
     BMemberName name;
     VulStaticTypeSignature signature;
@@ -237,8 +348,8 @@ struct VulStaticModuleInstance {
 
     VulInstanceID instance_id; // global unique instance id, assigned during module tree construction
 
-    string filepath; // relative filepath to top module dir
     vector<InstanceName> instance_path; // full instance path from top
+    string filepath; // relative filepath to top module dir
     ModuleName module_name;
 
     inline string simClassName() const {
@@ -309,6 +420,14 @@ struct VulStaticModuleInstance {
     vector<VulInstanceID> update_seq; // topological order of instance update in simulation
 };
 
+void instantiateModule(
+    VulStaticModuleInstance &instance,
+    const VulTempModule &temp,
+    const VulStaticConfigLib &param_overrides,
+    const VulStaticConfigLib &global_config,
+    const VulStaticBundleLib &global_bundles
+);
+
 void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance);
 
 void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top);
@@ -318,12 +437,10 @@ struct VulStaticTestHarnessModule {
 
     VulStaticConfigLib top_config_overrides;
 
-    unordered_map<ReqServName, VulStaticReqServ>      requests;
-    unordered_map<ReqServName, VulStaticReqServ>      services;
+    unordered_map<ReqServName, VulTempReq>      requests;
+    unordered_map<ReqServName, VulTempServ>      services;
 
     vector<CCodeLine> test_codelines;
-    unordered_map<ReqServName, vector<CCodeLine>>   serv_codelines;
-    unordered_map<ReqServName, vector<CCodeLine>>   serv_cond_codelines;
 
     vector<string> includedHeaders;
     vector<string> globalCodes;

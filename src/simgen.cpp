@@ -35,7 +35,6 @@ const string CodeTab = "    ";
 const string TickFunctionName = "on_current_tick";
 const string ApplyTickFunctionName = "apply_next_tick";
 
-const string UIntClassName = "Int";
 const string StorageNextClassName = "VulStorageNext";
 const string StorageNextArrayClassName = "VulStorageNextArray";
 const string BlockRAMClassName = "VulBRAM";
@@ -82,10 +81,7 @@ vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib) {
 
 string _genStaticMemberTypeStr(const VulStaticBundleMember &member) {
     string type_str;
-    string base_type = member.type;
-    if (member.uint_length > 0) {
-        base_type = UIntClassName + "<" + std::to_string(member.uint_length) + ">";
-    }
+    string base_type = member.type.toString();
     if (!member.dims.empty()) {
         for (const auto &dim : member.dims) {
             type_str += "std::array<";
@@ -246,7 +242,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         string type_str;
         string base_type = sig.type;
         if (sig.uint_length > 0) {
-            base_type = UIntClassName + "<" + std::to_string(sig.uint_length) + ">";
+            base_type = std::string(UIntClassName) + "<" + std::to_string(sig.uint_length) + ">";
         }
         if (!reg.dims.empty()) {
             type_str += StorageNextArrayClassName + "<" + base_type;
@@ -283,8 +279,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         }
         VulStaticBundleMember sig_as_member;
         sig_as_member.name = reg.name;
-        sig_as_member.type = reg.signature.type;
-        sig_as_member.uint_length = reg.signature.uint_length;
+        sig_as_member.type = reg.signature;
         sig_as_member.dims = reg.dims;
         impl_reg_reset_field.push_back("{\n");
         impl_reg_reset_field.push_back(_genStaticMemberTypeStr(sig_as_member) + " " + reg.name + ";\n");
@@ -644,6 +639,7 @@ vector<string> genStaticTestHarnessHpp(
     }
 
     for (const auto &serve : test_module.services) {
+        const auto &serv_name = serve.first;
         const auto &serv = serve.second;
         string rettype = serv.returnType();
         string argtypes = serv.signatureArgTypeOnly();
@@ -659,42 +655,13 @@ vector<string> genStaticTestHarnessHpp(
             public_member_field.push_back(CodeTab + "__impl_" + serve.first + "(" + argnames + ");\n");
         }
         public_member_field.push_back("}\n");
-    }
-    for (const auto &scode_entry : test_module.serv_codelines) {
-        const auto &serv_name = scode_entry.first;
-        const auto &code_lines = scode_entry.second;
-        // find the service declaration to get argument list
-        auto serv_iter = test_module.services.find(serv_name);
-        if (serv_iter != test_module.services.end()) {
-            string arglists = serv_iter->second.signatureArgOnly();
-            member_field.push_back("void __impl_" + serv_name + "(" + arglists + ") {\n");
-        } else {
-            member_field.push_back("void __impl_" + serv_name + "() {\n");
-        }
-        for (const auto &line : code_lines) {
-            if (line.ends_with("\n")) {
-                member_field.push_back(line);
-            } else {
-                member_field.push_back(line + "\n");
-            }
-        }
+
+        member_field.push_back("void __impl_" + serv_name + "(" + arglists + ") {\n");
+        member_field.insert(member_field.end(), serv.codelines.begin(), serv.codelines.end());
         member_field.push_back("}\n");
-    }
-    for (const auto &scode_entry : test_module.serv_cond_codelines) {
-        const auto &serv_name = scode_entry.first;
-        const auto &code_lines = scode_entry.second;
-        // find the service declaration to get argument list
-        auto serv_iter = test_module.services.find(serv_name);
-        if (serv_iter != test_module.services.end() && serv_iter->second.has_handshake) {
-            string arglists = serv_iter->second.signatureArgOnly();
+        if (serv.has_handshake) {
             member_field.push_back("bool __cond_" + serv_name + "(" + arglists + ") {\n");
-            for (const auto &line : code_lines) {
-                if (line.ends_with("\n")) {
-                    member_field.push_back(line);
-                } else {
-                    member_field.push_back(line + "\n");
-                }
-            }
+            member_field.push_back("return (" + serv.cond + ");\n");
             member_field.push_back("}\n");
         }
     }

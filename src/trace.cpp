@@ -168,7 +168,7 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
         for (const auto &reg : instance_ptr->registers) {
             vector<FlatField> flat_fields;
             uint32_t offset = 0;
-            flatten_member(reg.signature.toBundleMember(reg.name), local_bundlelib, reg.name, offset, flat_fields);
+            flatten_type_signature(reg.signature, local_bundlelib, reg.name, offset, flat_fields);
             for (const auto &f : flat_fields) {
                 all_signals.push_back(VulTracedSignal{f.name, f.width});
             }

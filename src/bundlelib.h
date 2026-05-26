@@ -31,6 +31,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <string_view>
 
 using std::vector;
 using std::string;
@@ -44,6 +45,52 @@ typedef string BMemberName;
 typedef string BMemberType;
 typedef string BundleTag;
 
+struct VulTempEnumMember {
+    BMemberName         name;
+    ConfigValue         value;
+};
+
+struct VulTempBundleMember {
+    BMemberName         name;
+    BMemberType         type;
+    vector<ConfigValue> dims; // only for array types
+};
+VulTempBundleMember parseMemberDeclaration(const string &decl);
+
+struct VulTempBundle {
+    BundleName                      name;
+    Comment                         comment;
+    vector<VulTempBundleMember>     members;
+    vector<VulTempEnumMember>       enum_members;   // if not empty, other members must be empty
+    bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
+};
+
+using VulTempBundleLib = vector<VulTempBundle>;
+
+inline constexpr std::string_view UIntClassName = "Int";
+
+struct VulStaticTypeSignature {
+    BMemberType type;
+    ConfigRealValue uint_length; // only for uint types
+
+    string toString() const {
+        if (uint_length > 0) {
+            return std::string(UIntClassName) + std::to_string(uint_length) + ">";
+        } else {
+            return type;
+        }
+    }
+    inline bool operator==(const VulStaticTypeSignature &other) const {
+        if (uint_length > 0 || other.uint_length > 0) {
+            return type == other.type && uint_length == other.uint_length;
+        }
+        return type == other.type;
+    }
+};
+
+VulStaticTypeSignature parseTypeSignature(const string &type_str, const VulStaticConfigLib &config_lib);
+
+
 struct VulStaticEnumMember {
     BMemberName         name;
     ConfigRealValue     value;
@@ -52,8 +99,7 @@ struct VulStaticEnumMember {
 
 struct VulStaticBundleMember {
     BMemberName         name;
-    BMemberType         type;
-    ConfigRealValue     uint_length; // only for uint types
+    VulStaticTypeSignature  type;
     vector<ConfigRealValue> dims; // only for array types
 };
 
@@ -66,44 +112,9 @@ struct VulStaticBundle {
 
 using VulStaticBundleLib = std::vector<VulStaticBundle>;
 
+VulStaticBundle staticalizeBundle(const VulTempBundle &item, const VulStaticConfigLib &config_lib);
 
-
-typedef struct {
-    BMemberName         name;
-    ConfigValue         value;
-    Comment             comment;
-} VulBundleEnumMember;
-
-class VulBundleMember {
-public:
-    BMemberName         name;
-    ConfigValue         value; // only for basic types and uint types, default zero-initialized
-    Comment             comment;
-
-    BMemberType         type;
-    ConfigValue         uint_length; // only for uint types
-
-    vector<ConfigValue> dims;
-
-    inline string typeString() const {
-        string t = (uint_length.empty() ? type : ("UInt<" + uint_length + ">"));
-        for (const auto &d : dims) {
-            t += "[" + d + "]";
-        }
-        return t;
-    }
-};
-
-class VulBundleItem {
-public:
-    BundleName                      name;
-    Comment                         comment;
-    vector<VulBundleMember>         members;
-    vector<VulBundleEnumMember>     enum_members;   // if not empty, other members must be empty
-    bool                            is_alias = false; // if true, all other fields only contain single member: alias_target
-};
-
-VulStaticBundle staticalizeBundle(const VulBundleItem &item, const VulStaticConfigLib &config_lib);
+VulStaticBundleLib mergeStaticBundleLibs(const VulStaticBundleLib &global_lib, const VulStaticBundleLib &local_lib);
 
 struct FlatField {
     std::string name;  // 展平后的访问路径
@@ -127,3 +138,15 @@ void flatten_member(
     std::vector<FlatField>& out
 );
 
+inline void flatten_type_signature(
+    const VulStaticTypeSignature& t,
+    const VulStaticBundleLib& table,
+    const std::string& prefix,
+    uint32_t& offset,
+    std::vector<FlatField>& out
+) {
+    VulStaticBundleMember temp_member;
+    temp_member.name = prefix;
+    temp_member.type = t;
+    flatten_member(temp_member, table, prefix, offset, out);
+}

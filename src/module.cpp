@@ -30,6 +30,187 @@
 
 using std::make_shared;
 
+VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulStaticConfigLib &config_lib) {
+    VulStaticReqServ static_req;
+    static_req.name = item.name;
+    static_req.has_handshake = item.has_handshake;
+    for (const auto &arg : item.args) {
+        VulStaticArg static_arg;
+        static_arg.name = arg.second;
+        static_arg.type = parseTypeSignature(arg.first, config_lib);
+        static_req.args.push_back(static_arg);
+    }
+    for (const auto &ret : item.rets) {
+        VulStaticArg static_arg;
+        static_arg.name = ret.second;
+        static_arg.type = parseTypeSignature(ret.first, config_lib);
+        static_req.rets.push_back(static_arg);
+    }
+    return static_req;
+}
+
+void instantiateModule(
+    VulStaticModuleInstance &instance,
+    const VulTempModule &temp,
+    const VulStaticConfigLib &param_overrides,
+    const VulStaticConfigLib &global_config,
+    const VulStaticBundleLib &global_bundles
+) {
+    instance.filepath = temp.filepath;
+    instance.module_name = temp.name;
+
+    VulStaticConfigLib local_config_lib = global_config;
+    
+    for (const auto &conf : temp.configs) {
+        VulErrorContextGuard _err{"Processing config '" + conf.name + "'"};
+        ConfigRealValue value = calculateConstexprValue(conf.value, local_config_lib);
+        local_config_lib[conf.name] = value;
+        instance.local_consts[conf.name] = value;
+    }
+    for (const auto &param : temp.params) {
+        VulErrorContextGuard _err{"Processing parameter '" + param.name + "'"};
+        ConfigRealValue value;
+        auto override_iter = param_overrides.find(param.name);
+        if (override_iter != param_overrides.end()) {
+            value = override_iter->second;
+        } else {
+            value = calculateConstexprValue(param.value, local_config_lib);
+        }
+        local_config_lib[param.name] = value;
+        instance.local_parameters[param.name] = value;
+    }
+
+    for (const auto &bundle : temp.bundles) {
+        VulErrorContextGuard _err{"Processing bundle '" + bundle.name + "'"};
+        VulStaticBundle sb = staticalizeBundle(bundle, local_config_lib);
+        instance.local_bundles.push_back(sb);
+    }
+    VulStaticBundleLib local_config_library = mergeStaticBundleLibs(global_bundles, instance.local_bundles);
+
+    // Requests
+    for (const auto &req : temp.requests) {
+        VulErrorContextGuard _err{"Processing request '" + req.name + "'"};
+        instance.requests[req.name] = staticalizeReqServ(req, local_config_lib);
+    }
+
+    // services
+    VulLogicBlockID next_logic_block_id = 1;
+    for (const auto &serv : temp.services) {
+        const string &serv_name = serv.name;
+        VulErrorContextGuard _err{"Processing service '" + serv_name + "'"};
+        instance.services[serv_name] = staticalizeReqServ(serv, local_config_lib);
+        VulLogicBlock lb;
+        lb.block_id = next_logic_block_id++;
+        lb.with_priority = !serv.priority.empty();
+        if (lb.with_priority) {
+            ConfigRealValue priority_value = calculateConstexprValue(serv.priority, local_config_lib);
+            lb.priority = priority_value;
+        } else {
+            lb.priority = 0;
+        }
+        lb.codelines = serv.codelines;
+        if (serv.has_handshake) {
+            lb.cond_codelines.push_back("return (" + serv.cond + ");\n");
+        }
+        instance.serv_logic_blocks[serv_name] = lb;
+    }
+
+    // registers
+    for (const auto &reg : temp.registers) {
+        VulErrorContextGuard _err{"Processing register '" + reg.name + "'"};
+        VulStaticRegister static_reg;
+        static_reg.name = reg.name;
+        static_reg.signature = parseTypeSignature(reg.type, local_config_lib);
+        static_reg.ports = 1;
+        if (!reg.portnum.empty()) {
+            ConfigRealValue portnum_value = calculateConstexprValue(reg.portnum, local_config_lib);
+            static_reg.ports = (portnum_value > 1) ? portnum_value : 1;
+        }
+        static_reg.reset_codelines = reg.reset_codelines;
+        for (const auto &dim : reg.dims) {
+            ConfigRealValue dim_value = calculateConstexprValue(dim, local_config_lib);
+            static_reg.dims.push_back(dim_value);
+        }
+        instance.registers.push_back(std::move(static_reg));
+    }
+
+    // wires
+    for (const auto &wire : temp.wires) {
+        VulErrorContextGuard _err{"Processing wire '" + wire.name + "'"};
+        VulStaticWire static_wire;
+        static_wire.name = wire.name;
+        static_wire.signature = parseTypeSignature(wire.type, local_config_lib);
+        static_wire.reset_codelines = wire.reset_codelines;
+        instance.wires.push_back(std::move(static_wire));
+    }
+
+    // brams
+    for (const auto &bram : temp.brams) {
+        VulErrorContextGuard _err{"Processing BRAM '" + bram.name + "'"};
+        VulStaticBRAM static_bram;
+        static_bram.name = bram.name;
+        static_bram.data_type = parseTypeSignature(bram.data_type, local_config_lib);
+        static_bram.addr_width = calculateConstexprValue(bram.addr_width, local_config_lib);
+        static_bram.read_ports = calculateConstexprValue(bram.read_ports, local_config_lib);
+        static_bram.write_ports = calculateConstexprValue(bram.write_ports, local_config_lib);
+        instance.brams.push_back(std::move(static_bram));
+    }
+
+    // digital ROMs
+    for (const auto &rom : temp.roms) {
+        VulErrorContextGuard _err{"Processing ROM '" + rom.name + "'"};
+        VulStaticDigitalROM static_rom;
+        static_rom.name = rom.name;
+        static_rom.data_width = calculateConstexprValue(rom.data_width, local_config_lib);
+        static_rom.addr_width = calculateConstexprValue(rom.addr_width, local_config_lib);
+        static_rom.read_ports = calculateConstexprValue(rom.read_ports, local_config_lib);
+        static_rom.init_path = rom.init_path;
+        instance.roms.push_back(std::move(static_rom));
+    }
+
+    // queues
+    for (const auto &queue : temp.queues) {
+        VulErrorContextGuard _err{"Processing queue '" + queue.name + "'"};
+        VulStaticQueue static_queue;
+        static_queue.name = queue.name;
+        static_queue.type = parseTypeSignature(queue.type, local_config_lib);
+        static_queue.depth = calculateConstexprValue(queue.depth, local_config_lib);
+        static_queue.enq_width = calculateConstexprValue(queue.enq_width, local_config_lib);
+        static_queue.deq_width = calculateConstexprValue(queue.deq_width, local_config_lib);
+        instance.queues.push_back(std::move(static_queue));
+    }
+
+    // instances
+    for (const auto &inst : temp.instances) {
+        VulErrorContextGuard _err{"Processing instance '" + inst.name + "'"};
+        VulStaticInstanceDecl static_inst;
+        static_inst.name = inst.name;
+        static_inst.module_name = inst.module_name;
+        for (const auto &param_override : inst.parameter_overrides) {
+            const string &param_name = param_override.first;
+            const string &param_value_str = param_override.second;
+            ConfigRealValue param_value = calculateConstexprValue(param_value_str, local_config_lib);
+            static_inst.parameter_overrides[param_name] = param_value;
+        }
+        for (const auto &serv : inst.referenced_services) {
+            static_inst.referenced_services.insert(serv);
+        }
+        instance.instances[inst.name] = static_inst;
+    }
+
+    // tick blocks
+    for (const auto &tb : temp.tick_blocks) {
+        VulErrorContextGuard _err{"Processing tick block"};
+        VulTickBlock tick_block;
+        tick_block.codelines = tb;
+        instance.tick_blocks.push_back(std::move(tick_block));
+    }
+
+    // req-serv connections
+    instance.req_connections = temp.req_connections;
+
+}
+
 void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance) {
     unordered_map<string, LogicBlockCall> valid_function_names;
     for (const auto &req_entry : module_instance.requests) {

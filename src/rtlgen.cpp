@@ -112,7 +112,7 @@ void _procRegisters(RTLGenContext &ctx) {
 
         uint32_t element_width = 0;
         std::vector<FlatField> out;
-        flatten_member(reg.signature.toBundleMember("value"), ctx.local_bundlelib, "value", element_width, out);
+        flatten_type_signature(reg.signature, ctx.local_bundlelib, "value", element_width, out);
         uint32_t wrport_num = reg.ports;
         uint32_t size = (reg.dims.empty()) ? 1 : reg.dims[0];
 
@@ -307,7 +307,7 @@ inline ArgPort procArg(const VulStaticArg &arg, const VulStaticBundleLib &bundle
     ArgPort port;
     port.name = arg.name;
     port.width = 0;
-    flatten_member(arg.type.toBundleMember(arg.name), bundlelib, arg.name, port.width, port.flat_fields);
+    flatten_type_signature(arg.type, bundlelib, arg.name, port.width, port.flat_fields);
     return port;
 }
 
@@ -618,14 +618,14 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 for (const auto &arg : req.args) {
                     uint32_t offset = 0;
                     std::vector<FlatField> out;
-                    flatten_member(arg.type.toBundleMember(""), ctx.local_bundlelib, arg.name, offset, out);
+                    flatten_type_signature(arg.type, ctx.local_bundlelib, arg.name, offset, out);
                     ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_arg_" + arg.name + ";\n");
                     child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")" );
                 }
                 for (const auto &ret : req.rets) {
                     uint32_t offset = 0;
                     std::vector<FlatField> out;
-                    flatten_member(ret.type.toBundleMember(""), ctx.local_bundlelib, ret.name, offset, out);
+                    flatten_type_signature(ret.type, ctx.local_bundlelib, ret.name, offset, out);
                     ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_ret_" + ret.name + ";\n");
                     child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")" );
                 }
@@ -772,7 +772,7 @@ void _procQueues(RTLGenContext &ctx) {
 
         uint32_t data_width = 0;
         vector<FlatField> data_fields;
-        flatten_member(que.type.toBundleMember("value"), ctx.local_bundlelib, "value", data_width, data_fields);
+        flatten_type_signature(que.type, ctx.local_bundlelib, "value", data_width, data_fields);
         
         string proxy_class_name = "QueueProxy_" + que_name + "__";
         string data_width_str = std::to_string(data_width);
@@ -1064,7 +1064,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
 
         uint32_t data_width = 0;
         vector<FlatField> read_fields;
-        flatten_member(bram.data_type.toBundleMember("value"), ctx.local_bundlelib, "value", data_width, read_fields);
+        flatten_type_signature(bram.data_type, ctx.local_bundlelib, "value", data_width, read_fields);
         if (data_width == 0) {
             throw VulException("BRAM data width must be positive");
         }
@@ -1086,7 +1086,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
         if (is_1rw) {
             vector<FlatField> write_fields;
             uint32_t write_width = 0;
-            flatten_member(bram.data_type.toBundleMember("write_data"), ctx.local_bundlelib, "write_data", write_width, write_fields);
+            flatten_type_signature(bram.data_type, ctx.local_bundlelib, "write_data", write_width, write_fields);
             if (write_width != data_width) {
                 throw VulException("BRAM data width mismatch while generating proxy");
             }
@@ -1192,7 +1192,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
 
             vector<FlatField> write_fields;
             uint32_t write_width = 0;
-            flatten_member(bram.data_type.toBundleMember("data"), ctx.local_bundlelib, "data", write_width, write_fields);
+            flatten_type_signature(bram.data_type, ctx.local_bundlelib, "data", write_width, write_fields);
             if (write_width != data_width) {
                 throw VulException("BRAM data width mismatch while generating proxy");
             }

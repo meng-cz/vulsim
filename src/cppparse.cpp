@@ -1,6 +1,7 @@
 
 #include "cppparse.hpp"
 #include "stringop.hpp"
+#include "errormsg.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -20,7 +21,7 @@ std::vector<std::string> readFileLines(const std::string& filename) {
     std::ifstream file(filename);
 
     if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename);
+        throw VulException("Failed to open file: " + filename);
     }
 
     std::string line;
@@ -298,7 +299,7 @@ std::vector<MatchMacroResult> matchMacros(const std::vector<std::string>& code, 
     std::string macro_name;
     int macro_argc;
     if (!parse_pattern(pattern, macro_name, macro_argc)) {
-        throw std::runtime_error("Invalid macro pattern: " + pattern);
+        throw VulException("Invalid macro pattern: " + pattern);
     }
     while (true) {
         pos = findNext(code, pos, macro_name);
@@ -388,6 +389,381 @@ bool codeblockContainsFunctionCall(const std::vector<std::string>& code, const s
         }
     }
     return false;
+}
+
+using namespace stringop;
+
+namespace {
+
+struct FlatCode {
+    std::string text;
+    std::vector<LinePosition> pos;
+};
+
+bool isIdentStart(char c) {
+    unsigned char u = static_cast<unsigned char>(c);
+    return std::isalpha(u) || c == '_';
+}
+
+bool isIdentChar(char c) {
+    unsigned char u = static_cast<unsigned char>(c);
+    return std::isalnum(u) || c == '_';
+}
+
+bool isSpace(char c) {
+    unsigned char u = static_cast<unsigned char>(c);
+    return std::isspace(u);
+}
+
+std::string locStr(const std::vector<LinePosition>& pos, size_t i) {
+    if (i >= pos.size()) {
+        return "<eof>";
+    }
+
+    return "line " + std::to_string(pos[i].line) +
+           ", column " + std::to_string(pos[i].column);
+}
+
+FlatCode flattenCodeWithoutPreprocessorLines(const std::vector<std::string>& code) {
+    FlatCode out;
+
+    for (int32_t line = 0; line < static_cast<int32_t>(code.size()); ++line) {
+        const std::string& s = code[line];
+
+        if (!ltrim(s).empty() && ltrim(s)[0] == '#') {
+            continue;
+        }
+
+        for (int32_t col = 0; col < static_cast<int32_t>(s.size()); ++col) {
+            out.text.push_back(s[col]);
+            out.pos.push_back({line, col});
+        }
+
+        out.text.push_back('\n');
+        out.pos.push_back({line, static_cast<int32_t>(s.size())});
+    }
+
+    return out;
+}
+
+size_t skipInterEntryTokens(const std::string& s, size_t p) {
+    while (p < s.size()) {
+        if (isSpace(s[p]) || s[p] == ';') {
+            ++p;
+        } else {
+            break;
+        }
+    }
+
+    return p;
+}
+
+size_t skipSpacesOnly(const std::string& s, size_t p) {
+    while (p < s.size() && isSpace(s[p])) {
+        ++p;
+    }
+
+    return p;
+}
+
+// 跳过普通字符串、字符字面量，以及形如 R"delim(...)delim" 的 raw string。
+// 如果当前位置不是字面量起点，则返回原位置。
+size_t skipLiteralIfAt(const std::string& s, size_t p) {
+    if (p >= s.size()) {
+        return p;
+    }
+
+    // raw string literal: R"delim(...)delim"
+    // 对 u8R"...", LR"...", uR"...", UR"..." 这种情况，扫描到 R 时也能处理。
+    if (s[p] == 'R' && p + 1 < s.size() && s[p + 1] == '"') {
+        size_t delimBegin = p + 2;
+        size_t openParen = delimBegin;
+
+        while (openParen < s.size() && s[openParen] != '(') {
+            ++openParen;
+        }
+
+        if (openParen >= s.size()) {
+            return s.size();
+        }
+
+        std::string delim = s.substr(delimBegin, openParen - delimBegin);
+        std::string endMark = ")" + delim + "\"";
+
+        size_t end = s.find(endMark, openParen + 1);
+        if (end == std::string::npos) {
+            return s.size();
+        }
+
+        return end + endMark.size();
+    }
+
+    // normal string / char literal
+    if (s[p] != '"' && s[p] != '\'') {
+        return p;
+    }
+
+    char quote = s[p];
+    ++p;
+
+    while (p < s.size()) {
+        if (s[p] == '\\') {
+            // 跳过转义字符，例如 \"、\\、\n、'\'' 等。
+            p += 2;
+            continue;
+        }
+
+        if (s[p] == quote) {
+            return p + 1;
+        }
+
+        ++p;
+    }
+
+    return s.size();
+}
+
+size_t findMatchingByCounter(
+    const std::string& s,
+    const std::vector<LinePosition>& pos,
+    size_t openPos,
+    char openCh,
+    char closeCh
+) {
+    if (openPos >= s.size() || s[openPos] != openCh) {
+        throw VulException("internal parser error: invalid open position");
+    }
+
+    int depth = 1;
+    size_t p = openPos + 1;
+
+    while (p < s.size()) {
+        size_t afterLiteral = skipLiteralIfAt(s, p);
+        if (afterLiteral != p) {
+            p = afterLiteral;
+            continue;
+        }
+
+        if (s[p] == openCh) {
+            ++depth;
+            ++p;
+            continue;
+        }
+
+        if (s[p] == closeCh) {
+            --depth;
+
+            if (depth == 0) {
+                return p;
+            }
+
+            ++p;
+            continue;
+        }
+
+        ++p;
+    }
+
+    throw VulException(
+        std::string("unmatched '") + openCh + "' at " + locStr(pos, openPos)
+    );
+}
+
+std::vector<std::string> splitTopLevelArgs(std::string_view sv) {
+    std::vector<std::string> result;
+
+    size_t begin = 0;
+    size_t p = 0;
+
+    int parenDepth = 0;
+    int braceDepth = 0;
+    int bracketDepth = 0;
+    int angleDepth = 0;
+
+    auto isTemplateAngleOpen = [&](size_t i) -> bool {
+        // 这里故意只做保守处理。
+        // 对普通宏参数，逗号通常只需要避开 (), {}, []。
+        // 如果参数中包含 std::map<int,int> 这种模板类型，可以通过 angleDepth 避免误切。
+        return i < sv.size() && sv[i] == '<';
+    };
+
+    std::string tmp(sv);
+
+    while (p < tmp.size()) {
+        size_t afterLiteral = skipLiteralIfAt(tmp, p);
+        if (afterLiteral != p) {
+            p = afterLiteral;
+            continue;
+        }
+
+        char c = tmp[p];
+
+        if (c == '(') {
+            ++parenDepth;
+        } else if (c == ')') {
+            if (parenDepth > 0) --parenDepth;
+        } else if (c == '{') {
+            ++braceDepth;
+        } else if (c == '}') {
+            if (braceDepth > 0) --braceDepth;
+        } else if (c == '[') {
+            ++bracketDepth;
+        } else if (c == ']') {
+            if (bracketDepth > 0) --bracketDepth;
+        } else if (isTemplateAngleOpen(p)) {
+            ++angleDepth;
+        } else if (c == '>') {
+            if (angleDepth > 0) --angleDepth;
+        } else if (
+            c == ',' &&
+            parenDepth == 0 &&
+            braceDepth == 0 &&
+            bracketDepth == 0 &&
+            angleDepth == 0
+        ) {
+            result.push_back(trim(tmp.substr(begin, p - begin)));
+            begin = p + 1;
+        }
+
+        ++p;
+    }
+
+    std::string last = trim(tmp.substr(begin));
+
+    if (!last.empty() || !result.empty()) {
+        result.push_back(std::move(last));
+    }
+
+    return result;
+}
+
+std::vector<std::string> splitBodyLines(std::string_view sv) {
+    std::string text(sv);
+
+    // 常见格式：
+    //
+    // MACRO(...) {
+    //   body
+    // }
+    //
+    // 去掉由外层大括号引入的首尾换行，避免 body 变成 ["", "...", ""]。
+    if (!text.empty() && text.front() == '\n') {
+        text.erase(text.begin());
+    }
+
+    if (!text.empty() && text.back() == '\n') {
+        text.pop_back();
+    }
+
+    std::vector<std::string> lines;
+    size_t begin = 0;
+
+    while (begin <= text.size()) {
+        size_t end = text.find('\n', begin);
+
+        if (end == std::string::npos) {
+            lines.push_back(text.substr(begin));
+            break;
+        }
+
+        lines.push_back(text.substr(begin, end - begin));
+        begin = end + 1;
+    }
+
+    // 空 body 返回空 vector，而不是 {""}。
+    if (lines.size() == 1 && lines[0].empty()) {
+        lines.clear();
+    }
+
+    return lines;
+}
+
+} // namespace
+
+std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code) {
+    FlatCode flat = flattenCodeWithoutPreprocessorLines(code);
+
+    const std::string& s = flat.text;
+    const std::vector<LinePosition>& pos = flat.pos;
+
+    std::vector<MacroEntry> entries;
+
+    size_t p = 0;
+
+    while (true) {
+        p = skipInterEntryTokens(s, p);
+
+        if (p >= s.size()) {
+            break;
+        }
+
+        if (!isIdentStart(s[p])) {
+            throw VulException(
+                "expected macro name at " + locStr(pos, p)
+            );
+        }
+
+        size_t nameBegin = p;
+        ++p;
+
+        while (p < s.size() && isIdentChar(s[p])) {
+            ++p;
+        }
+
+        std::string name = s.substr(nameBegin, p - nameBegin);
+        LinePosition entryPos = pos[nameBegin];
+
+        p = skipSpacesOnly(s, p);
+
+        if (p >= s.size() || s[p] != '(') {
+            throw VulException(
+                "expected '(' after macro name '" + name + "' at " + locStr(pos, p)
+            );
+        }
+
+        size_t argOpen = p;
+        size_t argClose = findMatchingByCounter(s, pos, argOpen, '(', ')');
+
+        std::string_view argText(
+            s.data() + argOpen + 1,
+            argClose - argOpen - 1
+        );
+
+        std::vector<std::string> args = splitTopLevelArgs(argText);
+
+        p = argClose + 1;
+        p = skipSpacesOnly(s, p);
+
+        MacroEntry entry;
+        entry.pos = entryPos;
+        entry.name = std::move(name);
+        entry.args = std::move(args);
+
+        if (p < s.size() && s[p] == '{') {
+            size_t bodyOpen = p;
+            size_t bodyClose = findMatchingByCounter(s, pos, bodyOpen, '{', '}');
+
+            std::string_view bodyText(
+                s.data() + bodyOpen + 1,
+                bodyClose - bodyOpen - 1
+            );
+
+            entry.body = splitBodyLines(bodyText);
+            p = bodyClose + 1;
+        } else if (p < s.size() && s[p] == ';') {
+            entry.body.clear();
+            ++p;
+        } else {
+            throw VulException(
+                "expected '{' or ';' after macro entry '" +
+                entry.name + "' at " + locStr(pos, p)
+            );
+        }
+
+        entries.push_back(std::move(entry));
+    }
+
+    return entries;
 }
 
 

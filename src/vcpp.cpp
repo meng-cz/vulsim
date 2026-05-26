@@ -39,202 +39,839 @@ using namespace stringop;
 #include <algorithm>
 #include <deque>
 
-struct MemberDecl {
-    std::string type;
-    std::string name;
-    std::string init;
-    std::vector<std::string> dims;
+struct VCPPModuleContext {
+    VulTempModule temp;
+    std::vector<uint32_t> line_mapping; // new line number -> original line number (1-based)
+    inline string getOriginalPosition(const LinePosition &pos) const {
+        if (pos.line < 0 || pos.line >= line_mapping.size()) {
+            return "Line " + std::to_string(pos.line + 1) + ":" + std::to_string(pos.column + 1);
+        }
+        return "Line " + std::to_string(line_mapping[pos.line]) + ":" + std::to_string(pos.column + 1);
+    }
 };
 
-MemberDecl parse_member_decl(const std::string& line) {
-    MemberDecl res;
+class VCPPModuleHandler {
+public:
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) = 0;
+    virtual string name() const = 0;
+};
 
-    std::string s = trim(line);
-
-    // ===== 1️⃣ 拆分初始化（=）=====
-    size_t eq_pos = std::string::npos;
-    int paren = 0;
-    bool in_string = false, escape = false;
-
-    for (size_t i = 0; i < s.size(); ++i) {
-        char c = s[i];
-
-        if (in_string) {
-            if (escape) escape = false;
-            else if (c == '\\') escape = true;
-            else if (c == '"') in_string = false;
-            continue;
-        }
-
-        if (c == '"') {
-            in_string = true;
-            continue;
-        }
-
-        if (c == '(' || c == '<') ++paren;
-        if (c == ')' || c == '>') --paren;
-
-        if (c == '=' && paren == 0) {
-            eq_pos = i;
-            break;
-        }
+class VCPPModuleHandlerRegistry {
+public:
+    static VCPPModuleHandlerRegistry& instance() {
+        static VCPPModuleHandlerRegistry registry;
+        return registry;
     }
 
-    std::string left = (eq_pos == std::string::npos) ? s : s.substr(0, eq_pos);
-    std::string init = (eq_pos == std::string::npos) ? "" : s.substr(eq_pos + 1);
+    bool register_handler(std::unique_ptr<VCPPModuleHandler> handler) {
+        // For simplicity, we assume each handler handles a unique macro name, which is determined by the handler's dynamic type name.
+        std::string handler_name = handler->name();
+        if (handlers_.count(handler_name) > 0) {
+            return false; // handler for this macro already exists
+        }
+        handlers_[handler_name] = std::move(handler);
+        return true;
+    }
 
-    res.init = trim(init);
+    void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        std::string handler_name = entry.name; // assume macro name is the same as handler's dynamic type name for simplicity
+        if (handlers_.count(handler_name) == 0) {
+            throw VulException("No handler registered for macro: " + entry.name + " at " + context.getOriginalPosition(entry.pos));
+        }
+        handlers_[handler_name]->run(context, entry);
+    }
 
-    // ===== 2️⃣ 解析数组维度 =====
-    std::string main_part;
-    size_t i = 0;
+private:
+    VCPPModuleHandlerRegistry() = default;
+    std::unordered_map<std::string, std::unique_ptr<VCPPModuleHandler>> handlers_;
+};
 
-    while (i < left.size()) {
-        if (left[i] == '[') {
-            size_t j = i + 1;
-            int depth = 1;
-            while (j < left.size() && depth > 0) {
-                if (left[j] == '[') ++depth;
-                else if (left[j] == ']') --depth;
-                ++j;
-            }
+template <typename T>
+class VCPPModuleAutoRegisterHandler {
+public:
+    explicit VCPPModuleAutoRegisterHandler() {
+        VCPPModuleHandlerRegistry::instance().register_handler(std::make_unique<T>());
+    }
+};
 
-            std::string dim = left.substr(i + 1, j - i - 2);
-            res.dims.push_back(trim(dim));
 
-            i = j;
+class VCPPModuleCONFIG : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CONFIG"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 2) {
+            throw VulException("CONFIG requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempConfig config;
+        config.name = entry.args[0];
+        config.value = entry.args[1];
+        context.temp.configs.push_back(std::move(config));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleCONFIG> _auto_register_CONFIG_handler;
+
+class VCPPModulePARAMETER : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "PARAMETER"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 2) {
+            throw VulException("PARAMETER requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempConfig param;
+        param.name = entry.args[0];
+        param.value = entry.args[1];
+        context.temp.params.push_back(std::move(param));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModulePARAMETER> _auto_register_PARAMETER_handler;
+
+class VCPPModuleALIAS : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "ALIAS"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("ALIAS requires at least 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempBundle bundle;
+        bundle.name = entry.args[0];
+        bundle.is_alias = true;
+        VulTempBundleMember alias_member;
+        alias_member.name = "target";
+        alias_member.type = entry.args[1];
+        for (size_t i = 2; i < entry.args.size(); ++i) {
+            alias_member.dims.push_back(entry.args[i]);
+        }
+        bundle.members.push_back(std::move(alias_member));
+        context.temp.bundles.push_back(std::move(bundle));
+    }
+};
+
+class VCPPModuleALIAS_ARRAY1 : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "ALIAS_ARRAY1"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 3) {
+            throw VulException("ALIAS_ARRAY1 requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempBundle bundle;
+        bundle.name = entry.args[0];
+        bundle.is_alias = true;
+        VulTempBundleMember alias_member;
+        alias_member.name = "target";
+        alias_member.type = entry.args[1];
+        for (size_t i = 2; i < entry.args.size(); ++i) {
+            alias_member.dims.push_back(entry.args[i]);
+        }
+        bundle.members.push_back(std::move(alias_member));
+        context.temp.bundles.push_back(std::move(bundle));
+    }
+};
+
+class VCPPModuleALIAS_ARRAY2 : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "ALIAS_ARRAY2"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 4) {
+            throw VulException("ALIAS_ARRAY2 requires exactly 4 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempBundle bundle;
+        bundle.name = entry.args[0];
+        bundle.is_alias = true;
+        VulTempBundleMember alias_member;
+        alias_member.name = "target";
+        alias_member.type = entry.args[1];
+        for (size_t i = 2; i < entry.args.size(); ++i) {
+            alias_member.dims.push_back(entry.args[i]);
+        }
+        bundle.members.push_back(std::move(alias_member));
+        context.temp.bundles.push_back(std::move(bundle));
+    }
+};
+
+static VCPPModuleAutoRegisterHandler<VCPPModuleALIAS> _auto_register_ALIAS_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleALIAS_ARRAY1> _auto_register_ALIAS_ARRAY1_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleALIAS_ARRAY2> _auto_register_ALIAS_ARRAY2_handler;
+
+class VCPPModuleSTRUCT : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "STRUCT"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 1) {
+            throw VulException("STRUCT requires exactly 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulErrorContextGuard _err{"Processing STRUCT '" + entry.args[0] + "' at " + context.getOriginalPosition(entry.pos)};
+        VulTempBundle bundle;
+        bundle.name = entry.args[0];
+        bundle.is_alias = false;
+        string body;
+        for (const auto line : entry.body) {
+            body += trim(line);
+        }
+        vector<string> member_strs = split(body, ';');
+        for (const auto &member_str : member_strs) {
+            if (member_str.empty()) continue;
+            VulTempBundleMember member = parseMemberDeclaration(member_str);
+            bundle.members.push_back(std::move(member));
+        }
+        context.temp.bundles.push_back(std::move(bundle));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleSTRUCT> _auto_register_STRUCT_handler;
+
+class VCPPModuleREGISTER : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "REGISTER"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("REGISTER requires at least 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempRegister reg;
+        reg.name = entry.args[0];
+        reg.type = entry.args[1];
+        if (entry.args.size() >= 3) {
+            reg.portnum = entry.args[2];
+        }
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            reg.dims.push_back(entry.args[i]);
+        }
+        reg.reset_codelines = entry.body;
+        context.temp.registers.push_back(std::move(reg));
+    }
+};
+class VCPPModuleREGISTER_MUL : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "REGISTER_MUL"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 3) {
+            throw VulException("REGISTER_MUL requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempRegister reg;
+        reg.name = entry.args[0];
+        reg.type = entry.args[1];
+        if (entry.args.size() >= 3) {
+            reg.portnum = entry.args[2];
+        }
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            reg.dims.push_back(entry.args[i]);
+        }
+        reg.reset_codelines = entry.body;
+        context.temp.registers.push_back(std::move(reg));
+    }
+};
+class VCPPModuleREGISTER_ARRAY1 : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "REGISTER_ARRAY1"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 4) {
+            throw VulException("REGISTER_ARRAY1 requires exactly 4 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempRegister reg;
+        reg.name = entry.args[0];
+        reg.type = entry.args[1];
+        reg.portnum = entry.args[3];
+        reg.dims.push_back(entry.args[2]);
+        reg.reset_codelines = entry.body;
+        context.temp.registers.push_back(std::move(reg));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleREGISTER> _auto_register_REGISTER_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleREGISTER_MUL> _auto_register_REGISTER_MUL_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleREGISTER_ARRAY1> _auto_register_REGISTER_ARRAY1_handler;
+
+class VCPPModuleWIRE : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "WIRE"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 2) {
+            throw VulException("WIRE requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempWire wire;
+        wire.name = entry.args[0];
+        wire.type = entry.args[1];
+        wire.reset_codelines = entry.body;
+        context.temp.wires.push_back(std::move(wire));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleWIRE> _auto_register_WIRE_handler;
+
+static inline void parseReqArgsAndRets(
+    const vector<string> &macro_args,
+    size_t begin_idx,
+    VulTempReqServBase &reqserv
+) {
+    for (size_t i = begin_idx; i < macro_args.size(); ++i) {
+        const string &arg_decl_raw = macro_args[i];
+        const string arg_decl = trim(arg_decl_raw);
+        const size_t split_pos = arg_decl.find_last_of(" \t\r\n");
+        if (split_pos == string::npos) {
+            throw VulException("invalid argument declaration '" + arg_decl_raw + "'");
+        }
+
+        const string type_tag = trim(arg_decl.substr(0, split_pos));
+        const string arg_name = trim(arg_decl.substr(split_pos + 1));
+        if (type_tag.empty() || arg_name.empty()) {
+            throw VulException("invalid argument declaration '" + arg_decl_raw + "'");
+        }
+
+        if (type_tag.size() > 5 && type_tag.rfind("ARG(", 0) == 0 && type_tag.back() == ')') {
+            reqserv.args.emplace_back(type_tag.substr(4, type_tag.size() - 5), arg_name);
+        } else if (type_tag.size() > 6 && type_tag.rfind("RESP(", 0) == 0 && type_tag.back() == ')') {
+            reqserv.rets.emplace_back(type_tag.substr(5, type_tag.size() - 6), arg_name);
         } else {
-            main_part.push_back(left[i]);
-            ++i;
+            throw VulException("invalid argument type tag '" + type_tag + "'");
         }
     }
-
-    main_part = trim(main_part);
-
-    // ===== 3️⃣ 提取 name（最后一个标识符）=====
-    int end = (int)main_part.size() - 1;
-
-    while (end >= 0 && std::isspace(main_part[end])) --end;
-
-    int start = end;
-    while (start >= 0 &&
-           (std::isalnum(main_part[start]) || main_part[start] == '_')) {
-        --start;
-    }
-
-    res.name = main_part.substr(start + 1, end - start);
-
-    // ===== 4️⃣ 剩余部分是 type =====
-    res.type = trim(main_part.substr(0, start + 1));
-
-    return res;
 }
 
-
-vector<VulConfigItem> _parseConsts(const std::vector<std::string>& code) {
-    vector<VulConfigItem> configs;
-
-    auto matches = matchMacros(code, "CONST($,$)");
-    for (const auto& args : matches) {
-        const std::string& name = args.args[0];
-        const std::string& value = args.args[1];
-        VulConfigItem item;
-        item.name = name;
-        item.value = value;
-        item.comment = "";
-        configs.push_back(item);
-    }
-
-    return configs;
-}
-
-vector<VulBundleItem> _parseBundles(const std::vector<std::string>& code) {
-    vector<VulBundleItem> bundles;
-
-    auto matches = matchMacros(code, "ALIAS($,$)");
-    for (const auto& args : matches) {
-        const std::string& name = args.args[0];
-        const std::string& target = args.args[1];
-        VulBundleItem item;
-        item.name = name;
-        item.is_alias = true;
-        VulBundleMember member;
-        member.type = target;
-        member.name = "alias_target";
-        member.uint_length = "";
-        item.members.push_back(member);
-        bundles.push_back(item);
-    }
-
-    matches = matchMacros(code, "ALIAS_ARRAY1($,$,$)");
-    for (const auto& args : matches) {
-        const std::string& name = args.args[0];
-        const std::string& target = args.args[1];
-        const std::string& dim = args.args[2];
-        VulBundleItem item;
-        item.name = name;
-        item.is_alias = true;
-        VulBundleMember member;
-        member.type = target;
-        member.name = "alias_target";
-        member.uint_length = "";
-        member.dims.push_back(dim);
-        item.members.push_back(member);
-        bundles.push_back(item);
-    }
-
-    matches = matchMacros(code, "ALIAS_ARRAY2($,$,$,$)");
-    for (const auto& args : matches) {
-        const std::string& name = args.args[0];
-        const std::string& target = args.args[1];
-        const std::string& dim1 = args.args[2];
-        const std::string& dim2 = args.args[3];
-        VulBundleItem item;
-        item.name = name;
-        item.is_alias = true;
-        VulBundleMember member;
-        member.type = target;
-        member.name = "alias_target";
-        member.uint_length = "";
-        member.dims.push_back(dim1);
-        member.dims.push_back(dim2);
-        item.members.push_back(member);
-        bundles.push_back(item);
-    }
-
-    matches = matchMacros(code, "STRUCT($)");
-    for (const auto& args : matches) {
-        const std::string& name = args.args[0];
-        auto block = findNextBraceBlock(code, args.pos, '{', '}');
-        if (block.end_pos.line == -1) {
-            throw VulException("STRUCT " + name + " has no body");
+class VCPPModuleREQUEST : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "REQUEST"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.empty()) {
+            throw VulException("REQUEST requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
         }
-        vector<std::string> member_lines = split(block.content, ';');
-        VulBundleItem item;
-        item.name = name;
-        item.is_alias = false;
-        for (const auto& line : member_lines) {
-            auto decl = parse_member_decl(line);
-            if (!decl.name.empty()) {
-                VulBundleMember member;
-                member.name = decl.name;
-                member.type = decl.type;
-                member.value = decl.init;
-                member.dims = decl.dims;
-                member.uint_length = "";
-                item.members.push_back(member);
+        VulTempReq req;
+        req.name = entry.args[0];
+        req.has_handshake = false;
+        VulErrorContextGuard _err{"Processing REQUEST '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 1, req);
+        context.temp.requests.push_back(std::move(req));
+    }
+};
+
+class VCPPModuleREQUEST_READY : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "REQUEST_READY"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.empty()) {
+            throw VulException("REQUEST_READY requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempReq req;
+        req.name = entry.args[0];
+        req.has_handshake = true;
+        VulErrorContextGuard _err{"Processing REQUEST_READY '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 1, req);
+        context.temp.requests.push_back(std::move(req));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleREQUEST> _auto_register_REQUEST_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleREQUEST_READY> _auto_register_REQUEST_READY_handler;
+
+class VCPPModuleSERVICE : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "SERVICE"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.empty()) {
+            throw VulException("SERVICE requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempServ serv;
+        serv.name = entry.args[0];
+        serv.has_handshake = false;
+        serv.cond = "";
+        serv.priority = "";
+        serv.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing SERVICE '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 1, serv);
+        context.temp.services.push_back(std::move(serv));
+    }
+};
+
+class VCPPModuleSERVICE_READY : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "SERVICE_READY"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("SERVICE_READY requires at least 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempServ serv;
+        serv.name = entry.args[0];
+        serv.has_handshake = true;
+        serv.cond = entry.args[1];
+        serv.priority = "";
+        serv.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing SERVICE_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 2, serv);
+        context.temp.services.push_back(std::move(serv));
+    }
+};
+
+class VCPPModuleSERVICE_PRIO : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "SERVICE_PRIO"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("SERVICE_PRIO requires at least 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempServ serv;
+        serv.name = entry.args[0];
+        serv.has_handshake = false;
+        serv.cond = "";
+        serv.priority = entry.args[1];
+        serv.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing SERVICE_PRIO '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 2, serv);
+        context.temp.services.push_back(std::move(serv));
+    }
+};
+
+class VCPPModuleSERVICE_PRIO_READY : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "SERVICE_PRIO_READY"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 3) {
+            throw VulException("SERVICE_PRIO_READY requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempServ serv;
+        serv.name = entry.args[0];
+        serv.has_handshake = true;
+        serv.priority = entry.args[1];
+        serv.cond = entry.args[2];
+        serv.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing SERVICE_PRIO_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 3, serv);
+        context.temp.services.push_back(std::move(serv));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE> _auto_register_SERVICE_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE_READY> _auto_register_SERVICE_READY_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE_PRIO> _auto_register_SERVICE_PRIO_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE_PRIO_READY> _auto_register_SERVICE_PRIO_READY_handler;
+
+class VCPPModuleTICK_IMPL : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "TICK_IMPL"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 0) {
+            throw VulException("TICK_IMPL does not take any arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        context.temp.tick_blocks.push_back(entry.body);
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleTICK_IMPL> _auto_register_TICK_IMPL_handler;
+
+class VCPPModuleCHILD_INSTANCE : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CHILD_INSTANCE"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("CHILD_INSTANCE requires at least 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempInstance inst;
+        inst.name = entry.args[1];
+        inst.module_name = entry.args[0];
+        for (size_t i = 2; i < entry.args.size(); ++i) {
+            const string &param_override_raw = entry.args[i];
+            const size_t split_pos = param_override_raw.find('=');
+            if (split_pos == string::npos) {
+                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            const string param_name = trim(param_override_raw.substr(0, split_pos));
+            const string param_value = trim(param_override_raw.substr(split_pos + 1));
+            if (param_name.empty() || param_value.empty()) {
+                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            inst.parameter_overrides.emplace_back(param_name, param_value);
+        }
+        context.temp.instances.push_back(std::move(inst));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleCHILD_INSTANCE> _auto_register_CHILD_INSTANCE_handler;
+
+class VCPPModuleUSE_CHILD_SERVICE_PORT : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "USE_CHILD_SERVICE_PORT"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("USE_CHILD_SERVICE_PORT requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        const string &instance_name = entry.args[0];
+        const string &service_port_name = entry.args[1];
+        for (auto &inst : context.temp.instances) {
+            if (inst.name == instance_name) {
+                inst.referenced_services.push_back(service_port_name);
+                return;
             }
         }
-        bundles.push_back(item);
+        throw VulException("No child instance named '" + instance_name + "' found for USE_CHILD_SERVICE_PORT at " + context.getOriginalPosition(entry.pos));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleUSE_CHILD_SERVICE_PORT> _auto_register_USE_CHILD_SERVICE_PORT_handler;
+
+class VCPPModuleCONNECT_CR_CS : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CONNECT_CR_CS"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 4) {
+            throw VulException("CONNECT_CR_CS requires exactly 4 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulReqServConnection conn;
+        conn.req_instance = entry.args[0];
+        conn.req_name = entry.args[1];
+        conn.serv_instance = entry.args[2];
+        conn.serv_name = entry.args[3];
+        context.temp.req_connections.push_back(std::move(conn));
+    }
+};
+
+class VCPPModuleCONNECT_CR_S : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CONNECT_CR_S"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 3) {
+            throw VulException("CONNECT_CR_S requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulReqServConnection conn;
+        conn.req_instance = entry.args[0];
+        conn.req_name = entry.args[1];
+        conn.serv_instance = "";
+        conn.serv_name = entry.args[2];
+        context.temp.req_connections.push_back(std::move(conn));
+    }
+};
+
+class VCPPModuleCONNECT_CR_R : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CONNECT_CR_R"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 3) {
+            throw VulException("CONNECT_CR_R requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulReqServConnection conn;
+        conn.req_instance = entry.args[0];
+        conn.req_name = entry.args[1];
+        conn.serv_instance = "";
+        conn.serv_name = entry.args[2];
+        context.temp.req_connections.push_back(std::move(conn));
+    }
+};
+
+class VCPPModuleCONNECT_S_CS : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CONNECT_S_CS"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 3) {
+            throw VulException("CONNECT_S_CS requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulReqServConnection conn;
+        conn.req_instance = "";
+        conn.req_name = entry.args[0];
+        conn.serv_instance = entry.args[1];
+        conn.serv_name = entry.args[2];
+        context.temp.req_connections.push_back(std::move(conn));
+    }
+};
+
+static VCPPModuleAutoRegisterHandler<VCPPModuleCONNECT_CR_CS> _auto_register_CONNECT_CR_CS_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleCONNECT_CR_S> _auto_register_CONNECT_CR_S_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleCONNECT_CR_R> _auto_register_CONNECT_CR_R_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleCONNECT_S_CS> _auto_register_CONNECT_S_CS_handler;
+
+class VCPPModuleBRAM : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "BRAM"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 5) {
+            throw VulException("BRAM requires exactly 5 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempBRAM bram;
+        bram.name = entry.args[0];
+        bram.data_type = entry.args[1];
+        bram.addr_width = entry.args[2];
+        bram.read_ports = entry.args[3];
+        bram.write_ports = entry.args[4];
+        context.temp.brams.push_back(std::move(bram));
+    }
+};
+
+class VCPPModuleBRAM_1RW : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "BRAM_1RW"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 3) {
+            throw VulException("BRAM_1RW requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempBRAM bram;
+        bram.name = entry.args[0];
+        bram.data_type = entry.args[1];
+        bram.addr_width = entry.args[2];
+        bram.read_ports = "";
+        bram.write_ports = "";
+        context.temp.brams.push_back(std::move(bram));
+    }
+};
+
+class VCPPModuleROM : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "ROM"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 5) {
+            throw VulException("ROM requires exactly 5 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempDigitalROM rom;
+        rom.name = entry.args[0];
+        rom.data_width = entry.args[1];
+        rom.addr_width = entry.args[2];
+        rom.read_ports = entry.args[3];
+        rom.init_path = entry.args[4];
+        context.temp.roms.push_back(std::move(rom));
+    }
+};
+
+class VCPPModuleQUEUE : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "QUEUE"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 3) {
+            throw VulException("QUEUE requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempQueue queue;
+        queue.name = entry.args[0];
+        queue.type = entry.args[1];
+        queue.depth = entry.args[2];
+        queue.enq_width = "1";
+        queue.deq_width = "1";
+        context.temp.queues.push_back(std::move(queue));
+    }
+};
+
+class VCPPModuleQUEUE_MP : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "QUEUE_MP"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 5) {
+            throw VulException("QUEUE_MP requires exactly 5 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempQueue queue;
+        queue.name = entry.args[0];
+        queue.type = entry.args[1];
+        queue.depth = entry.args[2];
+        queue.enq_width = entry.args[3];
+        queue.deq_width = entry.args[4];
+        context.temp.queues.push_back(std::move(queue));
+    }
+};
+
+static VCPPModuleAutoRegisterHandler<VCPPModuleBRAM> _auto_register_BRAM_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleBRAM_1RW> _auto_register_BRAM_1RW_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleROM> _auto_register_ROM_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleQUEUE> _auto_register_QUEUE_handler;
+static VCPPModuleAutoRegisterHandler<VCPPModuleQUEUE_MP> _auto_register_QUEUE_MP_handler;
+
+VulTempModule _parseTempModule(
+    const string &module_name,
+    const string &module_filepath
+) {
+    VulErrorContextGuard _err{"Parsing module '" + module_name + "' from file '" + module_filepath + "'"};
+
+    VCPPModuleContext context;
+    context.temp.name = module_name;
+    context.temp.filepath = module_filepath;
+
+    vector<string> code_lines = readFileLines(module_filepath);
+    auto trim_res = stripComments(code_lines);
+    context.line_mapping = std::move(trim_res.mapping);
+    code_lines = std::move(trim_res.lines);
+
+    vector<MacroEntry> macro_entries = findAllMacroEntries(code_lines);
+    // printf("Found %zu macro entries in module '%s'\n", macro_entries.size(), module_name.c_str());
+    for (const auto &entry : macro_entries) {
+        // printf("Found macro: %s at %s: ", entry.name.c_str(), context.getOriginalPosition(entry.pos).c_str());
+        // for (const auto &arg : entry.args) {
+        //     printf("'%s' ", arg.c_str());
+        // }
+        // printf("\n");
+        VCPPModuleHandlerRegistry::instance().run(context, entry);
     }
 
-    return bundles;
+    return context.temp;
 }
 
-vector<string> extractIncludes(const vector<string> &code) {
-    vector<string> includes;
+
+struct VCPPTestContext {
+    VulStaticTestHarnessModule test;
+    VulStaticConfigLib config_lib;
+    VulStaticBundleLib bundle_lib;
+    std::vector<uint32_t> line_mapping; // new line number -> original line number (1-based)
+    inline string getOriginalPosition(const LinePosition &pos) const {
+        if (pos.line < 0 || pos.line >= line_mapping.size()) {
+            return "Line " + std::to_string(pos.line + 1) + ":" + std::to_string(pos.column + 1);
+        }
+        return "Line " + std::to_string(line_mapping[pos.line]) + ":" + std::to_string(pos.column + 1);
+    }
+};
+
+class VCPPTestHandler {
+public:
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) = 0;
+    virtual string name() const = 0;
+};
+
+class VCPPTestHandlerRegistry {
+public:
+    static VCPPTestHandlerRegistry& instance() {
+        static VCPPTestHandlerRegistry registry;
+        return registry;
+    }
+
+    bool register_handler(std::unique_ptr<VCPPTestHandler> handler) {
+        // For simplicity, we assume each handler handles a unique macro name, which is determined by the handler's dynamic type name.
+        std::string handler_name = handler->name();
+        if (handlers_.count(handler_name) > 0) {
+            return false; // handler for this macro already exists
+        }
+        handlers_[handler_name] = std::move(handler);
+        return true;
+    }
+
+    void run(VCPPTestContext &context, const MacroEntry &entry) {
+        std::string handler_name = entry.name; // assume macro name is the same as handler's dynamic type name for simplicity
+        if (handlers_.count(handler_name) == 0) {
+            throw VulException("No handler registered for macro: " + entry.name + " at " + context.getOriginalPosition(entry.pos));
+        }
+        handlers_[handler_name]->run(context, entry);
+    }
+
+private:
+    VCPPTestHandlerRegistry() = default;
+    std::unordered_map<std::string, std::unique_ptr<VCPPTestHandler>> handlers_;
+};
+
+template <typename T>
+class VCPPTestAutoRegisterHandler {
+public:
+    explicit VCPPTestAutoRegisterHandler() {
+        VCPPTestHandlerRegistry::instance().register_handler(std::make_unique<T>());
+    }
+};
+
+class VCPPTestPARAMETER : public VCPPTestHandler {
+public:
+    virtual string name() const { return "PARAMETER"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 2) {
+            throw VulException("PARAMETER requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulErrorContextGuard _err{"Processing PARAMETER '" + entry.args[0] + "' at " + context.getOriginalPosition(entry.pos)};
+        ConfigRealValue value = calculateConstexprValue(entry.args[1], context.config_lib);
+        context.test.top_config_overrides[entry.args[0]] = value;
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestPARAMETER> _auto_register_TEST_PARAMETER_handler;
+
+
+class VCPPTestREQUEST : public VCPPTestHandler {
+public:
+    virtual string name() const { return "REQUEST"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.empty()) {
+            throw VulException("REQUEST requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempReq req;
+        req.name = entry.args[0];
+        req.has_handshake = false;
+        VulErrorContextGuard _err{"Processing REQUEST '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 1, req);
+        context.test.requests[req.name] = std::move(req);
+    }
+};
+
+class VCPPTestREQUEST_READY : public VCPPTestHandler {
+public:
+    virtual string name() const { return "REQUEST_READY"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.empty()) {
+            throw VulException("REQUEST_READY requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempReq req;
+        req.name = entry.args[0];
+        req.has_handshake = true;
+        VulErrorContextGuard _err{"Processing REQUEST_READY '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 1, req);
+        context.test.requests[req.name] = std::move(req);
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestREQUEST> _auto_register_TEST_REQUEST_handler;
+static VCPPTestAutoRegisterHandler<VCPPTestREQUEST_READY> _auto_register_TEST_REQUEST_READY_handler;
+
+class VCPPTestSERVICE : public VCPPTestHandler {
+public:
+    virtual string name() const { return "SERVICE"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.empty()) {
+            throw VulException("SERVICE requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempServ serv;
+        serv.name = entry.args[0];
+        serv.has_handshake = false;
+        serv.cond = "";
+        serv.priority = "";
+        serv.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing SERVICE '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 1, serv);
+        context.test.services[serv.name] = std::move(serv);
+    }
+};
+
+class VCPPTestSERVICE_READY : public VCPPTestHandler {
+public:
+    virtual string name() const { return "SERVICE_READY"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 2) {
+            throw VulException("SERVICE_READY requires at least 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempServ serv;
+        serv.name = entry.args[0];
+        serv.has_handshake = true;
+        serv.cond = entry.args[1];
+        serv.priority = "";
+        serv.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing SERVICE_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        parseReqArgsAndRets(entry.args, 2, serv);
+        context.test.services[serv.name] = std::move(serv);
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestSERVICE> _auto_register_TEST_SERVICE_handler;
+static VCPPTestAutoRegisterHandler<VCPPTestSERVICE_READY> _auto_register_TEST_SERVICE_READY_handler;
+
+class VCPPTestGLOBAL : public VCPPTestHandler {
+public:
+    virtual string name() const { return "GLOBAL"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        context.test.globalCodes.insert(context.test.globalCodes.end(), entry.body.begin(), entry.body.end());
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestGLOBAL> _auto_register_TEST_GLOBAL_handler;
+
+class VCPPTestSIMULATION : public VCPPTestHandler {
+public:
+    virtual string name() const { return "SIMULATION"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (!context.test.test_codelines.empty()) {
+            throw VulException("Multiple SIMULATION blocks are not allowed at " + context.getOriginalPosition(entry.pos));
+        }
+        context.test.test_codelines.insert(context.test.test_codelines.end(), entry.body.begin(), entry.body.end());
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestSIMULATION> _auto_register_TEST_SIMULATION_handler;
+
+VulStaticTestHarnessModule _parseTestModule(
+    const string &test_filepath,
+    const VulStaticConfigLib &config_lib,
+    const VulStaticBundleLib &bundle_lib
+) {
+    VCPPTestContext context;
+    context.config_lib = config_lib;
+    context.bundle_lib = bundle_lib;
+
+    VulErrorContextGuard _err{"Parsing test module from file '" + test_filepath + "'"};
+
+    vector<string> code_lines = readFileLines(test_filepath);
+    auto trim_res = stripComments(code_lines);
+    context.line_mapping = std::move(trim_res.mapping);
+    code_lines = std::move(trim_res.lines);
+    
     const string prefix = "#include";
-    for (const auto &line_raw : code) {
+    for (const auto &line_raw : code_lines) {
         string line = trim(line_raw);
         if (line.rfind(prefix, 0) != 0) {
             continue;
@@ -247,553 +884,21 @@ vector<string> extractIncludes(const vector<string> &code) {
         if (second_quote == string::npos || second_quote <= first_quote + 1) {
             continue;
         }
-        includes.push_back(line.substr(first_quote + 1, second_quote - first_quote - 1));
+        string included_path = line.substr(first_quote + 1, second_quote - first_quote - 1);
+        if (included_path == "header.hpp" || included_path == "header.h") {
+            continue; // skip the header file, which is processed separately
+        }
+        context.test.includedHeaders.push_back(line.substr(first_quote + 1, second_quote - first_quote - 1));
     }
-    return includes;
+
+    vector<MacroEntry> macro_entries = findAllMacroEntries(code_lines);
+    for (const auto &entry : macro_entries) {
+        VCPPTestHandlerRegistry::instance().run(context, entry);
+    }
+
+    return std::move(context.test);
 }
 
-inline void parse_reg_uint_type(const string& type_str, const VulStaticConfigLib &configlib, VulStaticTypeSignature &signature) {
-    // parse UInt<N> to extract N
-    const string prefix = "UInt<";
-    const string suffix = ">";
-    if (type_str.substr(0, prefix.size()) == prefix && type_str.size() > prefix.size() + suffix.size() && type_str.substr(type_str.size() - suffix.size()) == suffix) {
-        string num_str = type_str.substr(prefix.size(), type_str.size() - prefix.size() - suffix.size());
-        ConfigRealValue value = calculateConstexprValue(num_str, configlib);
-        signature.type = "UInt";
-        signature.uint_length = value;
-    } else {
-        signature.type = type_str;
-        signature.uint_length = 0;
-    }
-};
-
-void _parseReqServArgs(
-    const vector<string> & macro_args,
-    const uint64_t begin_idx,
-    const VulStaticConfigLib &configlib,
-    VulStaticReqServ & reqserv
-) {
-    for (size_t i = begin_idx; i < macro_args.size(); ++i) {
-        VulStaticArg arg;
-        vector<string> parts = split(macro_args[i], ' ');
-        if (parts.size() != 2) {
-            throw VulException("Invalid argument format in REQ_PORT/SERV_PORT: " + macro_args[i]);
-        }
-        arg.name = parts[1];
-        // parse ARG(type) or RESP(type) for parts[0]
-        string type_str = trim(parts[0]);
-        if (type_str.substr(0, 4) == "ARG(" && type_str.back() == ')') {
-            parse_reg_uint_type(type_str.substr(4, type_str.size() - 5), configlib, arg.type);
-            reqserv.args.push_back(arg);
-        } else if (type_str.substr(0, 5) == "RESP(" && type_str.back() == ')') {
-            parse_reg_uint_type(type_str.substr(5, type_str.size() - 6), configlib, arg.type);
-            reqserv.rets.push_back(arg);
-        } else {
-            throw VulException("Invalid argument type format in REQ_PORT/SERV_PORT: " + parts[0]);
-        }
-    }
-}
-
-void _parseStaticModule(
-    const std::vector<std::string>& code,
-    const VulStaticConfigLib &configlib,
-    const VulStaticConfigLib &param_overrides,
-    VulStaticModuleInstance &module
-) {
-    VulStaticConfigLib local_configlib = configlib; // copy global config lib to local, will add local consts to it
-
-    {
-        // parse params
-        VulErrorContextGuard _err{"parsing parameters"};
-        auto matches = matchMacros(code, "PARAMETER($,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[0] + " = " + item.args[1]};
-            ConfigRealValue value = 0;
-            const string &param_name = item.args[0];
-            const string &param_value_str = item.args[1];
-            auto iter = param_overrides.find(param_name);
-            if (iter != param_overrides.end()) {
-                // override parameter value
-                value = iter->second;
-            } else {
-                value = calculateConstexprValue(param_value_str, configlib);
-            }
-            module.local_parameters[param_name] = value;
-        }
-    }
-    {
-        // parse consts
-        VulErrorContextGuard _err{"parsing consts"};
-        auto consts = _parseConsts(code);
-        for (const auto& item : consts) {
-            VulErrorContextGuard _err{item.name + " = " + item.value};
-            ConfigRealValue value = calculateConstexprValue(item.value, configlib);
-            local_configlib[item.name] = value;
-            module.local_consts[item.name] = value;
-        }
-    }
-    {
-        // parse bundles
-        VulErrorContextGuard _err{"parsing struct"};
-        auto bundles = _parseBundles(code);
-        for (const auto& item : bundles) {
-            VulErrorContextGuard _err{"parsing struct " + item.name};
-            VulStaticBundle static_bundle = staticalizeBundle(item, local_configlib);
-            module.local_bundles.push_back(std::move(static_bundle));
-        }
-    }
-    
-    {
-        // parse register
-        VulErrorContextGuard _err{"parsing registers"};
-        auto matches = matchMacros(code, "REGISTER($,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[1] + " " + item.args[0]};
-            VulStaticRegister reg;
-            reg.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
-            reg.ports = 1;
-            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
-            if (block.end_pos.line != -1) {
-                reg.reset_codelines = split(block.content, '\n');
-            }
-            module.registers.push_back(std::move(reg));
-        }
-        matches = matchMacros(code, "REGISTER_ARRAY1($,$,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[1] + "<" + item.args[3] + ">" + " " + item.args[0] + "[" + item.args[2] + "]"};
-            VulStaticRegister reg;
-            reg.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
-            ConfigRealValue array_size = calculateConstexprValue(item.args[2], local_configlib);
-            reg.dims.push_back(array_size);
-            array_size = calculateConstexprValue(item.args[3], local_configlib);
-            reg.ports = (array_size > 1) ? array_size : 1;
-            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
-            if (block.end_pos.line != -1) {
-                reg.reset_codelines = split(block.content, '\n');
-            }
-            module.registers.push_back(std::move(reg));
-        }
-        matches = matchMacros(code, "REGISTER_MUL($,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[1] + "<" + item.args[2] + ">" + " " + item.args[0]};
-            VulStaticRegister reg;
-            reg.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
-            ConfigRealValue portnum = calculateConstexprValue(item.args[2], local_configlib);
-            reg.ports = (portnum > 1) ? portnum : 1;
-            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
-            if (block.end_pos.line != -1) {
-                reg.reset_codelines = split(block.content, '\n');
-            }
-            module.registers.push_back(std::move(reg));
-        }
-    }
-    {
-        // parse wire
-        VulErrorContextGuard _err{"parsing wires"};
-        auto matches = matchMacros(code, "WIRE($,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[1] + " " + item.args[0]};
-            VulStaticWire reg;
-            reg.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, reg.signature);
-            BlockResult block = findNextBraceBlock(code, item.pos, '{', '}');
-            if (block.end_pos.line != -1) {
-                reg.reset_codelines = split(block.content, '\n');
-            }
-            module.wires.push_back(std::move(reg));
-        }
-    }
-    {
-        // parse req
-        VulErrorContextGuard _err{"parsing requests"};
-        auto matches = matchMacros(code, "REQUEST()");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[0]};
-            VulStaticReqServ req;
-            req.name = item.args[0];
-            req.has_handshake = false;
-            _parseReqServArgs(item.args, 1, configlib, req);
-            module.requests[req.name] = req;
-        }
-        matches = matchMacros(code, "REQUEST_READY()");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[0]};
-            VulStaticReqServ req;
-            req.name = item.args[0];
-            req.has_handshake = true;
-            _parseReqServArgs(item.args, 1, configlib, req);
-            module.requests[req.name] = req;
-        }
-    }
-    {
-        // parse serv
-        VulErrorContextGuard _err{"parsing services"};
-        vector<MatchMacroResult> unified_matches;
-        auto matches = matchMacros(code, "SERVICE()");
-        for (const auto& item : matches) {
-            vector<string> args;
-            args.push_back(item.args[0]);
-            args.push_back(""); // condition = None
-            args.push_back(""); // priority = None
-            args.insert(args.end(), item.args.begin() + 1, item.args.end());
-            unified_matches.push_back(MatchMacroResult{item.pos, args});
-        }
-        matches = matchMacros(code, "SERVICE_READY()");
-        for (const auto& item : matches) {
-            vector<string> args;
-            args.push_back(item.args[0]);
-            args.push_back(item.args[1]);
-            args.push_back(""); // priority = None
-            args.insert(args.end(), item.args.begin() + 2, item.args.end());
-            unified_matches.push_back(MatchMacroResult{item.pos, args});
-        }
-        matches = matchMacros(code, "SERVICE_PRIO()");
-        for (const auto& item : matches) {
-            vector<string> args;
-            args.push_back(item.args[0]);
-            args.push_back(""); // condition = None
-            args.push_back(item.args[1]);
-            args.insert(args.end(), item.args.begin() + 2, item.args.end());
-            unified_matches.push_back(MatchMacroResult{item.pos, args});
-        }
-        matches = matchMacros(code, "SERVICE_PRIO_READY()");
-        for (const auto& item : matches) {
-            vector<string> args;
-            args.push_back(item.args[0]);
-            args.push_back(item.args[2]);
-            args.push_back(item.args[1]);
-            args.insert(args.end(), item.args.begin() + 3, item.args.end());
-            unified_matches.push_back(MatchMacroResult{item.pos, args});
-        }
-        for (const auto& item : unified_matches) {
-            VulErrorContextGuard _err{item.args[0]};
-            VulStaticReqServ serv;
-            serv.name = item.args[0];
-            serv.has_handshake = (item.args[1] != "");
-            _parseReqServArgs(item.args, 3, configlib, serv);
-            module.services[serv.name] = serv;
-            VulLogicBlock lb;
-            lb.block_id = module.serv_logic_blocks.size() + 1; // 按照出现顺序分配 block_id
-            lb.with_priority = (item.args[2] != "");
-            lb.priority = lb.with_priority ? std::stoi(item.args[2]) : 0;
-            if (serv.has_handshake) {
-                lb.cond_codelines.push_back("return (" + item.args[1] + ");\n");
-            }
-            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                throw VulException("SERVICE_IMPL for service " + serv.name + " has no body");
-            }
-            lb.codelines = split(block.content, '\n');
-            module.serv_logic_blocks[serv.name] = lb;
-        }
-    }
-    const string tick_func_name = "tick";
-    {
-        uint32_t tick_impl_count = 0;
-        VulErrorContextGuard _err{"parsing tick implementation"};
-        // parse TICK_IMPL
-        auto matches = matchMacros(code, "TICK_IMPL()");
-        if (!matches.empty()) {
-            for (const auto & match : matches) {
-                auto block = findNextBraceBlock(code, match.pos, '{', '}', true);
-                if (block.end_pos.line == -1) {
-                    throw VulException("TICK_IMPL has no body");
-                }
-                VulTickBlock tick_block;
-                tick_block.codelines = split(block.content, '\n');
-                module.tick_blocks.push_back(std::move(tick_block));
-            }
-        } else {
-            // 没有提供 TICK_IMPL，使用默认空实现
-            VulTickBlock tick_block;
-            tick_block.codelines = {};
-            module.tick_blocks.push_back(std::move(tick_block));
-        }
-    }
-    {
-        // parse CHILD_INSTANCE(module, instance, param1=value1, param2=value2, ...)
-        VulErrorContextGuard _err{"parsing child instances"};
-        auto matches = matchMacros(code, "CHILD_INSTANCE()");
-        for (const auto& item : matches) {
-            if (item.args.size() < 2) {
-                throw VulException("CHILD_INSTANCE requires at least two arguments (module name and instance name), at line " + std::to_string(item.pos.line));
-            }
-            VulErrorContextGuard _err{item.args[1]};
-            ModuleName child_module = item.args[0];
-            std::string instance_name = item.args[1];
-            unordered_map<std::string, std::string> param_values;
-            for (size_t i = 2; i < item.args.size(); ++i) {
-                const std::string& arg = item.args[i];
-                size_t eq_pos = arg.find('=');
-                if (eq_pos == std::string::npos) {
-                    throw VulException("Invalid parameter assignment in CHILD_INSTANCE: " + arg + ", at line " + std::to_string(item.pos.line));
-                }
-                std::string param_name = trim(arg.substr(0, eq_pos));
-                std::string param_value = trim(arg.substr(eq_pos + 1));
-                param_values[param_name] = param_value;
-            }
-
-            VulStaticInstanceDecl instance;
-            instance.name = instance_name;
-            instance.module_name = child_module;
-            for (const auto& [param_name, param_value] : param_values) {
-                ConfigRealValue value = calculateConstexprValue(param_value, configlib);
-                instance.parameter_overrides[param_name] = value;
-            }
-            module.instances[instance.name] = instance;
-        }
-        // parse USE_CHILD_SERVICE_PORT(instance, serv, ret, ...)
-        matches = matchMacros(code, "USE_CHILD_SERVICE_PORT()");
-        for (const auto& item : matches) {
-            if (item.args.size() < 2) {
-                throw VulException("USE_CHILD_SERVICE_PORT requires at least two arguments (instance name and service name), at line " + std::to_string(item.pos.line));
-            }
-            std::string instance_name = item.args[0];
-            std::string serv_name = item.args[1];
-            auto instance_iter = module.instances.find(instance_name);
-            if (instance_iter == module.instances.end()) {
-                throw VulException("Instance not found for USE_CHILD_SERVICE_PORT: " + instance_name + ", at line " + std::to_string(item.pos.line));
-            }
-            instance_iter->second.referenced_services.insert(serv_name);
-        }
-    }
-    {
-        VulErrorContextGuard _err{"parsing request-service connections"};
-        // parse CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv)
-        auto matches = matchMacros(code, "CONNECT_CR_CS($,$,$,$)");
-        for (const auto& item : matches) {
-            VulReqServConnection conn;
-            conn.req_instance = item.args[0];
-            conn.req_name = item.args[1];
-            conn.serv_instance = item.args[2];
-            conn.serv_name = item.args[3];
-            module.req_connections.push_back(conn);
-        }
-        // parse CONNECT_CR_S(srcmod, srcreq, dstserv)
-        matches = matchMacros(code, "CONNECT_CR_S($,$,$)");
-        for (const auto& item : matches) {
-            VulReqServConnection conn;
-            conn.req_instance = item.args[0];
-            conn.req_name = item.args[1];
-            conn.serv_instance = ""; // 连接到顶层接口
-            conn.serv_name = item.args[2];
-            module.req_connections.push_back(conn);
-        }
-        // parse CONNECT_CR_R(srcmod, srcreq, dstreq)
-        matches = matchMacros(code, "CONNECT_CR_R($,$,$)");
-        for (const auto& item : matches) {
-            VulReqServConnection conn;
-            conn.req_instance = item.args[0];
-            conn.req_name = item.args[1];
-            conn.serv_instance = ""; // 连接到顶层接口
-            conn.serv_name = item.args[2];
-            module.req_connections.push_back(conn);
-        }
-        // parse CONNECT_S_CS(srcserv, dstmod, dstserv)
-        matches = matchMacros(code, "CONNECT_S_CS($,$,$)");
-        for (const auto& item : matches) {
-            VulReqServConnection conn;
-            conn.req_instance = ""; // 连接到顶层接口
-            conn.req_name = item.args[0];
-            conn.serv_instance = item.args[1];
-            conn.serv_name = item.args[2];
-            module.req_connections.push_back(conn);
-        }
-    }
-    {
-        // parse BRAM
-        VulErrorContextGuard _err{"parsing BRAMs"};
-        auto matches = matchMacros(code, "BRAM($,$,$,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{"parsing BRAM " + item.args[0]};
-            VulStaticBRAM bram;
-            bram.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, bram.data_type);
-            bram.addr_width = calculateConstexprValue(item.args[2], local_configlib);
-            bram.read_ports = calculateConstexprValue(item.args[3], local_configlib);
-            bram.write_ports = calculateConstexprValue(item.args[4], local_configlib);
-            module.brams.push_back(bram);
-        }
-        matches = matchMacros(code, "BRAM_1RW($,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{"parsing BRAM " + item.args[0]};
-            VulStaticBRAM bram;
-            bram.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, bram.data_type);
-            bram.addr_width = calculateConstexprValue(item.args[2], local_configlib);
-            bram.read_ports = 0;
-            bram.write_ports = 0;
-            module.brams.push_back(bram);
-        }
-    }
-    {
-        // parse ROM
-        VulErrorContextGuard _err{"parsing ROMs"};
-        auto matches = matchMacros(code, "ROM($,$,$,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{"parsing ROM " + item.args[0]};
-            VulStaticDigitalROM rom;
-            rom.name = item.args[0];
-            rom.data_width = calculateConstexprValue(item.args[1], local_configlib);
-            rom.addr_width = calculateConstexprValue(item.args[2], local_configlib);
-            rom.read_ports = calculateConstexprValue(item.args[3], local_configlib);
-            rom.init_path = item.args[4];
-            module.roms.push_back(rom);
-        }
-    }
-    {
-        // parse QUEUEs
-        VulErrorContextGuard _err{"parsing queues"};
-        auto matches = matchMacros(code, "QUEUE($,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{"parsing QUEUE " + item.args[0]};
-            VulStaticQueue queue;
-            queue.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, queue.type);
-            queue.depth = calculateConstexprValue(item.args[2], local_configlib);
-            queue.enq_width = queue.deq_width = 1; // default width = 1
-            module.queues.push_back(std::move(queue));
-        }
-        matches = matchMacros(code, "QUEUE_MP($,$,$,$,$)");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{"parsing QUEUE_MP " + item.args[0]};
-            VulStaticQueue queue;
-            queue.name = item.args[0];
-            parse_reg_uint_type(item.args[1], local_configlib, queue.type);
-            queue.depth = calculateConstexprValue(item.args[2], local_configlib);
-            queue.enq_width = calculateConstexprValue(item.args[3], local_configlib);
-            queue.deq_width = calculateConstexprValue(item.args[4], local_configlib);
-            module.queues.push_back(std::move(queue));
-        }
-    }
-}
-
-VulStaticTestHarnessModule _parseStaticTestHarnessModule(
-    const std::vector<std::string>& code,
-    const VulStaticConfigLib &configlib
-) {
-    VulStaticTestHarnessModule module;
-    VulStaticConfigLib local_configlib = configlib;
-    
-    {
-        // parse test codelines
-        VulErrorContextGuard _err{"parsing simulation codelines"};
-        auto matches = matchMacros(code, "SIMULATION()");
-        if (!matches.empty()) {
-            auto block = findNextBraceBlock(code, matches[0].pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                throw VulException("SIMULATION has no body, at line " + std::to_string(matches[0].pos.line));
-            }
-            module.test_codelines = split(block.content, '\n');
-        }
-    }
-    {
-        // parse req
-        VulErrorContextGuard _err{"parsing requests"};
-        auto matches = matchMacros(code, "REQUEST()");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[0]};
-            VulStaticReqServ req;
-            req.name = item.args[0];
-            req.has_handshake = false;
-            _parseReqServArgs(item.args, 1, configlib, req);
-            module.requests[req.name] = req;
-        }
-        matches = matchMacros(code, "REQUEST_READY()");
-        for (const auto& item : matches) {
-            VulErrorContextGuard _err{item.args[0]};
-            VulStaticReqServ req;
-            req.name = item.args[0];
-            req.has_handshake = true;
-            _parseReqServArgs(item.args, 1, configlib, req);
-            module.requests[req.name] = req;
-        }
-    }
-    {
-        // parse serv
-        VulErrorContextGuard _err{"parsing services"};
-        vector<MatchMacroResult> unified_matches;
-        auto matches = matchMacros(code, "SERVICE()");
-        for (const auto& item : matches) {
-            vector<string> args;
-            args.push_back(item.args[0]);
-            args.push_back(""); // condition = None
-            args.push_back(""); // priority = None
-            args.insert(args.end(), item.args.begin() + 1, item.args.end());
-            unified_matches.push_back(MatchMacroResult{item.pos, args});
-        }
-        matches = matchMacros(code, "SERVICE_READY()");
-        for (const auto& item : matches) {
-            vector<string> args;
-            args.push_back(item.args[0]);
-            args.push_back(item.args[1]);
-            args.push_back(""); // priority = None
-            args.insert(args.end(), item.args.begin() + 2, item.args.end());
-            unified_matches.push_back(MatchMacroResult{item.pos, args});
-        }
-        for (const auto& item : unified_matches) {
-            VulErrorContextGuard _err{item.args[0]};
-            VulStaticReqServ serv;
-            serv.name = item.args[0];
-            serv.has_handshake = (item.args[1] != "");
-            _parseReqServArgs(item.args, 3, configlib, serv);
-            module.services[serv.name] = serv;
-            if (serv.has_handshake) {
-                vector<string> cond_lines;
-                cond_lines.push_back("return (" + item.args[1] + ");\n");
-                module.serv_cond_codelines[serv.name] = cond_lines;
-            }
-            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                throw VulException("SERVICE_IMPL for service " + serv.name + " has no body");
-            }
-            module.serv_codelines[serv.name] = split(block.content, '\n');
-        }
-    }
-    {
-        // parse PARAMETER(name, value)
-        VulErrorContextGuard _err{"parsing parameters"};
-        auto matches = matchMacros(code, "PARAMETER($,$)");
-        for (const auto& item : matches) {
-            if (item.args.size() < 2) {
-                throw VulException("PARAMETER requires at least two arguments (name and value), at line " + std::to_string(item.pos.line));
-            }
-            VulErrorContextGuard _err{item.args[0] + " = " + item.args[1]};
-            const string &param_name = item.args[0];
-            const string &param_value_str = item.args[1];
-            ConfigRealValue value = calculateConstexprValue(param_value_str, configlib);
-            module.top_config_overrides[param_name] = value;
-        }
-    }
-    {
-        // parse #include "xxx"
-        VulErrorContextGuard _err{"parsing includes"};
-        auto includes = extractIncludes(code);
-        // exclude internal includes (defhelper.hpp, header.hpp, testheader.hpp, run.hpp)
-        includes.erase(std::remove_if(includes.begin(), includes.end(), [](const std::string& s) {
-            return s == "defhelper.hpp" || s == "header.hpp" || s == "testheader.hpp" || s == "run.hpp";
-        }), includes.end());
-        module.includedHeaders = includes;
-    }
-    {
-        // parse GLOBAL() { ...}
-        VulErrorContextGuard _err{"parsing global declarations"};
-        auto matches = matchMacros(code, "GLOBAL() {");
-        for (const auto& item : matches) {
-            auto block = findNextBraceBlock(code, item.pos, '{', '}', true);
-            if (block.end_pos.line == -1) {
-                continue;
-            }
-            auto codelines = split(block.content, '\n');
-            module.globalCodes.insert(module.globalCodes.end(), codelines.begin(), codelines.end());
-        }
-    }
-
-    return module;
-}
 
 VulStaticProject parseVcppStaticProject(
     const string &project_dir,
@@ -821,16 +926,13 @@ VulStaticProject parseVcppStaticProject(
     }
     if (header_found) {
         VulErrorContextGuard _err{"parsing header file " + header_path.string()};
-        auto header_lines = readFileLines(header_path.string());
-        auto header_strip = stripComments(header_lines);
-        auto consts = _parseConsts(header_strip.lines);
-        for (const auto& item : consts) {
+        VulTempModule fake_module = _parseTempModule("header", header_path.string());
+        for (const auto& item : fake_module.configs) {
             VulErrorContextGuard _err{"evaluating constant " + item.name};
             ConfigRealValue value = calculateConstexprValue(item.value, project.global_configlib);
             project.global_configlib[item.name] = value;
         }
-        auto bundles = _parseBundles(header_strip.lines);
-        for (const auto& item : bundles) {
+        for (const auto& item : fake_module.bundles) {
             VulErrorContextGuard _err{"staticalizing bundle " + item.name};
             VulStaticBundle static_bundle;
             static_bundle = staticalizeBundle(item, project.global_configlib);
@@ -846,9 +948,7 @@ VulStaticProject parseVcppStaticProject(
         }
         {
             VulErrorContextGuard _err{"reading test harness module from " + main_path.string()};
-            auto main_lines = readFileLines(main_path.string());
-            auto main_strip = stripComments(main_lines);
-            project.test_harness = _parseStaticTestHarnessModule(main_strip.lines, project.global_configlib);
+            project.test_harness = _parseTestModule(main_path.string(), project.global_configlib, project.global_bundlelib);
         }
     }
 
@@ -906,29 +1006,45 @@ VulStaticProject parseVcppStaticProject(
     top_instance->filepath = top_path.string();
     todo_queue.push_back({top_instance, project.test_harness.top_config_overrides});
 
-    uint32_t module_count = 0;
+    uint32_t instance_count = 0;
+    VulTempModuleCache temp_module_cache;
 
     while (!todo_queue.empty()) {
         auto [instance_ptr, config_overrides] = todo_queue.front();
         todo_queue.pop_front();
 
-        VulErrorContextGuard _err{"parsing module instance " + instance_ptr->simClassName()};
+        VulErrorContextGuard _err{"parsing instance " + instance_ptr->simClassName() + " of module " + instance_ptr->module_name};
+        const ModuleName& mod_name = instance_ptr->module_name;
+        VulTempModule *temp_mod_ptr = nullptr;
 
-        auto mod_file_opt = find_module_file(instance_ptr->module_name);
-        if (!mod_file_opt.has_value()) {
-            throw VulException("Module file not found for module: " + instance_ptr->module_name);
+        auto temp_mod_iter = temp_module_cache.find(mod_name);
+        if (temp_mod_iter != temp_module_cache.end()) {
+            temp_mod_ptr = &temp_mod_iter->second;
+        } else {
+
+            auto mod_file_opt = find_module_file(mod_name);
+            if (!mod_file_opt.has_value()) {
+                throw VulException("Module file not found for module: " + instance_ptr->module_name);
+            }
+            const path& mod_file = mod_file_opt.value();
+            string mod_file_str = mod_file.string();
+
+            VulErrorContextGuard _err_file{"entering module file " + mod_file_str};
+
+            temp_module_cache[mod_name] = _parseTempModule(mod_name, mod_file_str);
+            temp_mod_ptr = &temp_module_cache[mod_name];
         }
 
-        VulErrorContextGuard _err_file{"entering module file " + mod_file_opt.value().string()};
-
-        path mod_path = mod_file_opt.value();
-        instance_ptr->filepath = mod_path.string();
-        auto mod_lines = readFileLines(mod_path.string());
-        auto mod_strip = stripComments(mod_lines);
-        _parseStaticModule(mod_strip.lines, project.global_configlib, config_overrides, *instance_ptr);
+        instantiateModule(
+            *instance_ptr,
+            *temp_mod_ptr,
+            config_overrides,
+            project.global_configlib,
+            project.global_bundlelib
+        );
         detectRequestCallInLogicBlocks(*instance_ptr);
 
-        instance_ptr->instance_id = module_count++;
+        instance_ptr->instance_id = instance_count++;
 
         // process child instances
         for (const auto& [child_name, child_instance_decl] : instance_ptr->instances) {
@@ -974,7 +1090,7 @@ VulStaticProject parseVcppStaticProject(
             dfs_stack.push_back({node->children[i - 1], depth + 1});
         }
     }
-    printf("Total instances: %d\n", module_count);
+    printf("Total instances: %d\n", instance_count);
     
     if (!is_sim) {
         printf("No main file provided, skipping simulation setup.\n");
@@ -986,14 +1102,14 @@ VulStaticProject parseVcppStaticProject(
     shared_ptr<VulStaticModuleInstance> fake_main = std::make_shared<VulStaticModuleInstance>();
     fake_main->instance_path = {"sim", "main"};
     fake_main->module_name = "TestMain";
-    fake_main->instance_id = module_count + 1;
+    fake_main->instance_id = instance_count + 1;
     fake_main->tick_blocks.push_back(VulTickBlock());
 
     shared_ptr<VulStaticModuleInstance> sim_top = std::make_shared<VulStaticModuleInstance>();
     sim_top->instance_path = {"sim"};
     sim_top->module_name = "SimTop";
     sim_top->filepath = main_file_path;
-    sim_top->instance_id = module_count + 2;
+    sim_top->instance_id = instance_count + 2;
     sim_top->tick_blocks.push_back(VulTickBlock());
 
     for (const auto &req_entry: project.top_module_instance->requests) {
@@ -1044,3 +1160,5 @@ VulStaticProject parseVcppStaticProject(
 
     return project;
 }
+
+
