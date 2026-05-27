@@ -350,6 +350,75 @@ bool codeblockContainsFunctionCall(const std::vector<std::string>& code, const s
                c == '_';
     };
 
+    auto skip_spaces_cross_line = [&](size_t &li, size_t &ci) {
+        while (li < code.size()) {
+            const std::string &cur = code[li];
+            while (ci < cur.size()) {
+                const char c = cur[ci];
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                    ++ci;
+                } else {
+                    return;
+                }
+            }
+            ++li;
+            ci = 0;
+        }
+    };
+
+    auto skip_template_arglist = [&](size_t &li, size_t &ci) -> bool {
+        int depth = 0;
+        bool in_string = false;
+        bool in_char = false;
+        bool escape = false;
+        while (li < code.size()) {
+            const std::string &cur = code[li];
+            while (ci < cur.size()) {
+                const char c = cur[ci];
+                if (in_string || in_char) {
+                    ++ci;
+                    if (escape) {
+                        escape = false;
+                    } else if (c == '\\') {
+                        escape = true;
+                    } else if (in_string && c == '"') {
+                        in_string = false;
+                    } else if (in_char && c == '\'') {
+                        in_char = false;
+                    }
+                    continue;
+                }
+                if (c == '"') {
+                    in_string = true;
+                    ++ci;
+                    continue;
+                }
+                if (c == '\'') {
+                    in_char = true;
+                    ++ci;
+                    continue;
+                }
+                if (c == '<') {
+                    ++depth;
+                    ++ci;
+                    continue;
+                }
+                if (c == '>') {
+                    --depth;
+                    ++ci;
+                    if (depth == 0) {
+                        return true;
+                    }
+                    continue;
+                }
+                ++ci;
+            }
+            ++li;
+            ci = 0;
+        }
+        return false;
+    };
+
     for (size_t i = 0; i < code.size(); ++i) {
         const std::string& line = code[i];
         size_t pos = 0;
@@ -372,17 +441,19 @@ bool codeblockContainsFunctionCall(const std::vector<std::string>& code, const s
             // 找 name 后第一个非空白字符（可跨行）
             size_t li = i;
             size_t ci = end;
-            while (li < code.size()) {
-                const std::string& cur = code[li];
-                while (ci < cur.size() && (cur[ci] == ' ' || cur[ci] == '\t' || cur[ci] == '\r' || cur[ci] == '\n')) {
-                    ++ci;
+            skip_spaces_cross_line(li, ci);
+            if (li < code.size()) {
+                if (code[li][ci] == '(') {
+                    return true;
                 }
-                if (ci < cur.size()) {
-                    if (cur[ci] == '(') return true;
-                    break;
+                if (code[li][ci] == '<') {
+                    if (skip_template_arglist(li, ci)) {
+                        skip_spaces_cross_line(li, ci);
+                        if (li < code.size() && ci < code[li].size() && code[li][ci] == '(') {
+                            return true;
+                        }
+                    }
                 }
-                ++li;
-                ci = 0;
             }
 
             pos += func_name.size();

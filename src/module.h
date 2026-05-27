@@ -75,6 +75,7 @@ struct VulTempWire {
 
 struct VulTempReqServBase {
     string name;
+    string array_size; // empty means non-arrayed request/service port
     vector<pair<string, string>> args; // pair of arg name and arg type
     vector<pair<string, string>> rets; // pair of ret name and ret type
     bool has_handshake;
@@ -232,12 +233,16 @@ struct VulStaticArg {
 
 struct VulStaticReqServ {
     ReqServName name;
+    bool is_arrayed = false;
+    ConfigRealValue array_size = 1;
     vector<VulStaticArg> args;
     vector<VulStaticArg> rets;
     bool has_handshake;
 
     inline bool match(const VulStaticReqServ &a) const {
         if (a.has_handshake != has_handshake) return false;
+        if (a.is_arrayed != is_arrayed) return false;
+        if (a.array_size != array_size) return false;
         if (a.args.size() != args.size()) return false;
         for (size_t i = 0; i < a.args.size(); ++i) {
             if (a.args[i].type != args[i].type) return false;

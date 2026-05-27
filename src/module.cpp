@@ -33,7 +33,17 @@ using std::make_shared;
 VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulStaticConfigLib &config_lib) {
     VulStaticReqServ static_req;
     static_req.name = item.name;
+    static_req.is_arrayed = false;
+    static_req.array_size = 1;
     static_req.has_handshake = item.has_handshake;
+    if (!item.array_size.empty()) {
+        ConfigRealValue array_size = calculateConstexprValue(item.array_size, config_lib);
+        if (array_size <= 0) {
+            throw VulException("ARRAY() must be positive for request/service '" + item.name + "'");
+        }
+        static_req.is_arrayed = true;
+        static_req.array_size = array_size;
+    }
     for (const auto &arg : item.args) {
         VulStaticArg static_arg;
         static_arg.name = arg.second;
@@ -651,4 +661,3 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
     }
 
 }
-

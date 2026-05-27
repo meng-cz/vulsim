@@ -181,16 +181,27 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     for (const auto &req_entry : mod.requests) {
         const auto &req = req_entry.second;
         string rettype = req.returnType();
-        string argtypes = req.signatureArgTypeOnly();
         string argnames = req.signatureArgNameList();
         string arglists = req.signatureArgOnly();
+        const bool is_arrayed = req.is_arrayed;
 
-        decl_private_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ");\n");
+        if (is_arrayed) {
+            decl_private_field.push_back("template <uint32_t IDX = 0>\n");
+            decl_private_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ");\n");
+        } else {
+            decl_private_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ");\n");
+        }
         decl_private_field.push_back("\n");
 
         string call_prefix = (rettype == "void" ? "" : "return ");
-        impl_field.push_back(rettype + " " + mod_class_name + "::" + req_entry.first + "(" + arglists + ") {\n");
-        impl_field.push_back(CodeTab + call_prefix + "__parent->__wrapper_" + mod.instance_path.back() + "_" + req_entry.first + "(" + argnames + ");\n");
+        if (is_arrayed) {
+            impl_field.push_back("template <uint32_t IDX>\n");
+            impl_field.push_back(rettype + " " + mod_class_name + "::" + req_entry.first + "(" + arglists + ") {\n");
+            impl_field.push_back(CodeTab + call_prefix + "__parent->__wrapper_" + mod.instance_path.back() + "_" + req_entry.first + "<IDX>(" + argnames + ");\n");
+        } else {
+            impl_field.push_back(rettype + " " + mod_class_name + "::" + req_entry.first + "(" + arglists + ") {\n");
+            impl_field.push_back(CodeTab + call_prefix + "__parent->__wrapper_" + mod.instance_path.back() + "_" + req_entry.first + "(" + argnames + ");\n");
+        }
         impl_field.push_back("}\n");
         impl_field.push_back("\n");
     }
@@ -199,33 +210,62 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     for (const auto &serv_entry : mod.services) {
         const auto &serv = serv_entry.second;
         string rettype = serv.returnType();
-        string argtypes = serv.signatureArgTypeOnly();
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
+        const bool is_arrayed = serv.is_arrayed;
 
-        decl_public_field.push_back(rettype + " " + serv_entry.first + "(" + arglists + ");\n");
+        if (is_arrayed) {
+            decl_public_field.push_back("template <uint32_t IDX = 0>\n");
+            decl_public_field.push_back(rettype + " " + serv_entry.first + "(" + arglists + ");\n");
+        } else {
+            decl_public_field.push_back(rettype + " " + serv_entry.first + "(" + arglists + ");\n");
+        }
 
         // implemented by logic block, or connented to child module's service
         auto lb_iter = mod.serv_logic_blocks.find(serv_entry.first);
         if (lb_iter != mod.serv_logic_blocks.end()) {
             if (rettype == "void") {
+                if (is_arrayed) {
+                    impl_field.push_back("template <uint32_t IDX>\n");
+                }
                 impl_field.push_back("void " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
                 impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
                 impl_field.push_back("}\n");
             } else {
-                decl_private_field.push_back("bool __cond_" + serv_entry.first + "(" + arglists + ");\n");
-                decl_private_field.push_back("void __impl_" + serv_entry.first + "(" + arglists + ");\n");
+                if (is_arrayed) {
+                    decl_private_field.push_back("template <uint32_t IDX = 0>\n");
+                    decl_private_field.push_back("bool __cond_" + serv_entry.first + "(" + arglists + ");\n");
+                    decl_private_field.push_back("template <uint32_t IDX = 0>\n");
+                    decl_private_field.push_back("void __impl_" + serv_entry.first + "(" + arglists + ");\n");
+                } else {
+                    decl_private_field.push_back("bool __cond_" + serv_entry.first + "(" + arglists + ");\n");
+                    decl_private_field.push_back("void __impl_" + serv_entry.first + "(" + arglists + ");\n");
+                }
 
+                if (is_arrayed) {
+                    impl_field.push_back("template <uint32_t IDX>\n");
+                }
                 impl_field.push_back("bool " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
-                impl_field.push_back(CodeTab + "bool cond = __cond_" + serv_entry.first + "(" + argnames + ");\n");
-                impl_field.push_back(CodeTab + "if (cond) __impl_" + serv_entry.first + "(" + argnames + ");\n");
+                if (is_arrayed) {
+                    impl_field.push_back(CodeTab + "bool cond = __cond_" + serv_entry.first + "<IDX>(" + argnames + ");\n");
+                    impl_field.push_back(CodeTab + "if (cond) __impl_" + serv_entry.first + "<IDX>(" + argnames + ");\n");
+                } else {
+                    impl_field.push_back(CodeTab + "bool cond = __cond_" + serv_entry.first + "(" + argnames + ");\n");
+                    impl_field.push_back(CodeTab + "if (cond) __impl_" + serv_entry.first + "(" + argnames + ");\n");
+                }
                 impl_field.push_back(CodeTab + "return cond;\n");
                 impl_field.push_back("}\n");
 
+                if (is_arrayed) {
+                    impl_field.push_back("template <uint32_t IDX>\n");
+                }
                 impl_field.push_back("bool " + mod_class_name + "::__cond_" + serv_entry.first + "(" + arglists + ") {\n");
                 impl_field.insert(impl_field.end(), lb_iter->second.cond_codelines.begin(), lb_iter->second.cond_codelines.end());
                 impl_field.push_back("}\n");
 
+                if (is_arrayed) {
+                    impl_field.push_back("template <uint32_t IDX>\n");
+                }
                 impl_field.push_back("void " + mod_class_name + "::__impl_" + serv_entry.first + "(" + arglists + ") {\n");
                 impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
                 impl_field.push_back("}\n");
@@ -393,9 +433,17 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             string rettype = serv.returnType();
             string arglists = serv.signatureArgOnly();
             string argname = serv.signatureArgNameList();
+            const bool is_arrayed = serv.is_arrayed;
+            if (is_arrayed) {
+                decl_private_field.push_back("template <uint32_t IDX = 0>\n");
+            }
             decl_private_field.push_back(rettype + " " + inst_name + "_" + serv_name + "(" + arglists + ") {\n");
             string call_prefix = (rettype == "void" ? "" : "return ");
-            decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "(" + argname + ");\n");
+            if (is_arrayed) {
+                decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "<IDX>(" + argname + ");\n");
+            } else {
+                decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "(" + argname + ");\n");
+            }
             decl_private_field.push_back("}\n");
         }
 
@@ -406,6 +454,10 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             string rettype = req.returnType();
             string arglists = req.signatureArgOnly();
             string argname = req.signatureArgNameList();
+            const bool is_arrayed = req.is_arrayed;
+            if (is_arrayed) {
+                decl_public_field.push_back("template <uint32_t IDX = 0>\n");
+            }
             decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
             string call_prefix = (rettype == "void" ? "" : "return ");
             // find the connected service
@@ -423,10 +475,18 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
             if (conn.serv_instance.empty()) {
                 // passed to local request/service, directly call the function
-                decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "(" + argname + ");\n");
+                if (is_arrayed) {
+                    decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "<IDX>(" + argname + ");\n");
+                } else {
+                    decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "(" + argname + ");\n");
+                }
             } else {
                 // passed to child module's service
-                decl_public_field.push_back(CodeTab + call_prefix + "__instptr_" + conn.serv_instance + "->" + conn.serv_name + "(" + argname + ");\n");
+                if (is_arrayed) {
+                    decl_public_field.push_back(CodeTab + call_prefix + "__instptr_" + conn.serv_instance + "->" + conn.serv_name + "<IDX>(" + argname + ");\n");
+                } else {
+                    decl_public_field.push_back(CodeTab + call_prefix + "__instptr_" + conn.serv_instance + "->" + conn.serv_name + "(" + argname + ");\n");
+                }
             }
 
             decl_public_field.push_back("}\n");
@@ -628,12 +688,19 @@ vector<string> genStaticTestHarnessHpp(
     for (const auto &req_entry : test_module.requests) {
         const auto &req = req_entry.second;
         string rettype = req.returnType();
-        string argtypes = req.signatureArgTypeOnly();
         string argnames = req.signatureArgNameList();
         string arglists = req.signatureArgOnly();
+        const bool is_arrayed = !req.array_size.empty();
+        if (is_arrayed) {
+            member_field.push_back("template <uint32_t IDX = 0>\n");
+        }
         member_field.push_back(rettype + " " + req_entry.first + "(" + arglists + ") {\n");
         string return_prefix = (rettype == "void" ? "" : "return ");
-        member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + req_entry.first + "(" + argnames + ");\n");
+        if (is_arrayed) {
+            member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + req_entry.first + "<IDX>(" + argnames + ");\n");
+        } else {
+            member_field.push_back(CodeTab + return_prefix + child_instptr_name + "->" + req_entry.first + "(" + argnames + ");\n");
+        }
         member_field.push_back("}\n");
         member_field.push_back("\n");
     }
@@ -642,24 +709,42 @@ vector<string> genStaticTestHarnessHpp(
         const auto &serv_name = serve.first;
         const auto &serv = serve.second;
         string rettype = serv.returnType();
-        string argtypes = serv.signatureArgTypeOnly();
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
+        const bool is_arrayed = !serv.array_size.empty();
 
+        if (is_arrayed) {
+            public_member_field.push_back("template <uint32_t IDX = 0>\n");
+        }
         public_member_field.push_back(rettype + " __wrapper_" + top_module.instance_path.back() + "_" + serve.first + "(" + arglists + ") {\n");
         if (serv.has_handshake) {
-            public_member_field.push_back(CodeTab + "bool cond = __cond_" + serve.first + "(" + argnames + ");\n");
-            public_member_field.push_back(CodeTab + "if (cond) __impl_" + serve.first + "(" + argnames + ");\n");
+            if (is_arrayed) {
+                public_member_field.push_back(CodeTab + "bool cond = __cond_" + serve.first + "<IDX>(" + argnames + ");\n");
+                public_member_field.push_back(CodeTab + "if (cond) __impl_" + serve.first + "<IDX>(" + argnames + ");\n");
+            } else {
+                public_member_field.push_back(CodeTab + "bool cond = __cond_" + serve.first + "(" + argnames + ");\n");
+                public_member_field.push_back(CodeTab + "if (cond) __impl_" + serve.first + "(" + argnames + ");\n");
+            }
             public_member_field.push_back(CodeTab + "return cond;\n");
         } else {
-            public_member_field.push_back(CodeTab + "__impl_" + serve.first + "(" + argnames + ");\n");
+            if (is_arrayed) {
+                public_member_field.push_back(CodeTab + "__impl_" + serve.first + "<IDX>(" + argnames + ");\n");
+            } else {
+                public_member_field.push_back(CodeTab + "__impl_" + serve.first + "(" + argnames + ");\n");
+            }
         }
         public_member_field.push_back("}\n");
 
+        if (is_arrayed) {
+            member_field.push_back("template <uint32_t IDX = 0>\n");
+        }
         member_field.push_back("void __impl_" + serv_name + "(" + arglists + ") {\n");
         member_field.insert(member_field.end(), serv.codelines.begin(), serv.codelines.end());
         member_field.push_back("}\n");
         if (serv.has_handshake) {
+            if (is_arrayed) {
+                member_field.push_back("template <uint32_t IDX = 0>\n");
+            }
             member_field.push_back("bool __cond_" + serv_name + "(" + arglists + ") {\n");
             member_field.push_back("return (" + serv.cond + ");\n");
             member_field.push_back("}\n");

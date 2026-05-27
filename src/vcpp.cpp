@@ -299,7 +299,19 @@ static inline void parseReqArgsAndRets(
     size_t begin_idx,
     VulTempReqServBase &reqserv
 ) {
-    for (size_t i = begin_idx; i < macro_args.size(); ++i) {
+    size_t i = begin_idx;
+    if (i < macro_args.size()) {
+        const string first_tag = trim(macro_args[i]);
+        if (first_tag.size() > 7 && first_tag.rfind("ARRAY(", 0) == 0 && first_tag.back() == ')') {
+            reqserv.array_size = trim(first_tag.substr(6, first_tag.size() - 7));
+            if (reqserv.array_size.empty()) {
+                throw VulException("empty ARRAY() expression");
+            }
+            ++i;
+        }
+    }
+
+    for (; i < macro_args.size(); ++i) {
         const string &arg_decl_raw = macro_args[i];
         const string arg_decl = trim(arg_decl_raw);
         const size_t split_pos = arg_decl.find_last_of(" \t\r\n");
@@ -1160,5 +1172,4 @@ VulStaticProject parseVcppStaticProject(
 
     return project;
 }
-
 

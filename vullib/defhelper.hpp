@@ -60,17 +60,19 @@
 
 #define RESP(type) type &
 
-#define REQUEST(name, ...) void name (__VA_ARGS__);
+#define ARRAY(N) N
 
-#define REQUEST_READY(name, ...) bool name(__VA_ARGS__);
+#define REQUEST(name, ...) template<uint32_t IDX = 0> void name (__VA_ARGS__);
 
-#define SERVICE(name, ...) void __##name (__VA_ARGS__)
+#define REQUEST_READY(name, ...) template<uint32_t IDX = 0> bool name(__VA_ARGS__);
 
-#define SERVICE_READY(name, cond, ...) bool __##name(__VA_ARGS__)
+#define SERVICE(name, ...) template<uint32_t IDX = 0> void __##name (__VA_ARGS__)
 
-#define SERVICE_PRIO(name, priority, ...) void __##name (__VA_ARGS__)
+#define SERVICE_READY(name, cond, ...) template<uint32_t IDX = 0> bool __##name(__VA_ARGS__)
 
-#define SERVICE_PRIO_READY(name, priority, cond, ...) bool __##name(__VA_ARGS__)
+#define SERVICE_PRIO(name, priority, ...) template<uint32_t IDX = 0> void __##name (__VA_ARGS__)
+
+#define SERVICE_PRIO_READY(name, priority, cond, ...) template<uint32_t IDX = 0> bool __##name(__VA_ARGS__)
 
 
 #define TICK_IMPL() void tick()

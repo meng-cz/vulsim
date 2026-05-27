@@ -60,6 +60,10 @@ struct RTLGenContext {
     vector<string> resource_files;
 };
 
+inline string reqservArraySuffix(uint32_t idx) {
+    return "__IDX" + std::to_string(idx);
+}
+
 
 void _procConstAndBundle(RTLGenContext &ctx){
     VulErrorContextGuard guard("processing local configlib and bundlelib");
@@ -299,6 +303,7 @@ void _procRegisters(RTLGenContext &ctx) {
 
 struct ArgPort {
     string name;
+    VulStaticTypeSignature type;
     uint32_t width;
     vector<FlatField> flat_fields;
 };
@@ -307,6 +312,7 @@ inline ArgPort procArg(const VulStaticArg &arg, const VulStaticBundleLib &bundle
     ArgPort port;
     port.name = arg.name;
     port.width = 0;
+    port.type = arg.type;
     flatten_type_signature(arg.type, bundlelib, arg.name, port.width, port.flat_fields);
     return port;
 }
@@ -355,59 +361,111 @@ void _procRequests(RTLGenContext &ctx) {
         }
 
         string rettype = req.returnType();
-        string argtypes = req.signatureArgTypeOnly();
-        string argnames = req.signatureArgNameList();
         string arglists = req.signatureArgOnly();
         bool has_rdy = req.has_handshake;
+        const bool is_arrayed = req.is_arrayed;
+        const uint32_t array_size = static_cast<uint32_t>(req.array_size);
+
+        auto arrayed_port_decl = [&](const string &base_name) -> string {
+            if (is_arrayed) {
+                return "std::array<" + base_name + ", " + std::to_string(array_size) + ">";
+            } else {
+                return base_name;
+            }
+        };
 
         // hls function ports
         string vld_port_name = reqservVldPort(req_name);
         string rdy_port_name = reqservRdyPort(req_name);
-        ctx.hls_arguments.push_back("bool &" + vld_port_name);
+        ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " &" + vld_port_name);
         if (has_rdy) {
-            ctx.hls_arguments.push_back("const bool " + rdy_port_name);
+            ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " " + rdy_port_name);
         }
         for (const auto &arg : arg_ports) {
-            ctx.hls_arguments.push_back("Int<" + std::to_string(arg.width) + "> &" + reqservArgPort(req_name, arg.name));
+            ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " &" + reqservArgPort(req_name, arg.name));
         }
         for (const auto &ret : ret_ports) {
-            ctx.hls_arguments.push_back("const Int<" + std::to_string(ret.width) + "> " + reqservArgPort(req_name, ret.name));
+            ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " " + reqservArgPort(req_name, ret.name));
         }
 
-        // generate request helper function declaration
-        ctx.hls_init.push_back(vld_port_name + " = false;\n");
-        ctx.hls_helpers.push_back("auto " + req_name + " = [&](" + arglists + ") -> " + rettype + "{\n");
-        ctx.hls_helpers.push_back("  " + vld_port_name + " = true;\n");
+        if (is_arrayed) {
+            for (uint32_t idx = 0; idx < array_size; ++idx) {
+                ctx.hls_init.push_back(vld_port_name + "[" + std::to_string(idx) + "] = false;\n");
+            }
+        }
+
+        // generate request helper function declaration (supports req<IDX>(...))
+        const string helper_struct_name = "__ReqHelper__" + req_name;
+        const string helper_var_name = "__req_helper__" + req_name;
+        const string array_size_str = std::to_string(array_size);
+
+        ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
+        ctx.hls_header.push_back("  " + arrayed_port_decl("bool") + " & vld_ports;\n");
+        if (has_rdy) {
+            ctx.hls_header.push_back("  const " + arrayed_port_decl("bool") + " & rdy_ports;\n");
+        }
+        for (const auto &arg : arg_ports) {
+            ctx.hls_header.push_back("  " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & arg_" + arg.name + ";\n");
+        }
+        for (const auto &ret : ret_ports) {
+            ctx.hls_header.push_back("  const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & ret_" + ret.name + ";\n");
+        }
+
+        ctx.hls_header.push_back("\n");
+        ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
+        ctx.hls_header.push_back("  " + rettype + " call(" + arglists + ") {\n");
+        ctx.hls_header.push_back("    static_assert(IDX < " + array_size_str + ", \"Request port index out of range\");\n");
+        string sel_str = is_arrayed ? ("[IDX]") : "";
+        ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
         for (const auto &arg : arg_ports) {
             for (const auto &field : arg.flat_fields) {
-                ctx.hls_helpers.push_back(reqservArgPort(req_name, arg.name) + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                ctx.hls_header.push_back("    (arg_" + arg.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
             }
         }
         for (const auto &ret : ret_ports) {
             for (const auto &field : ret.flat_fields) {
-                ctx.hls_helpers.push_back("  " + field.name + " = " + reqservArgPort(req_name, ret.name) + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("    " + field.name + " = (ret_" + ret.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
             }
         }
         if (has_rdy) {
-            ctx.hls_helpers.push_back("  return " + rdy_port_name + ";\n");
+            ctx.hls_header.push_back("    return rdy_ports" + sel_str + ";\n");
+        }
+        ctx.hls_header.push_back("  }\n");
+        ctx.hls_header.push_back("};\n");
+
+        ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
+        ctx.hls_helpers.push_back("  " + vld_port_name + ",\n");
+        if (has_rdy) {
+            ctx.hls_helpers.push_back("  " + rdy_port_name + ",\n");
+        }
+        for (size_t i = 0; i < arg_ports.size(); ++i) {
+            const auto &arg = arg_ports[i];
+            ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, arg.name) + ",\n");
+        }
+        for (size_t i = 0; i < ret_ports.size(); ++i) {
+            const auto &ret = ret_ports[i];
+            ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, ret.name) + ",\n");
         }
         ctx.hls_helpers.push_back("};\n");
+        ctx.hls_helpers.push_back("#define " + req_name + " " + helper_var_name + ".call\n");
+        ctx.hls_final.push_back("#undef " + req_name + "\n");
 
         // generate RTL ports
-        ctx.rtl_ports.push_back("output " + vld_port_name);
+        string sv_array_str = is_arrayed ? ("[" + std::to_string(array_size) + "]") : "";
+        ctx.rtl_ports.push_back("output " + vld_port_name + sv_array_str);
         ctx.rtl_logicports.push_back("." + vld_port_name + "(" + vld_port_name + ")");
         if (has_rdy) {
-            ctx.rtl_ports.push_back("input " + rdy_port_name);
+            ctx.rtl_ports.push_back("input " + rdy_port_name + sv_array_str);
             ctx.rtl_logicports.push_back("." + rdy_port_name + "(" + rdy_port_name + ")");
         }
         for (const auto &arg : arg_ports) {
             string arg_port_name = reqservArgPort(req_name, arg.name);
-            ctx.rtl_ports.push_back("output [" + std::to_string(arg.width - 1) + ":0] " + arg_port_name);
+            ctx.rtl_ports.push_back("output [" + std::to_string(arg.width - 1) + ":0] " + arg_port_name + sv_array_str);
             ctx.rtl_logicports.push_back("." + arg_port_name + "(" + arg_port_name + ")");
         }
         for (const auto &ret : ret_ports) {
             string ret_port_name = reqservArgPort(req_name, ret.name);
-            ctx.rtl_ports.push_back("input [" + std::to_string(ret.width - 1) + ":0] " + ret_port_name);
+            ctx.rtl_ports.push_back("input [" + std::to_string(ret.width - 1) + ":0] " + ret_port_name + sv_array_str);
             ctx.rtl_logicports.push_back("." + ret_port_name + "(" + ret_port_name + ")");
         }
     }
@@ -422,6 +480,8 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         string argnames;
         string arglists;
         bool has_rdy;
+        bool is_arrayed = false;
+        uint32_t array_size = 1;
         vector<ArgPort> arg_ports;
         vector<ArgPort> ret_ports;
         bool is_tick = false;
@@ -457,21 +517,32 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
         bool has_rdy = serv.has_handshake;
+        const bool is_arrayed = serv.is_arrayed;
+        const uint32_t array_size = static_cast<uint32_t>(serv.array_size);
+        string sv_array_str = is_arrayed ? ("[" + std::to_string(array_size) + "]") : "";
+
+        auto arrayed_port_decl = [&](const string &base_name) -> string {
+            if (is_arrayed) {
+                return "std::array<" + base_name + ", " + std::to_string(array_size) + ">";
+            } else {
+                return base_name;
+            }
+        };
 
         // rtl ports
         string vld_port_name = reqservVldPort(serv_name);
         string rdy_port_name = reqservRdyPort(serv_name);
-        ctx.rtl_ports.push_back("input " + vld_port_name);
+        ctx.rtl_ports.push_back("input " + vld_port_name + sv_array_str);
         if (has_rdy) {
-            ctx.rtl_ports.push_back("output " + rdy_port_name);
+            ctx.rtl_ports.push_back("output " + rdy_port_name + sv_array_str);
         }
         for (const auto &arg : arg_ports) {
             string arg_port_name = reqservArgPort(serv_name, arg.name);
-            ctx.rtl_ports.push_back("input [" + std::to_string(arg.width - 1) + ":0] " + arg_port_name);
+            ctx.rtl_ports.push_back("input [" + std::to_string(arg.width - 1) + ":0] " + arg_port_name + sv_array_str);
         }
         for (const auto &ret : ret_ports) {
             string ret_port_name = reqservArgPort(serv_name, ret.name);
-            ctx.rtl_ports.push_back("output [" + std::to_string(ret.width - 1) + ":0] " + ret_port_name);
+            ctx.rtl_ports.push_back("output [" + std::to_string(ret.width - 1) + ":0] " + ret_port_name + sv_array_str);
         }
 
         // a service should be:
@@ -484,28 +555,36 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         }
         const auto& lb = iter->second;
 
-        ctx.hls_arguments.push_back("const bool " + vld_port_name);
+        ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " " + vld_port_name);
         ctx.rtl_logicports.push_back("." + vld_port_name + "(" + vld_port_name + ")");
         if (has_rdy) {
-            ctx.hls_arguments.push_back("bool &" + rdy_port_name);
+            ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " & " + rdy_port_name);
             ctx.rtl_logicports.push_back("." + rdy_port_name + "(" + rdy_port_name + ")");
         }
         for (const auto &arg : arg_ports) {
             string arg_port_name = reqservArgPort(serv_name, arg.name);
-            ctx.hls_arguments.push_back("const Int<" + std::to_string(arg.width) + "> " + arg_port_name);
+            ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " " + arg_port_name);
             ctx.rtl_logicports.push_back("." + arg_port_name + "(" + arg_port_name + ")");
         }
         for (const auto &ret : ret_ports) {
             string ret_port_name = reqservArgPort(serv_name, ret.name);
-            ctx.hls_arguments.push_back("Int<" + std::to_string(ret.width) + "> &" + ret_port_name);
+            ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " &" + ret_port_name);
             ctx.rtl_logicports.push_back("." + ret_port_name + "(" + ret_port_name + ")");
         }
 
-        ctx.hls_blocks.push_back("auto " + implFuncName(serv_name) + " = [&](" + arglists + ") -> void {\n");
+        if (is_arrayed) {
+            ctx.hls_blocks.push_back("auto " + implFuncName(serv_name) + " = [&]<uint32_t IDX = 0>(" + arglists + ") -> void {\n");
+        } else {
+            ctx.hls_blocks.push_back("auto " + implFuncName(serv_name) + " = [&](" + arglists + ") -> void {\n");
+        }
         ctx.hls_blocks.insert(ctx.hls_blocks.end(), lb.codelines.begin(), lb.codelines.end());
         ctx.hls_blocks.push_back("};\n");
         if (has_rdy) {
-            ctx.hls_blocks.push_back("auto " + condFuncName(serv_name) + " = [&](" + arglists + ") -> bool {\n");
+            if (is_arrayed) {
+                ctx.hls_blocks.push_back("auto " + condFuncName(serv_name) + " = [&]<uint32_t IDX = 0>(" + arglists + ") -> bool {\n");
+            } else {
+                ctx.hls_blocks.push_back("auto " + condFuncName(serv_name) + " = [&](" + arglists + ") -> bool {\n");
+            }
             ctx.hls_blocks.insert(ctx.hls_blocks.end(), lb.cond_codelines.begin(), lb.cond_codelines.end());
             ctx.hls_blocks.push_back("};\n");
         }
@@ -518,6 +597,8 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         cache.argnames = argnames;
         cache.arglists = arglists;
         cache.has_rdy = has_rdy;
+        cache.is_arrayed = is_arrayed;
+        cache.array_size = array_size;
         cache.arg_ports = arg_ports;
         cache.ret_ports = ret_ports;
         cache.is_tick = false;
@@ -549,11 +630,49 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         const std::vector<ServiceCache>& vec = it->second;
         for (const ServiceCache& cache : vec) {
             if (cache.has_rdy) {
-                ctx.hls_body.push_back("{\n");
-                ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "(" + cache.argnames + ");\n");
-                ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + cache.argnames + ");\n");
-                ctx.hls_body.push_back("  " + reqservRdyPort(cache.name) + " = rdy;\n");
-                ctx.hls_body.push_back("}\n");
+                if (cache.is_arrayed) {
+                    for (uint32_t idx = 0; idx < cache.array_size; ++idx) {
+                        ctx.hls_body.push_back("{\n");
+                        string arg_names = "";
+                        for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
+                            const auto &arg = cache.arg_ports[i];
+                            string portname = (reqservArgPort(cache.name, arg.name) + "[" + std::to_string(idx) + "]");
+                            string typestr = arg.type.toString();
+                            ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
+                            for (const auto &field : arg.flat_fields) {
+                                ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                            }
+                            if (i > 0) {
+                                arg_names += ", ";
+                            }
+                            arg_names += arg.name;
+                        }
+                        ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) " + implFuncName(cache.name) + "<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        ctx.hls_body.push_back("  " + reqservRdyPort(cache.name) + "[" + std::to_string(idx) + "] = rdy;\n");
+                        ctx.hls_body.push_back("}\n");
+                    }
+                } else {
+                    ctx.hls_body.push_back("{\n");
+                    string arg_names = "";
+                    for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
+                        const auto &arg = cache.arg_ports[i];
+                        string portname = (reqservArgPort(cache.name, arg.name));
+                        string typestr = arg.type.toString();
+                        ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
+                        for (const auto &field : arg.flat_fields) {
+                            ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                        }
+                        if (i > 0) {
+                            arg_names += ", ";
+                        }
+                        arg_names += arg.name;
+                    }
+                    ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "(" + arg_names + ");\n");
+                    ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + arg_names + ");\n");
+                    ctx.hls_body.push_back("  " + reqservRdyPort(cache.name) + " = rdy;\n");
+                    ctx.hls_body.push_back("}\n");
+                }
             } else if (!cache.is_tick) {
                 ctx.hls_body.push_back("if (" + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + cache.argnames + ");\n");
             } else {
@@ -593,6 +712,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
         for (const auto &req_entry : child.requests) {
             const auto &req = req_entry.second;
             const string &req_name = req_entry.first;
+            string sv_array_str = req.is_arrayed ? ("[" + std::to_string(req.array_size) + "]") : "";
             VulReqServConnection conn;
             bool connected = false;
             for (const auto &c : ctx.module.req_connections) {
@@ -609,24 +729,24 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             // CR-S 需要wire，子实例-逻辑子模块
             if (conn.serv_instance != "" || ctx.module.services.find(conn.serv_name) != ctx.module.services.end()) {
                 string conn_str = conn_to_str(conn);
-                ctx.rtl_decl.push_back("wire " + conn_str + "_valid;\n");
+                ctx.rtl_decl.push_back("wire " + conn_str + "_valid" + sv_array_str + ";\n");
                 child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + conn_str + "_valid)" );
                 if (req.has_handshake) {
-                    ctx.rtl_decl.push_back("wire " + conn_str + "_ready;\n");
+                    ctx.rtl_decl.push_back("wire " + conn_str + "_ready" + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + conn_str + "_ready)" );
                 }
                 for (const auto &arg : req.args) {
                     uint32_t offset = 0;
                     std::vector<FlatField> out;
                     flatten_type_signature(arg.type, ctx.local_bundlelib, arg.name, offset, out);
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_arg_" + arg.name + ";\n");
+                    ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_arg_" + arg.name  + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")" );
                 }
                 for (const auto &ret : req.rets) {
                     uint32_t offset = 0;
                     std::vector<FlatField> out;
                     flatten_type_signature(ret.type, ctx.local_bundlelib, ret.name, offset, out);
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_ret_" + ret.name + ";\n");
+                    ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_ret_" + ret.name + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")" );
                 }
             } else {
@@ -686,15 +806,23 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 }
             } else {
                 // L-CS 需要wire，逻辑子模块-子实例，同时在 HLS 函数里设置 helper function
+                string sv_array_str = srv.is_arrayed ? ("[" + std::to_string(srv.array_size) + "]") : "";
+                auto arrayed_port_decl = [&](const string &base_name) -> string {
+                    if (srv.is_arrayed) {
+                        return "std::array<" + base_name + ", " + std::to_string(srv.array_size) + ">";
+                    } else {
+                        return base_name;
+                    }
+                };
                 string child_serv_name = child_instance_name + "_" + srv_name;
-                ctx.rtl_decl.push_back("wire " + reqservVldPort(child_serv_name) + ";\n");
+                ctx.rtl_decl.push_back("wire " + reqservVldPort(child_serv_name) + sv_array_str + ";\n");
                 child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(child_serv_name) + ")" );
-                ctx.hls_arguments.push_back("bool & " + reqservVldPort(child_serv_name));
+                ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " & " + reqservVldPort(child_serv_name));
                 ctx.rtl_logicports.push_back("." + reqservVldPort(child_serv_name) + "(" + reqservVldPort(child_serv_name) + ")");
                 if (srv.has_handshake) {
-                    ctx.rtl_decl.push_back("wire " + reqservRdyPort(child_serv_name) + ";\n");
+                    ctx.rtl_decl.push_back("wire " + reqservRdyPort(child_serv_name) + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(child_serv_name) + ")" );
-                    ctx.hls_arguments.push_back("const bool " + reqservRdyPort(child_serv_name));
+                    ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " & " + reqservRdyPort(child_serv_name));
                     ctx.rtl_logicports.push_back("." + reqservRdyPort(child_serv_name) + "(" + reqservRdyPort(child_serv_name) + ")");
                 }
                 vector<ArgPort> arg_ports;
@@ -706,34 +834,78 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                     ret_ports.push_back(procArg(ret, ctx.local_bundlelib));
                 }
                 for (const auto &arg : arg_ports) {
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(arg.width - 1) + ":0] " + reqservArgPort(child_serv_name, arg.name) + ";\n");
+                    ctx.rtl_decl.push_back("wire [" + std::to_string(arg.width - 1) + ":0] " + reqservArgPort(child_serv_name, arg.name) + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")" );
-                    ctx.hls_arguments.push_back("Int<" + std::to_string(arg.width) + "> & " + reqservArgPort(child_serv_name, arg.name));
+                    ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & " + reqservArgPort(child_serv_name, arg.name));
                     ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")");
                 }
                 for (const auto &ret : ret_ports) {
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(ret.width - 1) + ":0] " + reqservArgPort(child_serv_name, ret.name) + ";\n");
+                    ctx.rtl_decl.push_back("wire [" + std::to_string(ret.width - 1) + ":0] " + reqservArgPort(child_serv_name, ret.name) + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")" );
-                    ctx.hls_arguments.push_back("const Int<" + std::to_string(ret.width) + "> " + reqservArgPort(child_serv_name, ret.name));
+                    ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & " + reqservArgPort(child_serv_name, ret.name));
                     ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")");
                 }
-                ctx.hls_init.push_back(reqservVldPort(child_serv_name) + " = false;\n");
-                ctx.hls_helpers.push_back("auto " + child_serv_name + " = [&](" + srv.signatureArgOnly() + ") -> " + srv.returnType() + " {\n");
-                ctx.hls_helpers.push_back("  " + reqservVldPort(child_serv_name) + " = true;\n");
+                if (srv.is_arrayed) {
+                    for (uint32_t idx = 0; idx < srv.array_size; ++idx) {
+                        ctx.hls_init.push_back(reqservVldPort(child_serv_name) + "[" + std::to_string(idx) + "] = false;\n");
+                    }
+                } else {
+                    ctx.hls_init.push_back(reqservVldPort(child_serv_name) + " = false;\n");
+                }
+
+                const string helper_struct_name = "__ChildServiceHelper__" + child_serv_name;
+                const string helper_var_name = "__child_service_helper__" + child_serv_name;
+                const string array_size_str = std::to_string(srv.array_size);
+
+                ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
+                ctx.hls_header.push_back("  " + arrayed_port_decl("bool") + " & " + " vld_ports;\n");
+                if (srv.has_handshake) {
+                    ctx.hls_header.push_back("  const " + arrayed_port_decl("bool") + " & " + " rdy_ports;\n");
+                }
+                for (const auto &arg : arg_ports) {
+                    ctx.hls_header.push_back("  " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & " + " arg_" + arg.name + ";\n");
+                }
+                for (const auto &ret : ret_ports) {
+                    ctx.hls_header.push_back("  const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & " + " ret_" + ret.name + ";\n");
+                }
+                ctx.hls_header.push_back("\n");
+                ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
+                ctx.hls_header.push_back("  " + srv.returnType() + " call(" + srv.signatureArgOnly() + ") {\n");
+                ctx.hls_header.push_back("    static_assert(IDX < " + array_size_str + ", \"Service port index out of range\");\n");
+                string sel_str = srv.is_arrayed ? ("[IDX]") : "";
+                ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
                 for (const auto &arg : arg_ports) {
                     for (const auto &field : arg.flat_fields) {
-                        ctx.hls_helpers.push_back(reqservArgPort(child_serv_name, arg.name) + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                        ctx.hls_header.push_back("    (arg_" + arg.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
                     }
                 }
                 for (const auto &ret : ret_ports) {
                     for (const auto &field : ret.flat_fields) {
-                        ctx.hls_helpers.push_back("  " + field.name + " = " + reqservArgPort(child_serv_name, ret.name) + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                        ctx.hls_header.push_back("    " + field.name + " = (ret_" + ret.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
                     }
                 }
                 if (srv.has_handshake) {
-                    ctx.hls_helpers.push_back("  return " + reqservRdyPort(child_serv_name) + ";\n");
+                    ctx.hls_header.push_back("    return rdy_ports" + sel_str + ";\n");
+                }
+                ctx.hls_header.push_back("  }\n");
+                ctx.hls_header.push_back("};\n");
+
+                ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
+                ctx.hls_helpers.push_back("  " + reqservVldPort(child_serv_name) + ",\n");
+                if (srv.has_handshake) {
+                    ctx.hls_helpers.push_back("  " + reqservRdyPort(child_serv_name) + ",\n");
+                }
+                for (size_t i = 0; i < arg_ports.size(); ++i) {
+                    const auto &arg = arg_ports[i];
+                    ctx.hls_helpers.push_back("  " + reqservArgPort(child_serv_name, arg.name) + ",\n");
+                }
+                for (size_t i = 0; i < ret_ports.size(); ++i) {
+                    const auto &ret = ret_ports[i];
+                    ctx.hls_helpers.push_back("  " + reqservArgPort(child_serv_name, ret.name) + ",\n");
                 }
                 ctx.hls_helpers.push_back("};\n");
+                ctx.hls_helpers.push_back("#define " + child_serv_name + " " + helper_var_name + ".call\n");
+                ctx.hls_final.push_back("#undef " + child_serv_name + "\n");
             }
         }
         ctx.rtl_inst.push_back(child_class_name + " " + child_instance_name + " (\n");
