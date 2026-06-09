@@ -24,6 +24,7 @@
 #pragma once
 
 #include "project.h"
+#include <optional>
 
 using InstancePath = string;
 using SignalPath = string;
@@ -31,11 +32,14 @@ using SignalPath = string;
 struct VulTraceMatcher {
     InstancePath instance_path_matcher;
     SignalPath signal_path_matcher;
+    bool uses_double_colon = false;
 };
 
 struct VulTracedSignal {
     SignalPath signal_path;
     uint32_t bit_width;
+    bool trace_all_instances = true;
+    vector<vector<std::optional<ConfigRealValue>>> instance_index_filters;
 };
 
 VulTraceMatcher parseTraceMatcher(const string &matcher_str);

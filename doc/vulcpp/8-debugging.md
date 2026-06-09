@@ -29,6 +29,47 @@ echo "top::conn.*" > trace_config.txt
 
 常见写法示例：`top::conn.*` 表示追踪 `top::conn` 实例下所有层级的信号路径；`top::*.*` 表示追踪 `top` 下任意深度子实例中的所有信号；`top::cpu.regfile.*` 表示追踪 `top::cpu` 实例中 `regfile` 下所有层级子信号；`*.valid` 表示任意实例中最终变量名恰好为 `valid` 的信号。
 
+### 阵列化子实例的匹配
+
+对于阵列化子实例，可以在**实例路径**中直接写索引：
+
+```text
+top::mesh[0][0].datareg
+top::mesh[*][0].datareg
+top::lane[2].datareg
+```
+
+这里需要注意：
+- 索引写在实例路径一侧，因此层级分隔符仍然必须使用 `::`
+- 信号路径一侧仍然使用 `.`
+- 例如应写 `top::mesh[*][0].datareg`，而不能写成 `top.mesh[*][0].datareg`
+
+如果在阵列实例上**没有写索引**，则表示匹配该阵列实例类对应的**全部单元**：
+
+```text
+top::mesh.datareg
+top::lane.datareg
+```
+
+上例分别表示：
+- 追踪 `mesh` 阵列中所有节点的 `datareg`
+- 追踪 `lane` 阵列中所有节点的 `datareg`
+
+如果写了索引，则索引维数必须与实例声明维数一致，每一维可以是：
+- 一个精确常量索引，如 `0`、`2`
+- 通配符 `*`，表示该维任意合法索引
+
+例如：
+- `top::mesh[0][0].datareg`：仅匹配二维阵列中坐标为 `[0][0]` 的节点
+- `top::mesh[*][0].datareg`：匹配第 1 列的所有节点
+- `top::lane[2].datareg`：仅匹配一维阵列中索引为 `2` 的节点
+
+非法示例：
+- `top.mesh[*][0].datareg`
+  这会报错，因为实例路径使用了 `.` 而不是 `::`
+- `top::mesh[0].datareg`
+  这会报错，因为 `mesh` 是二维阵列，但这里只写了 1 维索引
+
 ## 2. 断点
 
 TODO：暂未实现

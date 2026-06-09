@@ -23,7 +23,6 @@
 #include "simgen.h"
 #include "stringop.hpp"
 
-#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
@@ -514,6 +513,8 @@ VulStaticConfigLib mergedModuleConfigLib(const VulStaticModuleInstance &mod) {
 
 template<typename Fn>
 void forEachIndexTuple(const vector<ConfigRealValue> &dims, Fn fn);
+vector<ConfigRealValue> childArrayDims(const VulStaticModuleInstance &mod);
+bool childIsArrayTemplate(const VulStaticModuleInstance &mod);
 
 vector<string> buildExplicitArrayWrapperLines(
     const VulStaticModuleInstance &mod,
@@ -1232,7 +1233,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     if (!traced_signals.empty()) {
         for (uint64_t i = 0; i < traced_signals.size(); ++i) {
             const auto &sig = traced_signals[i];
+            const bool needs_trace_bitmap = childIsArrayTemplate(mod) && !sig.trace_all_instances;
             string traceid_var = "_trace_id_" + std::to_string(i);
+            string tracebitmap_var = "_trace_bitmap_" + std::to_string(i);
             string signal_name = mod.concatInstancePath(".") + "." + sig.signal_path;
             string access_path = "";
             string regname = sig.signal_path;
@@ -1265,9 +1268,50 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
 
             decl_private_field.push_back("uint32_t " + traceid_var + " = 0;\n");
+            if (needs_trace_bitmap) {
+                decl_private_field.push_back("bool " + tracebitmap_var + " = false;\n");
+            }
 
-            impl_init_field.push_back(traceid_var + " = trace_registe_signal(\"" + signal_name + "\", " + std::to_string(sig.bit_width) + ");\n");
-            impl_commit_field.push_back("trace_record(" + traceid_var + ", " + access_path + ");\n");
+            if (childIsArrayTemplate(mod)) {
+                impl_init_field.push_back("{\n");
+                if (!needs_trace_bitmap) {
+                    impl_init_field.push_back(CodeTab + "std::string __trace_signal_name = \"" + mod.concatInstancePath(".") + "\";\n");
+                    for (size_t dim = 0; dim < childArrayDims(mod).size(); ++dim) {
+                        impl_init_field.push_back(CodeTab + "__trace_signal_name += \"[\" + std::to_string(__array_idx_" + std::to_string(dim) + ") + \"]\";\n");
+                    }
+                    impl_init_field.push_back(CodeTab + "__trace_signal_name += \"." + sig.signal_path + "\";\n");
+                    impl_init_field.push_back(CodeTab + traceid_var + " = trace_registe_signal(__trace_signal_name, " + std::to_string(sig.bit_width) + ");\n");
+                } else {
+                    impl_init_field.push_back(CodeTab + tracebitmap_var + " = false;\n");
+                    for (const auto &filter : sig.instance_index_filters) {
+                        string cond;
+                        for (size_t dim = 0; dim < filter.size(); ++dim) {
+                            if (!filter[dim].has_value()) continue;
+                            if (!cond.empty()) cond += " && ";
+                            cond += "__array_idx_" + std::to_string(dim) + " == " + std::to_string(*filter[dim]);
+                        }
+                        if (cond.empty()) {
+                            impl_init_field.push_back(CodeTab + tracebitmap_var + " = true;\n");
+                            break;
+                        }
+                        impl_init_field.push_back(CodeTab + "if (" + cond + ") " + tracebitmap_var + " = true;\n");
+                    }
+                    impl_init_field.push_back(CodeTab + "std::string __trace_signal_name = \"" + mod.concatInstancePath(".") + "\";\n");
+                    for (size_t dim = 0; dim < childArrayDims(mod).size(); ++dim) {
+                        impl_init_field.push_back(CodeTab + "__trace_signal_name += \"[\" + std::to_string(__array_idx_" + std::to_string(dim) + ") + \"]\";\n");
+                    }
+                    impl_init_field.push_back(CodeTab + "__trace_signal_name += \"." + sig.signal_path + "\";\n");
+                    impl_init_field.push_back(CodeTab + "if (" + tracebitmap_var + ") " + traceid_var + " = trace_registe_signal(__trace_signal_name, " + std::to_string(sig.bit_width) + ");\n");
+                }
+                impl_init_field.push_back("}\n");
+            } else {
+                impl_init_field.push_back(traceid_var + " = trace_registe_signal(\"" + signal_name + "\", " + std::to_string(sig.bit_width) + ");\n");
+            }
+            if (needs_trace_bitmap) {
+                impl_commit_field.push_back("if (" + tracebitmap_var + ") trace_record(" + traceid_var + ", " + access_path + ");\n");
+            } else {
+                impl_commit_field.push_back("trace_record(" + traceid_var + ", " + access_path + ");\n");
+            }
         }
     }
 

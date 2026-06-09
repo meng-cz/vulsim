@@ -24,6 +24,8 @@
 #include "stringop.hpp"
 
 #include <deque>
+#include <map>
+#include <unordered_set>
 
 VulTraceMatcher parseTraceMatcher(const string &matcher_str) {
     VulTraceMatcher matcher;
@@ -41,7 +43,11 @@ VulTraceMatcher parseTraceMatcher(const string &matcher_str) {
         return matcher;
     }
 
-    // Split by the first '.' so nested instance path like "a.b.c.sig" works.
+    matcher.uses_double_colon = matcher_str.find("::") != string::npos;
+
+    // As documented in UserGuide 8-debugging:
+    // split by the first '.'; the left side is instance path using "::",
+    // and the right side is signal path using '.'.
     size_t dot_pos = matcher_str.find('.');
     if (dot_pos == string::npos) {
         // No explicit signal matcher: treat as tracing all signals in this instance.
@@ -131,6 +137,79 @@ bool matchPathSegments(const string &pattern, const string &value, const string 
     return dp[p.size()][v.size()] != 0;
 }
 
+vector<string> splitPathSegments(const string &path, const string &sep) {
+    return (sep == "::" ? stringop::split(path, sep) : stringop::split(path, sep[0]));
+}
+
+string firstSignalSegmentBase(const string &signal_path) {
+    if (signal_path.empty()) return "";
+    string first_seg = stringop::split(signal_path, '.')[0];
+    return parseIndexedSegment(first_seg).base;
+}
+
+vector<ConfigRealValue> currentInstanceArrayDims(const shared_ptr<VulStaticModuleInstance> &instance_ptr) {
+    if (!instance_ptr->parent) return {};
+    auto it = instance_ptr->parent->instances.find(instance_ptr->instance_path.back());
+    if (it == instance_ptr->parent->instances.end()) return {};
+    return it->second.array_dims;
+}
+
+vector<std::optional<ConfigRealValue>> extractInstanceIndexFilter(
+    const string &matcher_instance_path,
+    const string &sep,
+    const shared_ptr<VulStaticModuleInstance> &instance_ptr
+) {
+    const auto dims = currentInstanceArrayDims(instance_ptr);
+    if (dims.empty()) {
+        return {};
+    }
+    auto matcher_segments = splitPathSegments(matcher_instance_path, sep);
+    if (matcher_segments.empty()) {
+        return {};
+    }
+    IndexedSegment leaf = parseIndexedSegment(matcher_segments.back());
+    if (leaf.base == "*") {
+        return {};
+    }
+    if (leaf.base != instance_ptr->instance_path.back()) {
+        return {};
+    }
+    if (leaf.indices.empty()) {
+        return {};
+    }
+    if (leaf.indices.size() != dims.size()) {
+        throw VulException(
+            "Trace matcher '" + matcher_instance_path +
+            "' specifies " + std::to_string(leaf.indices.size()) +
+            " indices, but instance '" + instance_ptr->concatInstancePath(".", false) +
+            "' has " + std::to_string(dims.size()) + " dimensions"
+        );
+    }
+    vector<std::optional<ConfigRealValue>> out;
+    out.reserve(dims.size());
+    for (size_t i = 0; i < dims.size(); ++i) {
+        const string idx = stringop::trim(leaf.indices[i]);
+        if (idx == "*") {
+            out.push_back(std::nullopt);
+            continue;
+        }
+        char *end = nullptr;
+        errno = 0;
+        long long parsed = std::strtoll(idx.c_str(), &end, 0);
+        if (errno != 0 || end == nullptr || *end != '\0') {
+            throw VulException("Invalid trace matcher index '" + idx + "' in '" + matcher_instance_path + "'");
+        }
+        if (parsed < 0 || parsed >= dims[i]) {
+            throw VulException(
+                "Trace matcher index '" + idx + "' out of range for dimension " + std::to_string(i) +
+                " of instance '" + instance_ptr->concatInstancePath(".", false) + "'"
+            );
+        }
+        out.push_back(static_cast<ConfigRealValue>(parsed));
+    }
+    return out;
+}
+
 
 } // namespace
 
@@ -156,11 +235,30 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
         VulStaticBundleLib local_bundlelib = instance_ptr->local_bundles;
         local_bundlelib.insert(local_bundlelib.end(), project.global_bundlelib.begin(), project.global_bundlelib.end());
 
-        vector<SignalPath> applied_signal_path_matchers;
+        struct AppliedSignalMatcher {
+            SignalPath signal_path_matcher;
+            bool trace_all_instances = true;
+            vector<std::optional<ConfigRealValue>> instance_index_filter;
+        };
+        vector<AppliedSignalMatcher> applied_signal_path_matchers;
         for (const auto &matcher : trace_matchers) {
-            string instance_path = instance_ptr->concatInstancePath("::", true);
-            if (matchPathSegments(matcher.instance_path_matcher, instance_path, "::")) {
-                applied_signal_path_matchers.push_back(matcher.signal_path_matcher);
+            string instance_path_colon = instance_ptr->concatInstancePath("::", false);
+            string instance_path_dot = instance_ptr->concatInstancePath(".", false);
+            bool matched_instance = false;
+            vector<std::optional<ConfigRealValue>> index_filter;
+            if (matcher.instance_path_matcher.find("::") != string::npos) {
+                matched_instance = matchPathSegments(matcher.instance_path_matcher, instance_path_colon, "::");
+                if (matched_instance) {
+                    index_filter = extractInstanceIndexFilter(matcher.instance_path_matcher, "::", instance_ptr);
+                }
+            } else {
+                matched_instance = matchPathSegments(matcher.instance_path_matcher, instance_path_dot, ".");
+                if (matched_instance) {
+                    index_filter = extractInstanceIndexFilter(matcher.instance_path_matcher, ".", instance_ptr);
+                }
+            }
+            if (matched_instance) {
+                applied_signal_path_matchers.push_back({matcher.signal_path_matcher, index_filter.empty(), std::move(index_filter)});
             }
         }
 
@@ -174,22 +272,60 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
             }
         }
 
-        vector<VulTracedSignal> &traced_signals = trace_table[instance_ptr->instance_id];
+        std::unordered_set<string> child_instance_names;
+        for (const auto &child : instance_ptr->children) {
+            child_instance_names.insert(child->instance_path.back());
+        }
+
+        for (const auto &matcher : trace_matchers) {
+            if (matcher.uses_double_colon || matcher.signal_path_matcher.empty() || matcher.signal_path_matcher == "*") {
+                continue;
+            }
+            string instance_path = instance_ptr->concatInstancePath("::", false);
+            if (!matchPathSegments(matcher.instance_path_matcher, instance_path, "::")) {
+                continue;
+            }
+            string first_base = firstSignalSegmentBase(matcher.signal_path_matcher);
+            if (first_base.empty()) {
+                continue;
+            }
+            if (child_instance_names.count(first_base)) {
+                throw VulException(
+                    "Invalid trace matcher '" +
+                    matcher.instance_path_matcher + "." + matcher.signal_path_matcher +
+                    "': instance paths must use '::', for example '" +
+                    instance_path + "::" + matcher.signal_path_matcher + "'"
+                );
+            }
+        }
+
+        std::map<SignalPath, VulTracedSignal> traced_signal_map;
         for (const auto &signal : all_signals) {
-            bool matched = false;
-            for (const auto &sig_matcher : applied_signal_path_matchers) {
-                if (matchPathSegments(sig_matcher, signal.signal_path, ".")) {
-                    matched = true;
-                    break;
+            for (const auto &applied : applied_signal_path_matchers) {
+                if (!matchPathSegments(applied.signal_path_matcher, signal.signal_path, ".")) {
+                    continue;
+                }
+                auto &dst = traced_signal_map[signal.signal_path];
+                dst.signal_path = signal.signal_path;
+                dst.bit_width = signal.bit_width;
+                if (applied.trace_all_instances) {
+                    dst.trace_all_instances = true;
+                    dst.instance_index_filters.clear();
+                } else if (dst.trace_all_instances && dst.instance_index_filters.empty()) {
+                    dst.trace_all_instances = false;
+                    dst.instance_index_filters.push_back(applied.instance_index_filter);
+                } else {
+                    dst.instance_index_filters.push_back(applied.instance_index_filter);
                 }
             }
-            if (matched) {
-                traced_signals.push_back(signal);
-            }
+        }
+
+        vector<VulTracedSignal> &traced_signals = trace_table[instance_ptr->instance_id];
+        for (auto &[_, sig] : traced_signal_map) {
+            traced_signals.push_back(std::move(sig));
         }
 
     }
 
     return trace_table;
 }
-
