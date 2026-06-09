@@ -669,6 +669,18 @@ static VCPPModuleAutoRegisterHandler<VCPPModuleROM> _auto_register_ROM_handler;
 static VCPPModuleAutoRegisterHandler<VCPPModuleQUEUE> _auto_register_QUEUE_handler;
 static VCPPModuleAutoRegisterHandler<VCPPModuleQUEUE_MP> _auto_register_QUEUE_MP_handler;
 
+class VCPPModuleHELPER : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "HELPER"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 0) {
+            throw VulException("HELPER does not take any arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        context.temp.helper_codes = entry.body;
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleHELPER> _auto_register_HELPER_handler;
+
 VulTempModule _parseTempModule(
     const string &module_name,
     const string &module_filepath

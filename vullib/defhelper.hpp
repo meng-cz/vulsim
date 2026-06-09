@@ -36,6 +36,8 @@
 
 #include <array>
 
+#define HELPER()  inline namespace helper
+
 #define CONST(name, value) constexpr int64_t name = value;
 
 #define PARAMETER(name, value) constexpr int64_t name = value;

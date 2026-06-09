@@ -83,6 +83,7 @@ void _procConstAndBundle(RTLGenContext &ctx){
         ctx.hls_header.push_back("\n");
     }
 
+    ctx.hls_header.insert(ctx.hls_header.end(), ctx.module.helper_codes.begin(), ctx.module.helper_codes.end());
 };
 
 void _procWires(RTLGenContext &ctx) {

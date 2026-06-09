@@ -219,6 +219,8 @@ void instantiateModule(
     // req-serv connections
     instance.req_connections = temp.req_connections;
 
+    // helper codes
+    instance.helper_codes = temp.helper_codes;
 }
 
 void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance) {

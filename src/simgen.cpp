@@ -506,6 +506,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         impl_field.push_back("\n");
     }
 
+    // helper field
+    decl_private_field.insert(decl_private_field.end(), mod.helper_codes.begin(), mod.helper_codes.end());
+
     // trace
     if (!traced_signals.empty()) {
         for (uint64_t i = 0; i < traced_signals.size(); ++i) {

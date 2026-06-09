@@ -190,6 +190,7 @@ struct VulTempModule {
     vector<VulTempInstance> instances;
     vector<VulTempTickBlock> tick_blocks;
     vector<VulReqServConnection>  req_connections;
+    vector<string> helper_codes;
 };
 
 using VulTempModuleCache = std::unordered_map<string, VulTempModule>; // map from module name to its parsed temp module
@@ -416,6 +417,7 @@ struct VulStaticModuleInstance {
 
     unordered_map<ReqServName, VulLogicBlock> serv_logic_blocks;
     vector<VulTickBlock> tick_blocks;
+    vector<string> helper_codes;
 
     unordered_map<InstanceName, VulStaticInstanceDecl> instances;
 
