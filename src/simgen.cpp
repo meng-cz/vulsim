@@ -21,10 +21,16 @@
 // SOFTWARE.
 
 #include "simgen.h"
+#include "stringop.hpp"
 
+#include <array>
+#include <cerrno>
 #include <chrono>
+#include <cstdlib>
 #include <deque>
 #include <iomanip>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -63,6 +69,655 @@ vector<string> genHeaderPrelude() {
     out.push_back("\n");
     return out;
 }
+
+namespace {
+
+struct ParsedInstanceExpr {
+    string base_name;
+    vector<string> index_exprs;
+};
+
+enum class IndexExprKind {
+    Constant,
+    Variable,
+    Wildcard,
+};
+
+struct ParsedIndexExpr {
+    IndexExprKind kind = IndexExprKind::Constant;
+    char var_symbol = 0;
+    int64_t offset = 0;
+    string const_expr;
+};
+
+static bool isIdentStart(char c) {
+    return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
+}
+
+static bool isIdentChar(char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+}
+
+static ParsedInstanceExpr parseInstanceExpr(const string &expr_raw) {
+    const string expr = stringop::trim(expr_raw);
+    if (expr.empty()) {
+        return {};
+    }
+    size_t pos = 0;
+    if (!isIdentStart(expr[pos])) {
+        throw VulException("Invalid instance expression: '" + expr + "'");
+    }
+    while (pos < expr.size() && isIdentChar(expr[pos])) {
+        ++pos;
+    }
+    ParsedInstanceExpr out;
+    out.base_name = expr.substr(0, pos);
+    while (pos < expr.size()) {
+        while (pos < expr.size() && std::isspace(static_cast<unsigned char>(expr[pos]))) {
+            ++pos;
+        }
+        if (pos >= expr.size()) break;
+        if (expr[pos] != '[') {
+            throw VulException("Invalid instance expression: '" + expr + "'");
+        }
+        const size_t begin = ++pos;
+        int depth = 1;
+        for (; pos < expr.size(); ++pos) {
+            if (expr[pos] == '[') ++depth;
+            else if (expr[pos] == ']') {
+                --depth;
+                if (depth == 0) break;
+            }
+        }
+        if (pos >= expr.size() || expr[pos] != ']') {
+            throw VulException("Unmatched '[' in instance expression: '" + expr + "'");
+        }
+        out.index_exprs.push_back(stringop::trim(expr.substr(begin, pos - begin)));
+        ++pos;
+    }
+    return out;
+}
+
+static bool tryParseSimpleInt(const string &expr, int64_t &value) {
+    const string trimmed = stringop::trim(expr);
+    if (trimmed.empty()) return false;
+    char *end = nullptr;
+    errno = 0;
+    long long parsed = std::strtoll(trimmed.c_str(), &end, 0);
+    if (errno != 0 || end == nullptr || *end != '\0') {
+        return false;
+    }
+    value = static_cast<int64_t>(parsed);
+    return true;
+}
+
+static ParsedIndexExpr parseIndexExprTemplate(const string &expr_raw) {
+    const string expr = stringop::trim(expr_raw);
+    if (expr == "*") {
+        ParsedIndexExpr out;
+        out.kind = IndexExprKind::Wildcard;
+        return out;
+    }
+    int64_t const_value = 0;
+    if (tryParseSimpleInt(expr, const_value)) {
+        ParsedIndexExpr out;
+        out.kind = IndexExprKind::Constant;
+        out.offset = const_value;
+        out.const_expr = expr;
+        return out;
+    }
+
+    auto parse_var_plus_const = [&](char symbol) -> std::optional<ParsedIndexExpr> {
+        const size_t symbol_pos = expr.find(symbol);
+        if (symbol_pos == string::npos) return std::nullopt;
+        string lhs = stringop::trim(expr.substr(0, symbol_pos));
+        string rhs = stringop::trim(expr.substr(symbol_pos + 1));
+        int64_t offset = 0;
+        if (lhs.empty() && rhs.empty()) {
+            ParsedIndexExpr out;
+            out.kind = IndexExprKind::Variable;
+            out.var_symbol = symbol;
+            out.offset = 0;
+            return out;
+        }
+        if (lhs.empty()) {
+            if (rhs.empty()) return std::nullopt;
+            if (rhs[0] == '+') {
+                if (!tryParseSimpleInt(rhs.substr(1), offset)) return std::nullopt;
+            } else if (rhs[0] == '-') {
+                if (!tryParseSimpleInt(rhs.substr(1), offset)) return std::nullopt;
+                offset = -offset;
+            } else {
+                return std::nullopt;
+            }
+            ParsedIndexExpr out;
+            out.kind = IndexExprKind::Variable;
+            out.var_symbol = symbol;
+            out.offset = offset;
+            return out;
+        }
+        if (rhs.empty()) {
+            if (lhs.back() != '+' && lhs.back() != '-') return std::nullopt;
+            const char op = lhs.back();
+            if (!tryParseSimpleInt(lhs.substr(0, lhs.size() - 1), offset)) return std::nullopt;
+            if (op == '-') offset = -offset;
+            ParsedIndexExpr out;
+            out.kind = IndexExprKind::Variable;
+            out.var_symbol = symbol;
+            out.offset = offset;
+            return out;
+        }
+        return std::nullopt;
+    };
+
+    if (auto parsed = parse_var_plus_const('$')) return *parsed;
+    if (auto parsed = parse_var_plus_const('?')) return *parsed;
+
+    ParsedIndexExpr out;
+    out.kind = IndexExprKind::Constant;
+    out.const_expr = expr;
+    return out;
+}
+
+vector<ConfigRealValue> parseConcreteInstanceIndices(
+    const string &decl_name,
+    const vector<ConfigRealValue> &dims,
+    const string &concrete_name
+) {
+    vector<ConfigRealValue> out;
+    if (concrete_name == decl_name) {
+        return out;
+    }
+    if (!concrete_name.starts_with(decl_name + "__")) {
+        throw VulException("Instance '" + concrete_name + "' does not match declaration '" + decl_name + "'");
+    }
+    size_t pos = decl_name.size() + 2;
+    while (pos <= concrete_name.size()) {
+        size_t next = concrete_name.find("__", pos);
+        string token = concrete_name.substr(pos, next == string::npos ? string::npos : next - pos);
+        if (token.empty()) {
+            throw VulException("Invalid array instance name: '" + concrete_name + "'");
+        }
+        out.push_back(static_cast<ConfigRealValue>(std::stoll(token)));
+        if (next == string::npos) {
+            break;
+        }
+        pos = next + 2;
+    }
+    if (out.size() != dims.size()) {
+        throw VulException("Array instance name '" + concrete_name + "' has wrong number of indices");
+    }
+    return out;
+}
+
+string childPtrFieldName(const string &inst_name, const vector<ConfigRealValue> &indices) {
+    string out = "__instptr_" + inst_name;
+    for (ConfigRealValue idx : indices) {
+        out += "[" + std::to_string(idx) + "]";
+    }
+    return out;
+}
+
+string childPtrFieldName(const VulStaticModuleInstance &parent, const string &concrete_name) {
+    for (const auto &[inst_name, inst] : parent.instances) {
+        if (!inst.isArrayed()) {
+            if (concrete_name == inst_name) {
+                return childPtrFieldName(inst_name, {});
+            }
+            continue;
+        }
+        if (concrete_name == inst_name || concrete_name.starts_with(inst_name + "__")) {
+            return childPtrFieldName(inst_name, parseConcreteInstanceIndices(inst_name, inst.array_dims, concrete_name));
+        }
+    }
+    throw VulException("Child pointer target not found for instance '" + concrete_name + "'");
+}
+
+std::array<int32_t, 2> sourceLoopVarDims(const vector<VulConnIndexExpr> &req_indices) {
+    std::array<int32_t, 2> dims = { -1, -1 };
+    for (size_t dim = 0; dim < req_indices.size(); ++dim) {
+        if (req_indices[dim].kind != VulConnIndexKind::LoopVar || req_indices[dim].offset != 0) continue;
+        dims[req_indices[dim].loop_dim] = static_cast<int32_t>(dim);
+    }
+    return dims;
+}
+
+string replaceLoopVarsWithInstIdx(const string &expr, const std::array<int32_t, 2> &loop_dims) {
+    string out;
+    out.reserve(expr.size() * 2);
+    for (char c : expr) {
+        if (c == '$') {
+            if (loop_dims[0] < 0) throw VulException("Source loop variable '$' is not defined");
+            out += "__instidx" + std::to_string(loop_dims[0]);
+        } else if (c == '?') {
+            if (loop_dims[1] < 0) throw VulException("Source loop variable '?' is not defined");
+            out += "__instidx" + std::to_string(loop_dims[1]);
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+string childPtrFieldExpr(const VulStaticModuleInstance &parent, const string &base_name, const vector<VulConnIndexExpr> &req_indices, const vector<VulConnIndexExpr> &indices) {
+    auto inst_it = parent.instances.find(base_name);
+    if (inst_it == parent.instances.end()) {
+        throw VulException("Instance '" + base_name + "' not found");
+    }
+    const auto loop_dims = sourceLoopVarDims(req_indices);
+    string out = "__instptr_" + base_name;
+    for (size_t dim = 0; dim < indices.size(); ++dim) {
+        const auto &parsed = indices[dim];
+        if (parsed.kind == VulConnIndexKind::LoopVar) {
+            if (loop_dims[parsed.loop_dim] < 0) {
+                throw VulException("Loop variable used before being defined on the source side");
+            }
+            string expr_str = "__instidx" + std::to_string(loop_dims[parsed.loop_dim]);
+            if (parsed.offset > 0) expr_str = "(" + expr_str + " + " + std::to_string(parsed.offset) + "u)";
+            if (parsed.offset < 0) expr_str = "(" + expr_str + " - " + std::to_string(-parsed.offset) + "u)";
+            out += "[" + expr_str + "]";
+        } else if (parsed.kind == VulConnIndexKind::GeneralExpr) {
+            out += "[" + replaceLoopVarsWithInstIdx(parsed.expr, loop_dims) + "]";
+        } else if (parsed.kind == VulConnIndexKind::Wildcard) {
+            out += "[__instidx" + std::to_string(dim) + "]";
+        } else {
+            out += "[" + parsed.expr + "]";
+        }
+    }
+    return out;
+}
+
+string localServiceIndexExpr(
+    const vector<VulConnIndexExpr> &req_indices,
+    const vector<ConfigRealValue> &inst_dims,
+    size_t dim
+) {
+    (void)inst_dims;
+    const auto loop_dims = sourceLoopVarDims(req_indices);
+    const auto &parsed = req_indices[dim];
+    if (parsed.kind == VulConnIndexKind::Wildcard) {
+        return "__instidx" + std::to_string(dim);
+    }
+    if (parsed.kind == VulConnIndexKind::LoopVar) {
+        if (loop_dims[parsed.loop_dim] < 0) {
+            throw VulException("Loop variable used before being defined on the source side");
+        }
+        if (parsed.offset == 0) return "__instidx" + std::to_string(loop_dims[parsed.loop_dim]);
+        string expr = "__instidx" + std::to_string(loop_dims[parsed.loop_dim]);
+        if (parsed.offset > 0) expr = "(" + expr + " + " + std::to_string(parsed.offset) + "u)";
+        if (parsed.offset < 0) expr = "(" + expr + " - " + std::to_string(-parsed.offset) + "u)";
+        return expr;
+    }
+    if (parsed.kind == VulConnIndexKind::GeneralExpr) {
+        return replaceLoopVarsWithInstIdx(parsed.expr, loop_dims);
+    }
+    return parsed.expr;
+}
+
+vector<string> buildArrayWrapperTemplateLines(
+    const VulStaticModuleInstance &mod,
+    const string &inst_name,
+    const VulStaticInstanceDecl &inst,
+    const string &req_name,
+    const VulStaticReqServ &req,
+    const string &argname,
+    const string &call_prefix,
+    const string &rettype
+) {
+    vector<string> lines;
+    bool emitted = false;
+    for (const auto &raw_conn : mod.req_connections) {
+        if (raw_conn.req_instance.empty()) continue;
+        if (raw_conn.req_instance_base != inst_name || raw_conn.req_name != req_name) continue;
+        if (raw_conn.req_indices.size() != inst.array_dims.size()) continue;
+        for (const auto &idx : raw_conn.serv_indices) {
+            if (idx.kind == VulConnIndexKind::GeneralExpr) {
+                return {};
+            }
+        }
+
+        vector<string> cond_terms;
+        for (size_t dim = 0; dim < raw_conn.req_indices.size(); ++dim) {
+            const auto &parsed = raw_conn.req_indices[dim];
+            if (parsed.kind == VulConnIndexKind::ConstantExpr) {
+                cond_terms.push_back("__instidx" + std::to_string(dim) + " == " + parsed.expr);
+            }
+        }
+
+        string guard = cond_terms.empty() ? "true" : cond_terms[0];
+        for (size_t i = 1; i < cond_terms.size(); ++i) {
+            guard += " && " + cond_terms[i];
+        }
+
+        if (!raw_conn.serv_instance.empty()) {
+            auto target_it = mod.instances.find(raw_conn.serv_instance_base);
+            if (target_it == mod.instances.end()) {
+                continue;
+            }
+            const auto &target_inst = target_it->second;
+            vector<string> bounds;
+            const auto loop_dims = sourceLoopVarDims(raw_conn.req_indices);
+            for (size_t dim = 0; dim < raw_conn.serv_indices.size(); ++dim) {
+                const auto &parsed = raw_conn.serv_indices[dim];
+                if (parsed.kind != VulConnIndexKind::LoopVar) continue;
+                if (loop_dims[parsed.loop_dim] < 0) {
+                    return {};
+                }
+                string src_expr = "__instidx" + std::to_string(loop_dims[parsed.loop_dim]);
+                const auto target_dim = target_inst.array_dims[dim];
+                if (parsed.offset > 0) {
+                    const auto offset = static_cast<uint64_t>(parsed.offset);
+                    if (offset > static_cast<uint64_t>(target_dim)) {
+                        guard = "false";
+                        break;
+                    }
+                    bounds.push_back("(" + src_expr + " < " + std::to_string(static_cast<uint64_t>(target_dim) - offset) + "u)");
+                } else if (parsed.offset < 0) {
+                    const auto offset = static_cast<uint64_t>(-parsed.offset);
+                    if (offset > static_cast<uint64_t>(target_dim)) {
+                        guard = "false";
+                        break;
+                    }
+                    bounds.push_back("(" + src_expr + " >= " + std::to_string(offset) + "u)");
+                } else {
+                    bounds.push_back("(" + src_expr + " < " + std::to_string(target_dim) + "u)");
+                }
+            }
+            for (const auto &b : bounds) {
+                guard += (guard.empty() ? "" : " && ") + b;
+            }
+
+            lines.push_back(CodeTab + string(emitted ? "else if (" : "if (") + guard + ") {\n");
+            string child_access = childPtrFieldExpr(mod, raw_conn.serv_instance_base, raw_conn.req_indices, raw_conn.serv_indices);
+            if (req.is_arrayed) {
+                lines.push_back(CodeTab + CodeTab + call_prefix + child_access + "->" + raw_conn.serv_name + "<IDX>(" + argname + ");\n");
+            } else {
+                lines.push_back(CodeTab + CodeTab + call_prefix + child_access + "->" + raw_conn.serv_name + "(" + argname + ");\n");
+            }
+            if (rettype == "void") lines.push_back(CodeTab + CodeTab + "return;\n");
+            lines.push_back(CodeTab + "}\n");
+            emitted = true;
+            continue;
+        }
+
+        if (raw_conn.serv_name.empty()) continue;
+        lines.push_back(CodeTab + string(emitted ? "else if (" : "if (") + guard + ") {\n");
+        bool generated_dispatch = false;
+        size_t wildcard_dim = 0;
+        for (size_t dim = 0; dim < raw_conn.req_indices.size(); ++dim) {
+            if (raw_conn.req_indices[dim].kind == VulConnIndexKind::Wildcard) {
+                wildcard_dim = dim;
+                auto serv_it = mod.services.find(raw_conn.serv_name);
+                if (serv_it != mod.services.end() && serv_it->second.is_arrayed) {
+                    for (uint32_t idx = 0; idx < serv_it->second.array_size; ++idx) {
+                        string branch = (idx == 0 ? "if" : "else if");
+                        lines.push_back(CodeTab + CodeTab + branch + " (" + localServiceIndexExpr(raw_conn.req_indices, inst.array_dims, wildcard_dim) + " == " + std::to_string(idx) + ") {\n");
+                        lines.push_back(CodeTab + CodeTab + CodeTab + call_prefix + raw_conn.serv_name + "<" + std::to_string(idx) + ">(" + argname + ");\n");
+                        if (rettype == "void") lines.push_back(CodeTab + CodeTab + CodeTab + "return;\n");
+                        lines.push_back(CodeTab + CodeTab + "}\n");
+                    }
+                    generated_dispatch = true;
+                }
+                break;
+            }
+        }
+        if (!generated_dispatch) {
+            string call_line;
+            if (req.is_arrayed) {
+                call_line = raw_conn.serv_name + "<IDX>(" + argname + ");";
+            } else {
+                call_line = raw_conn.serv_name + "(" + argname + ");";
+            }
+            lines.push_back(CodeTab + CodeTab + call_prefix + call_line + "\n");
+            if (rettype == "void") lines.push_back(CodeTab + CodeTab + "return;\n");
+        }
+        lines.push_back(CodeTab + "}\n");
+        emitted = true;
+    }
+    return lines;
+}
+
+string replaceLoopVarsForEval(const string &expr, const vector<ConfigRealValue> &loop_vars) {
+    string out;
+    out.reserve(expr.size() * 2);
+    for (char c : expr) {
+        if (c == '$') {
+            out += "__v0";
+        } else if (c == '?') {
+            out += "__v1";
+        } else {
+            out.push_back(c);
+        }
+    }
+    (void)loop_vars;
+    return out;
+}
+
+ConfigRealValue evalConnExprWithLoopVars(
+    const string &expr,
+    const VulStaticConfigLib &config_lib,
+    const vector<ConfigRealValue> &loop_vars
+) {
+    VulStaticConfigLib eval_cfg = config_lib;
+    if (loop_vars.size() > 0) eval_cfg["__v0"] = loop_vars[0];
+    if (loop_vars.size() > 1) eval_cfg["__v1"] = loop_vars[1];
+    return calculateConstexprValue(replaceLoopVarsForEval(expr, loop_vars), eval_cfg);
+}
+
+VulStaticConfigLib mergedModuleConfigLib(const VulStaticModuleInstance &mod) {
+    VulStaticConfigLib cfg = mod.local_parameters;
+    for (const auto &entry : mod.local_consts) {
+        cfg[entry.first] = entry.second;
+    }
+    return cfg;
+}
+
+template<typename Fn>
+void forEachIndexTuple(const vector<ConfigRealValue> &dims, Fn fn);
+
+vector<string> buildExplicitArrayWrapperLines(
+    const VulStaticModuleInstance &mod,
+    const string &inst_name,
+    const VulStaticInstanceDecl &inst,
+    const string &req_name,
+    const VulStaticReqServ &req,
+    const string &argname,
+    const string &call_prefix,
+    const string &rettype
+) {
+    vector<string> lines;
+    bool emitted = false;
+    const auto cfg = mergedModuleConfigLib(mod);
+    forEachIndexTuple(inst.array_dims, [&](const vector<ConfigRealValue> &indices) {
+        for (const auto &raw_conn : mod.req_connections) {
+            if (raw_conn.req_instance.empty()) continue;
+            if (raw_conn.req_instance_base != inst_name || raw_conn.req_name != req_name) continue;
+            if (raw_conn.req_indices.size() != inst.array_dims.size()) continue;
+
+            vector<ConfigRealValue> loop_vars(2, 0);
+            vector<bool> loop_set(2, false);
+            bool matched = true;
+            for (size_t dim = 0; dim < raw_conn.req_indices.size(); ++dim) {
+                const auto &idx = raw_conn.req_indices[dim];
+                if (idx.kind == VulConnIndexKind::ConstantExpr) {
+                    if (calculateConstexprValue(idx.expr, cfg) != indices[dim]) {
+                        matched = false;
+                        break;
+                    }
+                } else if (idx.kind == VulConnIndexKind::LoopVar) {
+                    if (idx.offset != 0) {
+                        matched = false;
+                        break;
+                    }
+                    if (loop_set[idx.loop_dim] && loop_vars[idx.loop_dim] != indices[dim]) {
+                        matched = false;
+                        break;
+                    }
+                    loop_vars[idx.loop_dim] = indices[dim];
+                    loop_set[idx.loop_dim] = true;
+                } else {
+                    matched = false;
+                    break;
+                }
+            }
+            if (!matched) continue;
+
+            string cond = "if (";
+            for (size_t dim = 0; dim < indices.size(); ++dim) {
+                if (dim > 0) cond += " && ";
+                cond += "__instidx" + std::to_string(dim) + " == " + std::to_string(indices[dim]);
+            }
+            cond += ") {\n";
+            lines.push_back(CodeTab + string(emitted ? "else " : "") + cond);
+
+            if (!raw_conn.serv_instance.empty()) {
+                auto target_it = mod.instances.find(raw_conn.serv_instance_base);
+                if (target_it == mod.instances.end()) {
+                    throw VulException("Instance '" + raw_conn.serv_instance_base + "' not found");
+                }
+                vector<ConfigRealValue> target_indices;
+                bool valid_target = true;
+                for (size_t dim = 0; dim < raw_conn.serv_indices.size(); ++dim) {
+                    const auto &idx = raw_conn.serv_indices[dim];
+                    ConfigRealValue target_idx = 0;
+                    if (idx.kind == VulConnIndexKind::ConstantExpr || idx.kind == VulConnIndexKind::GeneralExpr) {
+                        target_idx = evalConnExprWithLoopVars(idx.expr, cfg, loop_vars);
+                    } else if (idx.kind == VulConnIndexKind::LoopVar) {
+                        target_idx = loop_vars[idx.loop_dim] + idx.offset;
+                    } else {
+                        valid_target = false;
+                        break;
+                    }
+                    if (target_idx < 0 || target_idx >= target_it->second.array_dims[dim]) {
+                        valid_target = false;
+                        break;
+                    }
+                    target_indices.push_back(target_idx);
+                }
+                if (!valid_target) {
+                    lines.pop_back();
+                    continue;
+                }
+                string child_access = childPtrFieldName(raw_conn.serv_instance_base, target_indices);
+                if (req.is_arrayed) {
+                    lines.push_back(CodeTab + CodeTab + call_prefix + child_access + "->" + raw_conn.serv_name + "<IDX>(" + argname + ");\n");
+                } else {
+                    lines.push_back(CodeTab + CodeTab + call_prefix + child_access + "->" + raw_conn.serv_name + "(" + argname + ");\n");
+                }
+            } else {
+                bool generated_dispatch = false;
+                for (size_t dim = 0; dim < raw_conn.req_indices.size(); ++dim) {
+                    if (raw_conn.req_indices[dim].kind != VulConnIndexKind::Wildcard) continue;
+                    auto serv_it = mod.services.find(raw_conn.serv_name);
+                    if (serv_it != mod.services.end() && serv_it->second.is_arrayed) {
+                        ConfigRealValue wildcard_idx = indices[dim];
+                        lines.push_back(CodeTab + CodeTab + call_prefix + raw_conn.serv_name + "<" + std::to_string(wildcard_idx) + ">(" + argname + ");\n");
+                        generated_dispatch = true;
+                    }
+                    break;
+                }
+                if (!generated_dispatch) {
+                    if (req.is_arrayed) {
+                        lines.push_back(CodeTab + CodeTab + call_prefix + raw_conn.serv_name + "<IDX>(" + argname + ");\n");
+                    } else {
+                        lines.push_back(CodeTab + CodeTab + call_prefix + raw_conn.serv_name + "(" + argname + ");\n");
+                    }
+                }
+            }
+            if (rettype == "void") lines.push_back(CodeTab + CodeTab + "return;\n");
+            lines.push_back(CodeTab + "}\n");
+            emitted = true;
+            return;
+        }
+    });
+    return lines;
+}
+
+vector<ConfigRealValue> childArrayDims(const VulStaticModuleInstance &mod) {
+    if (!mod.parent) {
+        return {};
+    }
+    auto it = mod.parent->instances.find(mod.instance_path.back());
+    if (it == mod.parent->instances.end()) {
+        return {};
+    }
+    return it->second.array_dims;
+}
+
+bool childIsArrayTemplate(const VulStaticModuleInstance &mod) {
+    return !childArrayDims(mod).empty();
+}
+
+template<typename Fn>
+void forEachIndexTuple(const vector<ConfigRealValue> &dims, Fn fn) {
+    vector<ConfigRealValue> indices(dims.size(), 0);
+    std::function<void(size_t)> dfs = [&](size_t dim) {
+        if (dim == dims.size()) {
+            fn(indices);
+            return;
+        }
+        for (ConfigRealValue idx = 0; idx < dims[dim]; ++idx) {
+            indices[dim] = idx;
+            dfs(dim + 1);
+        }
+    };
+    if (dims.empty()) {
+        fn(indices);
+    } else {
+        dfs(0);
+    }
+}
+
+string moduleWrapperBaseName(const VulStaticModuleInstance &mod) {
+    if (childIsArrayTemplate(mod)) {
+        return mod.instance_path.back();
+    }
+    return mod.instance_path.back();
+}
+
+string nestedArrayType(const string &leaf_type, const vector<ConfigRealValue> &dims) {
+    string out = leaf_type;
+    for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
+        out = "std::array<" + out + ", " + std::to_string(*it) + ">";
+    }
+    return out;
+}
+
+vector<shared_ptr<VulStaticModuleInstance>> collectChildrenByDecl(
+    const VulStaticModuleInstance &mod,
+    const string &inst_name
+) {
+    vector<shared_ptr<VulStaticModuleInstance>> out;
+    for (const auto &child : mod.children) {
+        if (child->instance_path.back() == inst_name) {
+            out.push_back(child);
+        }
+    }
+    return out;
+}
+
+const VulStaticModuleInstance &findChildTemplateByName(
+    const VulStaticModuleInstance &mod,
+    const string &name
+) {
+    for (const auto &child : mod.children) {
+        if (child->instance_path.back() == name) {
+            return *child;
+        }
+    }
+    for (const auto &[inst_name, inst] : mod.instances) {
+        if (inst.isArrayed() && (name == inst_name || name.starts_with(inst_name + "__"))) {
+            for (const auto &child : mod.children) {
+                if (child->instance_path.back() == inst_name) {
+                    return *child;
+                }
+            }
+        }
+    }
+    throw VulException("Child instance template not found: " + name);
+}
+
+} // namespace
 
 vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib) {
     vector<string> out_lines = genHeaderPrelude();
@@ -194,13 +849,26 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         decl_private_field.push_back("\n");
 
         string call_prefix = (rettype == "void" ? "" : "return ");
+        string wrapper_name = "__parent->__wrapper_" + moduleWrapperBaseName(mod) + "_" + req_entry.first;
+        string wrapper_prefix_args;
+        const auto mod_array_dims = childArrayDims(mod);
+        if (!mod_array_dims.empty()) {
+            for (size_t i = 0; i < mod_array_dims.size(); ++i) {
+                if (!wrapper_prefix_args.empty()) wrapper_prefix_args += ", ";
+                wrapper_prefix_args += "__array_idx_" + std::to_string(i);
+            }
+            if (!argnames.empty()) {
+                wrapper_prefix_args += ", ";
+            }
+        }
+        wrapper_prefix_args += argnames;
         if (is_arrayed) {
             impl_field.push_back("template <uint32_t IDX>\n");
             impl_field.push_back(rettype + " " + mod_class_name + "::" + req_entry.first + "(" + arglists + ") {\n");
-            impl_field.push_back(CodeTab + call_prefix + "__parent->__wrapper_" + mod.instance_path.back() + "_" + req_entry.first + "<IDX>(" + argnames + ");\n");
+            impl_field.push_back(CodeTab + call_prefix + wrapper_name + "<IDX>(" + wrapper_prefix_args + ");\n");
         } else {
             impl_field.push_back(rettype + " " + mod_class_name + "::" + req_entry.first + "(" + arglists + ") {\n");
-            impl_field.push_back(CodeTab + call_prefix + "__parent->__wrapper_" + mod.instance_path.back() + "_" + req_entry.first + "(" + argnames + ");\n");
+            impl_field.push_back(CodeTab + call_prefix + wrapper_name + "(" + wrapper_prefix_args + ");\n");
         }
         impl_field.push_back("}\n");
         impl_field.push_back("\n");
@@ -403,48 +1071,33 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
         VulErrorContextGuard context_guard("processing child instance " + inst_name);
 
-        shared_ptr<VulStaticModuleInstance> inst_mod_ptr;
-        for (auto &mod_ptr : mod.children) {
-            if (mod_ptr->instance_path.back() == inst_name) {
-                inst_mod_ptr = mod_ptr;
-                break;
-            }
-        }
-        if (!inst_mod_ptr) {
+        auto inst_children = collectChildrenByDecl(mod, inst_name);
+        if (inst_children.empty()) {
             throw VulException("Child instance not found");
         }
+        shared_ptr<VulStaticModuleInstance> inst_mod_ptr = inst_children.front();
 
         decl_include_field.push_back("#include \"" + inst_mod_ptr->simDeclPath() + "\"\n");
 
         string child_class_name = inst_mod_ptr->simClassName();
         string child_instance_ptr_name = "__instptr_" + inst_name;
-        decl_private_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instance_ptr_name + ";\n");
-        impl_init_field.push_back(child_instance_ptr_name + " = std::make_unique<" + child_class_name + ">(this);\n");
-        impl_commit_field.push_back(child_instance_ptr_name + "->" + ApplyTickFunctionName + "();\n");
-        impl_sys_reset_field.push_back(child_instance_ptr_name + "->reset();\n");
-
-        // export services
-        for (const auto &serv_name : inst.referenced_services) {
-            auto serv_iter = inst_mod_ptr->services.find(serv_name);
-            if (serv_iter == inst_mod_ptr->services.end()) {
-                throw std::runtime_error("Service " + serv_name + " not found in module "+ inst_mod_ptr->module_name + " but required by " + mod.module_name);
-            }
-            const auto &serv = serv_iter->second;
-            string rettype = serv.returnType();
-            string arglists = serv.signatureArgOnly();
-            string argname = serv.signatureArgNameList();
-            const bool is_arrayed = serv.is_arrayed;
-            if (is_arrayed) {
-                decl_private_field.push_back("template <uint32_t IDX = 0>\n");
-            }
-            decl_private_field.push_back(rettype + " " + inst_name + "_" + serv_name + "(" + arglists + ") {\n");
-            string call_prefix = (rettype == "void" ? "" : "return ");
-            if (is_arrayed) {
-                decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "<IDX>(" + argname + ");\n");
-            } else {
-                decl_private_field.push_back(CodeTab + call_prefix + "__instptr_" + inst_name + "->" + serv_name + "(" + argname + ");\n");
-            }
-            decl_private_field.push_back("}\n");
+        if (inst.isArrayed()) {
+            decl_private_field.push_back(nestedArrayType("std::unique_ptr<" + child_class_name + ">", inst.array_dims) + " " + child_instance_ptr_name + ";\n");
+            forEachIndexTuple(inst.array_dims, [&](const vector<ConfigRealValue> &indices) {
+                string init_call = childPtrFieldName(inst_name, indices) + " = std::make_unique<" + child_class_name + ">(this";
+                for (ConfigRealValue idx : indices) {
+                    init_call += ", " + std::to_string(idx);
+                }
+                init_call += ");\n";
+                impl_init_field.push_back(init_call);
+                impl_commit_field.push_back(childPtrFieldName(inst_name, indices) + "->" + ApplyTickFunctionName + "();\n");
+                impl_sys_reset_field.push_back(childPtrFieldName(inst_name, indices) + "->reset();\n");
+            });
+        } else {
+            decl_private_field.push_back("std::unique_ptr<" + child_class_name + "> " + child_instance_ptr_name + ";\n");
+            impl_init_field.push_back(child_instance_ptr_name + " = std::make_unique<" + child_class_name + ">(this);\n");
+            impl_commit_field.push_back(child_instance_ptr_name + "->" + ApplyTickFunctionName + "();\n");
+            impl_sys_reset_field.push_back(child_instance_ptr_name + "->reset();\n");
         }
 
         // connected requests
@@ -455,42 +1108,108 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             string arglists = req.signatureArgOnly();
             string argname = req.signatureArgNameList();
             const bool is_arrayed = req.is_arrayed;
-            if (is_arrayed) {
-                decl_public_field.push_back("template <uint32_t IDX = 0>\n");
-            }
-            decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
-            string call_prefix = (rettype == "void" ? "" : "return ");
-            // find the connected service
-            VulReqServConnection conn;
-            bool found_conn = false;
-            for (const auto &c : mod.req_connections) {
-                if (c.req_instance == inst_name && c.req_name == req_name) {
-                    conn = c;
-                    found_conn = true;
-                    break;
+            if (inst.isArrayed()) {
+                decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(");
+                bool need_comma = false;
+                for (size_t dim = 0; dim < inst.array_dims.size(); ++dim) {
+                    if (need_comma) decl_public_field.back() += ", ";
+                    decl_public_field.back() += "uint32_t __instidx" + std::to_string(dim);
+                    need_comma = true;
                 }
+                if (!arglists.empty()) {
+                    if (need_comma) decl_public_field.back() += ", ";
+                    decl_public_field.back() += arglists;
+                }
+                decl_public_field.back() += ") {\n";
+            } else if (is_arrayed) {
+                decl_public_field.push_back("template <uint32_t IDX = 0>\n");
+                decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
             }
-            if (!found_conn) {
-                throw VulException("No connection found for request " + req_name + " of instance " + inst_name);
+            if (!inst.isArrayed() && !is_arrayed) {
+                decl_public_field.push_back(rettype + " __wrapper_" + inst_name + "_" + req_name + "(" + arglists + ") {\n");
             }
-            if (conn.serv_instance.empty()) {
-                // passed to local request/service, directly call the function
-                if (is_arrayed) {
-                    decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "<IDX>(" + argname + ");\n");
+            string call_prefix = (rettype == "void" ? "" : "return ");
+            if (inst.isArrayed()) {
+                auto template_lines = buildArrayWrapperTemplateLines(mod, inst_name, inst, req_name, req, argname, call_prefix, rettype);
+                if (!template_lines.empty()) {
+                    decl_public_field.insert(decl_public_field.end(), template_lines.begin(), template_lines.end());
+                    decl_public_field.push_back(CodeTab + "throw std::out_of_range(\"array child instance index out of range\");\n");
                 } else {
-                    decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "(" + argname + ");\n");
+                    auto explicit_lines = buildExplicitArrayWrapperLines(mod, inst_name, inst, req_name, req, argname, call_prefix, rettype);
+                    decl_public_field.insert(decl_public_field.end(), explicit_lines.begin(), explicit_lines.end());
+                    decl_public_field.push_back(CodeTab + "throw std::out_of_range(\"array child instance index out of range\");\n");
                 }
             } else {
-                // passed to child module's service
-                if (is_arrayed) {
-                    decl_public_field.push_back(CodeTab + call_prefix + "__instptr_" + conn.serv_instance + "->" + conn.serv_name + "<IDX>(" + argname + ");\n");
+                // find the connected service
+                VulReqServConnection conn;
+                bool found_conn = false;
+                for (const auto &c : mod.req_connections) {
+                    if (c.req_instance == inst_name && c.req_name == req_name) {
+                        conn = c;
+                        found_conn = true;
+                        break;
+                    }
+                }
+                if (!found_conn) {
+                    throw VulException("No connection found for request " + req_name + " of instance " + inst_name);
+                }
+                if (conn.serv_instance.empty()) {
+                    // passed to local request/service, directly call the function
+                    if (is_arrayed) {
+                        decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "<IDX>(" + argname + ");\n");
+                    } else {
+                        decl_public_field.push_back(CodeTab + call_prefix + conn.serv_name + "(" + argname + ");\n");
+                    }
                 } else {
-                    decl_public_field.push_back(CodeTab + call_prefix + "__instptr_" + conn.serv_instance + "->" + conn.serv_name + "(" + argname + ");\n");
+                    // passed to child module's service
+                    if (is_arrayed) {
+                        decl_public_field.push_back(CodeTab + call_prefix + childPtrFieldName(mod, conn.serv_instance) + "->" + conn.serv_name + "<IDX>(" + argname + ");\n");
+                    } else {
+                        decl_public_field.push_back(CodeTab + call_prefix + childPtrFieldName(mod, conn.serv_instance) + "->" + conn.serv_name + "(" + argname + ");\n");
+                    }
                 }
             }
 
             decl_public_field.push_back("}\n");
         }
+    }
+
+    // exported child services / implicit requests
+    std::map<string, vector<VulStaticChildServiceUse>> child_service_groups;
+    for (const auto &use : mod.child_service_uses) {
+        child_service_groups[use.alias_name].push_back(use);
+    }
+    for (const auto &group_entry : child_service_groups) {
+        const string &alias_name = group_entry.first;
+        const auto &group = group_entry.second;
+        const auto &target_child = findChildTemplateByName(mod, group.front().instance_name);
+        auto serv_iter = target_child.services.find(group.front().service_name);
+        if (serv_iter == target_child.services.end()) {
+            throw VulException("Service " + group.front().service_name + " not found in child " + target_child.module_name);
+        }
+        const auto &serv = serv_iter->second;
+        string rettype = serv.returnType();
+        string arglists = serv.signatureArgOnly();
+        string argname = serv.signatureArgNameList();
+        const bool is_alias_arrayed = group.front().alias_indexed;
+        if (is_alias_arrayed) {
+            decl_private_field.push_back("template <uint32_t IDX = 0>\n");
+        }
+        decl_private_field.push_back(rettype + " " + alias_name + "(" + arglists + ") {\n");
+        string call_prefix = (rettype == "void" ? "" : "return ");
+        if (!is_alias_arrayed) {
+            decl_private_field.push_back(CodeTab + call_prefix + childPtrFieldName(mod, group.front().instance_name) + "->" + group.front().service_name + "(" + argname + ");\n");
+        } else {
+            decl_private_field.push_back(CodeTab + "static_assert(IDX < " + std::to_string(group.size()) + ", \"Implicit request index out of range\");\n");
+            for (size_t i = 0; i < group.size(); ++i) {
+                const auto &use = group[i];
+                string branch = (i == 0 ? "if constexpr" : "else if constexpr");
+                decl_private_field.push_back(CodeTab + branch + " (IDX == " + std::to_string(use.alias_index) + ") {\n");
+                decl_private_field.push_back(CodeTab + CodeTab + call_prefix + childPtrFieldName(mod, use.instance_name) + "->" + use.service_name + "(" + argname + ");\n");
+                decl_private_field.push_back(CodeTab + "}\n");
+            }
+        }
+        decl_private_field.push_back("}\n");
     }
 
     // tick functions
@@ -559,6 +1278,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     decl.push_back("#include \"config.h\"\n");
     decl.push_back("#include \"bundle.h\"\n");
     decl.push_back("#include \"vullib.h\"\n");
+    decl.push_back("#include <stdexcept>\n");
     decl.push_back("\n");
 
     // include child module decls
@@ -577,6 +1297,12 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
     decl.push_back("private:\n");
     decl.push_back(CodeTab + parent_class_name + " * __parent;\n");
+    const auto self_array_dims = childArrayDims(mod);
+    if (!self_array_dims.empty()) {
+        for (size_t i = 0; i < self_array_dims.size(); ++i) {
+            decl.push_back(CodeTab + "uint32_t __array_idx_" + std::to_string(i) + ";\n");
+        }
+    }
     decl.push_back("\n");
 
     // entry declarations
@@ -590,7 +1316,16 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     decl.push_back("\n");
 
     // constructor declaration
-    decl.push_back(mod_class_name + "(" + parent_class_name + " *parent) : __parent(parent) {\n");
+    string ctor_sig = mod_class_name + "(" + parent_class_name + " *parent";
+    string ctor_init = "__parent(parent)";
+    if (!self_array_dims.empty()) {
+        for (size_t i = 0; i < self_array_dims.size(); ++i) {
+            ctor_sig += ", uint32_t __idx" + std::to_string(i);
+            ctor_init += ", __array_idx_" + std::to_string(i) + "(__idx" + std::to_string(i) + ")";
+        }
+    }
+    ctor_sig += ")";
+    decl.push_back(ctor_sig + " : " + ctor_init + " {\n");
     decl.push_back(CodeTab + "init();\n");
     decl.push_back(CodeTab + "__reg_reset();\n");
     decl.push_back("}\n");
@@ -631,7 +1366,14 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         } else {
             for (const auto &inst_ptr : mod.children) {
                 if (inst_ptr->instance_id == id) {
-                    impl.push_back(CodeTab + "__instptr_" + inst_ptr->instance_path.back() + "->" + TickFunctionName + "();\n");
+                    auto inst_decl_it = mod.instances.find(inst_ptr->instance_path.back());
+                    if (inst_decl_it != mod.instances.end() && inst_decl_it->second.isArrayed()) {
+                        forEachIndexTuple(inst_decl_it->second.array_dims, [&](const vector<ConfigRealValue> &indices) {
+                            impl.push_back(CodeTab + childPtrFieldName(inst_ptr->instance_path.back(), indices) + "->" + TickFunctionName + "();\n");
+                        });
+                    } else {
+                        impl.push_back(CodeTab + childPtrFieldName(inst_ptr->instance_path.back(), {}) + "->" + TickFunctionName + "();\n");
+                    }
                     break;
                 }
             }

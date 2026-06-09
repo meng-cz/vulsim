@@ -40,6 +40,8 @@
 
 #define CONST(name, value) constexpr int64_t name = value;
 
+#define CONFIG(name, value) constexpr int64_t name = value;
+
 #define PARAMETER(name, value) constexpr int64_t name = value;
 
 #define ALIAS(name, type) using name = type;
@@ -62,7 +64,7 @@
 
 #define RESP(type) type &
 
-#define ARRAY(N) N
+#define ARRAY(N) uint32_t N
 
 #define REQUEST(name, ...) template<uint32_t IDX = 0> void name (__VA_ARGS__);
 
@@ -80,8 +82,10 @@
 #define TICK_IMPL() void tick()
 
 #define CHILD_INSTANCE(module, name, ...) void * name = nullptr;
+#define CHILD_INSTANCE_ARRAY1(module, name, N0, ...) void * name[N0];
+#define CHILD_INSTANCE_ARRAY2(module, name, N0, N1, ...) void * name[N0][N1];
 
-#define USE_CHILD_SERVICE_PORT(instance, serv, ret, ...) ret instance##_##serv (__VA_ARGS__);
+#define USE_CHILD_SERVICE_PORT(instance, serv, alias, ...) template<uint32_t IDX = 0> bool alias (__VA_ARGS__);
 
 #define CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv) ;
 

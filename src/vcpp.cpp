@@ -489,22 +489,77 @@ public:
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleCHILD_INSTANCE> _auto_register_CHILD_INSTANCE_handler;
 
+class VCPPModuleCHILD_INSTANCE_ARRAY1 : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CHILD_INSTANCE_ARRAY1"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 3) {
+            throw VulException("CHILD_INSTANCE_ARRAY1 requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempInstance inst;
+        inst.name = entry.args[1];
+        inst.module_name = entry.args[0];
+        inst.array_dims.push_back(entry.args[2]);
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            const string &param_override_raw = entry.args[i];
+            const size_t split_pos = param_override_raw.find('=');
+            if (split_pos == string::npos) {
+                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            const string param_name = trim(param_override_raw.substr(0, split_pos));
+            const string param_value = trim(param_override_raw.substr(split_pos + 1));
+            if (param_name.empty() || param_value.empty()) {
+                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            inst.parameter_overrides.emplace_back(param_name, param_value);
+        }
+        context.temp.instances.push_back(std::move(inst));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleCHILD_INSTANCE_ARRAY1> _auto_register_CHILD_INSTANCE_ARRAY1_handler;
+
+class VCPPModuleCHILD_INSTANCE_ARRAY2 : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "CHILD_INSTANCE_ARRAY2"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 4) {
+            throw VulException("CHILD_INSTANCE_ARRAY2 requires at least 4 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempInstance inst;
+        inst.name = entry.args[1];
+        inst.module_name = entry.args[0];
+        inst.array_dims.push_back(entry.args[2]);
+        inst.array_dims.push_back(entry.args[3]);
+        for (size_t i = 4; i < entry.args.size(); ++i) {
+            const string &param_override_raw = entry.args[i];
+            const size_t split_pos = param_override_raw.find('=');
+            if (split_pos == string::npos) {
+                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            const string param_name = trim(param_override_raw.substr(0, split_pos));
+            const string param_value = trim(param_override_raw.substr(split_pos + 1));
+            if (param_name.empty() || param_value.empty()) {
+                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            inst.parameter_overrides.emplace_back(param_name, param_value);
+        }
+        context.temp.instances.push_back(std::move(inst));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleCHILD_INSTANCE_ARRAY2> _auto_register_CHILD_INSTANCE_ARRAY2_handler;
+
 class VCPPModuleUSE_CHILD_SERVICE_PORT : public VCPPModuleHandler {
 public:
     virtual string name() const { return "USE_CHILD_SERVICE_PORT"; }
     virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
-        if (entry.args.size() < 2) {
-            throw VulException("USE_CHILD_SERVICE_PORT requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        if (entry.args.size() < 3) {
+            throw VulException("USE_CHILD_SERVICE_PORT requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
         }
-        const string &instance_name = entry.args[0];
-        const string &service_port_name = entry.args[1];
-        for (auto &inst : context.temp.instances) {
-            if (inst.name == instance_name) {
-                inst.referenced_services.push_back(service_port_name);
-                return;
-            }
-        }
-        throw VulException("No child instance named '" + instance_name + "' found for USE_CHILD_SERVICE_PORT at " + context.getOriginalPosition(entry.pos));
+        VulTempChildServiceUse use;
+        use.instance_expr = entry.args[0];
+        use.service_name = entry.args[1];
+        use.alias_name = entry.args[2];
+        context.temp.child_service_uses.push_back(std::move(use));
     }
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleUSE_CHILD_SERVICE_PORT> _auto_register_USE_CHILD_SERVICE_PORT_handler;
@@ -1076,10 +1131,13 @@ VulStaticProject parseVcppStaticProject(
             child_instance->instance_path = instance_ptr->instance_path;
             child_instance->instance_path.push_back(child_name);
             child_instance->module_name = child_instance_decl.module_name;
-            child_instance->exported_services = child_instance_decl.referenced_services;
             child_instance->parent = instance_ptr;
             instance_ptr->children.push_back(child_instance);
             todo_queue.push_back({child_instance, child_instance_decl.parameter_overrides});
+
+            if (child_instance_decl.array_dims.size() > 2) {
+                throw VulException("Only up to 2 child instance array dimensions are currently supported");
+            }
         }
     }
     project.top_module_instance = top_instance;
@@ -1184,4 +1242,3 @@ VulStaticProject parseVcppStaticProject(
 
     return project;
 }
-

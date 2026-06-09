@@ -1,0 +1,22 @@
+本项目是一个用C++风格描写硬件，并自动生成仿真C++代码和可综合RTL代码（目前对于组合逻辑仅生成C++描述，还需外部HLS工具转换成最终RTL）。项目关键目录如下：
+（1）src：解析与转换工具的核心源代码。
+（2）tools：转换工具的main函数入口代码。
+（3）vullib：随着生成的仿真代码一同编译链接的仿真运行时库。同时defhelper.hpp辅助定义了用户描述硬件时需要的宏。
+（4）example：一些硬件项目代码示例。
+现在，请阅读并分析相关代码，然后为“硬件模块内实例化子模块”这一功能添加阵列化支持，具体如下：
+（1）在defhelper.hpp中定义一组新宏，关于通过常量表达式指定阵列化子实例的维度值
+（2）在处理阵列内部CONNECT时，允许实例名带有索引，使用$和?作为循环变量符，如：
+（2.1）CONNECT_CR_CS(arrinst[$][?], right_out, arrinst[$][?+1], left_in)代表将所有阵列节点的right_out连接到右侧节点的left_in。
+（2.2）CONNECT_CR_CS(arrinst[0][?], right_out, arrinst[0][?+1], left_in)代表将第1行阵列节点的right_out连接到右侧节点的left_in。
+（2.3）CONNECT_CR_CS(arrinst[$][?], right_out, arrinst[$+1][?+1], left_in)代表将所有阵列节点的right_out连接到右下侧节点的left_in。
+（3）在处理阵列外部CONNECT时，允许实例名带有索引，使用*作为维度统配符，当指定了*时，展现出的事务端口也是阵列化的（阵列化事务端口与连接现在已经实现）：
+（3.1）CONNECT_CR_S(arrinst[*][WID-1], right_out, out)代表将第WID列所有节点的right_out REQUEST聚合为一个[HEI]维度的REQUEST并连接到当前模块的out SERVICE上，out同样是个[HEI]维度的阵列化事务端口。
+（3.2）CONNECT_R_CS(in0, arrinst[0][0], left_in)代表将当前模块的in0 REQUEST连接到最左上角节点的left_in SERVICE。
+（3.3）USE_CHILD_SERVICE_PORT(arrinst[0][0], left_in, leftin00)代表将最左上角节点的left_in SERVICE引出到模块内的隐式request。（需要修改USE_CHILD_SERVICE_PORT，加入引出的隐式request的名字）
+（3.4）USE_CHILD_SERVICE_PORT(arrinst[*][0], left_in, leftin0)代表将第一列节点的left_in SERVICE引出到模块内的[HEI]维度的隐式request。
+（4）在生成仿真代码时，阵列化子实例的C++实例类带有若干个无符号整数构造函数。父模块持有阵列子实例的智能指针数组。阵列化子实例的事务包装函数与父模块对阵列子实例的连接转发函数的参数列表开头均带有若干无符号整数指定索引。
+（5）在生成RTL代码时，阵列化子实例使用原生的system verilog阵列化构造语法实现，根据连接信息将用户组合逻辑代码映射而来的逻辑模块端口连接到指定的阵列子实例节点。
+具体任务如下：
+（1）修改USE_CHILD_SERVICE_PORT，加入引出的隐式request的名字的功能，编译运行并测试这个功能。
+（2）添加阵列化子实例初始化、连接的核心功能，同时以最小的修改程度为其添加simgen和rtlgen。
+（3）在example中添加包含脉动阵列在内的一维和二维阵列化子实例的示例项目，并基于这些项目测试simgen的功能正确性。

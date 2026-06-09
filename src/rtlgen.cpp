@@ -23,6 +23,8 @@
 #include "rtlgen.h"
 #include "simgen.h"
 
+#include <functional>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <cctype>
@@ -62,6 +64,307 @@ struct RTLGenContext {
 
 inline string reqservArraySuffix(uint32_t idx) {
     return "__IDX" + std::to_string(idx);
+}
+
+template<typename Fn>
+void forEachIndexTuple(const vector<ConfigRealValue> &dims, Fn fn) {
+    vector<ConfigRealValue> indices(dims.size(), 0);
+    std::function<void(size_t)> dfs = [&](size_t dim) {
+        if (dim == dims.size()) {
+            fn(indices);
+            return;
+        }
+        for (ConfigRealValue idx = 0; idx < dims[dim]; ++idx) {
+            indices[dim] = idx;
+            dfs(dim + 1);
+        }
+    };
+    if (dims.empty()) {
+        fn(indices);
+    } else {
+        dfs(0);
+    }
+}
+
+struct ResolvedReqServConnection {
+    VulReqServConnection conn;
+    string req_instance_name;
+    vector<ConfigRealValue> req_instance_indices;
+    string serv_instance_name;
+    vector<ConfigRealValue> serv_instance_indices;
+};
+
+static string connEndpointBaseName(const string &raw_name, const string &base_name) {
+    return base_name.empty() ? raw_name : base_name;
+}
+
+static vector<ConfigRealValue> parseConcreteChildIndices(
+    const VulStaticModuleInstance &module,
+    const string &base_name,
+    const string &concrete_name
+) {
+    vector<ConfigRealValue> indices;
+    auto inst_it = module.instances.find(base_name);
+    if (inst_it == module.instances.end()) {
+        throw VulException("Instance " + base_name + " not found while resolving RTL child connection");
+    }
+    const auto &decl = inst_it->second;
+    if (!decl.isArrayed()) {
+        if (concrete_name != base_name) {
+            throw VulException("Unexpected concrete child name " + concrete_name + " for scalar instance " + base_name);
+        }
+        return indices;
+    }
+    string prefix = base_name + "__";
+    if (concrete_name.rfind(prefix, 0) != 0) {
+        throw VulException("Concrete child name " + concrete_name + " does not match array base " + base_name);
+    }
+    string rest = concrete_name.substr(prefix.size());
+    size_t pos = 0;
+    while (pos < rest.size()) {
+        size_t next = rest.find("__", pos);
+        string token = (next == string::npos) ? rest.substr(pos) : rest.substr(pos, next - pos);
+        if (token.empty()) {
+            throw VulException("Invalid concrete child name " + concrete_name);
+        }
+        indices.push_back(std::stoll(token));
+        if (next == string::npos) {
+            break;
+        }
+        pos = next + 2;
+    }
+    if (indices.size() != decl.array_dims.size()) {
+        throw VulException("Dimension mismatch while resolving concrete child name " + concrete_name);
+    }
+    return indices;
+}
+
+static bool matchConcreteEndpoint(
+    const vector<ConfigRealValue> &concrete_indices,
+    const vector<VulConnIndexExpr> &endpoint_indices,
+    const VulStaticConfigLib &config_lib,
+    vector<std::optional<ConfigRealValue>> &loop_vars
+) {
+    if (concrete_indices.size() != endpoint_indices.size()) {
+        return false;
+    }
+    for (size_t dim = 0; dim < endpoint_indices.size(); ++dim) {
+        const auto &idx = endpoint_indices[dim];
+        ConfigRealValue concrete_idx = concrete_indices[dim];
+        if (idx.kind == VulConnIndexKind::Wildcard) {
+            continue;
+        }
+        if (idx.kind == VulConnIndexKind::ConstantExpr) {
+            if (calculateConstexprValue(idx.expr, config_lib) != concrete_idx) {
+                return false;
+            }
+            continue;
+        }
+        if (idx.kind == VulConnIndexKind::GeneralExpr) {
+            return false;
+        }
+        if (idx.kind == VulConnIndexKind::LoopVar) {
+            if (idx.loop_dim < 0 || static_cast<size_t>(idx.loop_dim) >= loop_vars.size()) {
+                return false;
+            }
+            ConfigRealValue loop_value = concrete_idx - idx.offset;
+            auto &slot = loop_vars[idx.loop_dim];
+            if (slot.has_value()) {
+                if (*slot != loop_value) {
+                    return false;
+                }
+            } else {
+                slot = loop_value;
+            }
+            continue;
+        }
+    }
+    return true;
+}
+
+static string replaceLoopVarsForRTLExpr(const string &expr) {
+    string out;
+    out.reserve(expr.size() * 2);
+    for (char c : expr) {
+        if (c == '$') {
+            out += "__v0";
+        } else if (c == '?') {
+            out += "__v1";
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+static ConfigRealValue evalRTLExprWithLoopVars(
+    const string &expr,
+    const VulStaticConfigLib &config_lib,
+    const vector<std::optional<ConfigRealValue>> &loop_vars
+) {
+    VulStaticConfigLib eval_cfg = config_lib;
+    if (loop_vars.size() > 0 && loop_vars[0].has_value()) eval_cfg["__v0"] = *loop_vars[0];
+    if (loop_vars.size() > 1 && loop_vars[1].has_value()) eval_cfg["__v1"] = *loop_vars[1];
+    return calculateConstexprValue(replaceLoopVarsForRTLExpr(expr), eval_cfg);
+}
+
+static bool materializeConcreteEndpoint(
+    const VulStaticModuleInstance &module,
+    const string &base_name,
+    const vector<VulConnIndexExpr> &endpoint_indices,
+    const VulStaticConfigLib &config_lib,
+    const vector<std::optional<ConfigRealValue>> &loop_vars,
+    string &concrete_name,
+    vector<ConfigRealValue> &concrete_indices
+) {
+    concrete_name = base_name;
+    concrete_indices.clear();
+    if (base_name.empty()) {
+        return true;
+    }
+    auto inst_it = module.instances.find(base_name);
+    if (inst_it == module.instances.end()) {
+        throw VulException("Instance " + base_name + " not found while materializing RTL child connection");
+    }
+    const auto &decl = inst_it->second;
+    if (!decl.isArrayed()) {
+        return endpoint_indices.empty();
+    }
+    if (endpoint_indices.size() != decl.array_dims.size()) {
+        return false;
+    }
+    for (size_t dim = 0; dim < endpoint_indices.size(); ++dim) {
+        const auto &idx = endpoint_indices[dim];
+        if (idx.kind == VulConnIndexKind::Wildcard) {
+            return false;
+        }
+        ConfigRealValue value = 0;
+        if (idx.kind == VulConnIndexKind::ConstantExpr) {
+            value = calculateConstexprValue(idx.expr, config_lib);
+        } else if (idx.kind == VulConnIndexKind::GeneralExpr) {
+            value = evalRTLExprWithLoopVars(idx.expr, config_lib, loop_vars);
+        } else {
+            if (idx.loop_dim < 0 || static_cast<size_t>(idx.loop_dim) >= loop_vars.size() || !loop_vars[idx.loop_dim].has_value()) {
+                return false;
+            }
+            value = *loop_vars[idx.loop_dim] + idx.offset;
+        }
+        if (value < 0 || value >= decl.array_dims[dim]) {
+            return false;
+        }
+        concrete_indices.push_back(value);
+        concrete_name += "__" + std::to_string(value);
+    }
+    return true;
+}
+
+static string wildcardTopPortSuffix(
+    const vector<VulConnIndexExpr> &endpoint_indices,
+    const vector<ConfigRealValue> &concrete_indices
+) {
+    for (size_t dim = 0; dim < endpoint_indices.size(); ++dim) {
+        if (endpoint_indices[dim].kind == VulConnIndexKind::Wildcard) {
+            return "[" + std::to_string(concrete_indices[dim]) + "]";
+        }
+    }
+    return "";
+}
+
+static string childServiceSignalBase(const string &instance_name, const string &service_name) {
+    return instance_name + "_" + service_name;
+}
+
+static const VulStaticModuleInstance &findChildTemplateByName(
+    const VulStaticModuleInstance &mod,
+    const string &name
+) {
+    for (const auto &child : mod.children) {
+        if (child->instance_path.back() == name) {
+            return *child;
+        }
+    }
+    for (const auto &[inst_name, inst] : mod.instances) {
+        if (inst.isArrayed() && (name == inst_name || name.starts_with(inst_name + "__"))) {
+            for (const auto &child : mod.children) {
+                if (child->instance_path.back() == inst_name) {
+                    return *child;
+                }
+            }
+        }
+    }
+    throw VulException("Child instance template not found: " + name);
+}
+
+static bool resolveConnectionForConcreteRequest(
+    const VulStaticModuleInstance &module,
+    const VulStaticConfigLib &config_lib,
+    const string &concrete_name,
+    const string &req_name,
+    ResolvedReqServConnection &resolved
+) {
+    string base_name = concrete_name;
+    auto pos = concrete_name.find("__");
+    if (pos != string::npos) {
+        base_name = concrete_name.substr(0, pos);
+    }
+    vector<ConfigRealValue> req_indices = parseConcreteChildIndices(module, base_name, concrete_name);
+    for (const auto &conn : module.req_connections) {
+        if (conn.req_name != req_name) continue;
+        string conn_base = connEndpointBaseName(conn.req_instance, conn.req_instance_base);
+        if (conn_base != base_name) continue;
+        vector<std::optional<ConfigRealValue>> loop_vars(2);
+        if (!matchConcreteEndpoint(req_indices, conn.req_indices, config_lib, loop_vars)) continue;
+        resolved.conn = conn;
+        resolved.req_instance_name = concrete_name;
+        resolved.req_instance_indices = req_indices;
+        if (conn.serv_instance.empty()) {
+            resolved.serv_instance_name.clear();
+            resolved.serv_instance_indices.clear();
+            return true;
+        }
+        string serv_base = connEndpointBaseName(conn.serv_instance, conn.serv_instance_base);
+        if (!materializeConcreteEndpoint(module, serv_base, conn.serv_indices, config_lib, loop_vars, resolved.serv_instance_name, resolved.serv_instance_indices)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool resolveConnectionForConcreteService(
+    const VulStaticModuleInstance &module,
+    const VulStaticConfigLib &config_lib,
+    const string &concrete_name,
+    const string &srv_name,
+    ResolvedReqServConnection &resolved
+) {
+    string base_name = concrete_name;
+    auto pos = concrete_name.find("__");
+    if (pos != string::npos) {
+        base_name = concrete_name.substr(0, pos);
+    }
+    vector<ConfigRealValue> serv_indices = parseConcreteChildIndices(module, base_name, concrete_name);
+    for (const auto &conn : module.req_connections) {
+        if (conn.serv_name != srv_name) continue;
+        string conn_base = connEndpointBaseName(conn.serv_instance, conn.serv_instance_base);
+        if (conn_base != base_name) continue;
+        vector<std::optional<ConfigRealValue>> loop_vars(2);
+        if (!matchConcreteEndpoint(serv_indices, conn.serv_indices, config_lib, loop_vars)) continue;
+        resolved.conn = conn;
+        resolved.serv_instance_name = concrete_name;
+        resolved.serv_instance_indices = serv_indices;
+        if (conn.req_instance.empty()) {
+            resolved.req_instance_name.clear();
+            resolved.req_instance_indices.clear();
+            return true;
+        }
+        string req_base = connEndpointBaseName(conn.req_instance, conn.req_instance_base);
+        if (!materializeConcreteEndpoint(module, req_base, conn.req_indices, config_lib, loop_vars, resolved.req_instance_name, resolved.req_instance_indices)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 
@@ -152,7 +455,7 @@ void _procRegisters(RTLGenContext &ctx) {
 
         if (!is_array) {
             // allow implicit conversion to element type for non-array register
-            ctx.hls_header.push_back("operator const " + element_type_str + "&() const {\n");
+            ctx.hls_header.push_back("operator " + element_type_str + "() const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             for (const auto &field : out) {
                 ctx.hls_header.push_back("  " + field.name + " = rdata(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
@@ -161,7 +464,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("}\n");
 
             // single element get for non-array register
-            ctx.hls_header.push_back("const " + element_type_str + " &get() const {\n");
+            ctx.hls_header.push_back(element_type_str + " get() const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             for (const auto &field : out) {
                 ctx.hls_header.push_back("  " + field.name + " = rdata(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
@@ -187,7 +490,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("}\n");
         } else {
             // array element get for array register
-            ctx.hls_header.push_back("const " + element_type_str + "& operator[](const uint32_t idx) const {\n");
+            ctx.hls_header.push_back(element_type_str + " operator[](const uint32_t idx) const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> rdata_val = rdata[idx];\n");
             for (const auto &field : out) {
@@ -235,11 +538,11 @@ void _procRegisters(RTLGenContext &ctx) {
         if (!is_array) {
             ctx.rtl_decl.push_back("reg [" + ewid_m1_str + ":0] " + reg_decl_name + ";\n");
             if (is_ported) {
-                ctx.rtl_decl.push_back("wire " + wen_wire_name + ";\n");
-                ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + ";\n");
-            } else {
                 ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + wrport_num_str + "];\n");
                 ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + "[" + wrport_num_str + "];\n");
+            } else {
+                ctx.rtl_decl.push_back("wire " + wen_wire_name + ";\n");
+                ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + ";\n");
             }
 
             // generate always block for register update
@@ -263,11 +566,11 @@ void _procRegisters(RTLGenContext &ctx) {
         } else {
             ctx.rtl_decl.push_back("reg [" + ewid_m1_str + ":0] " + reg_decl_name + "[" + size_str + "];\n");
             if (is_ported) {
-                ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + size_str + "];\n");
-                ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + "[" + size_str + "];\n");
-            } else {
                 ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + size_str + "][" + wrport_num_str + "];\n");
                 ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + "[" + size_str + "][" + wrport_num_str + "];\n");
+            } else {
+                ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + size_str + "];\n");
+                ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + "[" + size_str + "];\n");
             }
 
             // generate always block for register update
@@ -338,18 +641,6 @@ void _procRequests(RTLGenContext &ctx) {
         const VulStaticReqServ &req = req_entry.second;
 
         VulErrorContextGuard req_guard("processing request " + req_name);
-
-        // skip if this request is connected to a child request port
-        bool skip = false;
-        for (const auto &c : ctx.module.req_connections) {
-            if (c.serv_instance == "" && c.serv_name == req_name) {
-                skip = true;
-                break;
-            }
-        }
-        if (skip) {
-            continue;
-        }
 
         vector<ArgPort> arg_ports;
         vector<ArgPort> ret_ports;
@@ -648,8 +939,8 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                             }
                             arg_names += arg.name;
                         }
-                        ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "<" + std::to_string(idx) + ">(" + arg_names + ");\n");
-                        ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) " + implFuncName(cache.name) + "<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + arg_names + ");\n");
                         ctx.hls_body.push_back("  " + reqservRdyPort(cache.name) + "[" + std::to_string(idx) + "] = rdy;\n");
                         ctx.hls_body.push_back("}\n");
                     }
@@ -675,7 +966,45 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                     ctx.hls_body.push_back("}\n");
                 }
             } else if (!cache.is_tick) {
-                ctx.hls_body.push_back("if (" + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + cache.argnames + ");\n");
+                if (cache.is_arrayed) {
+                    for (uint32_t idx = 0; idx < cache.array_size; ++idx) {
+                        ctx.hls_body.push_back("{\n");
+                        string arg_names = "";
+                        for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
+                            const auto &arg = cache.arg_ports[i];
+                            string portname = reqservArgPort(cache.name, arg.name) + "[" + std::to_string(idx) + "]";
+                            string typestr = arg.type.toString();
+                            ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
+                            for (const auto &field : arg.flat_fields) {
+                                ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                            }
+                            if (i > 0) {
+                                arg_names += ", ";
+                            }
+                            arg_names += arg.name;
+                        }
+                        ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        ctx.hls_body.push_back("}\n");
+                    }
+                } else {
+                    ctx.hls_body.push_back("{\n");
+                    string arg_names = "";
+                    for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
+                        const auto &arg = cache.arg_ports[i];
+                        string portname = reqservArgPort(cache.name, arg.name);
+                        string typestr = arg.type.toString();
+                        ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
+                        for (const auto &field : arg.flat_fields) {
+                            ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                        }
+                        if (i > 0) {
+                            arg_names += ", ";
+                        }
+                        arg_names += arg.name;
+                    }
+                    ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + arg_names + ");\n");
+                    ctx.hls_body.push_back("}\n");
+                }
             } else {
                 ctx.hls_body.push_back(cache.name + "();\n");
             }
@@ -685,8 +1014,8 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
 
 void _procChildrenAndConnection(RTLGenContext &ctx) {
 
-    auto conn_to_str = [](const VulReqServConnection &conn) -> string {
-        return conn.serv_instance + "_" + conn.serv_name + "_" + conn.req_instance + "_" + conn.req_name;
+    auto conn_to_str = [](const ResolvedReqServConnection &conn) -> string {
+        return conn.serv_instance_name + "_" + conn.conn.serv_name + "_" + conn.req_instance_name + "_" + conn.conn.req_name;
     };
 
     // CR-CS 需要wire，子实例-子实例
@@ -698,222 +1027,258 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
     for (const auto child_ptr : ctx.module.children) {
         const auto &child = *child_ptr;
         string child_class_name = child.simClassName();
-        string child_instance_name = child.instance_path.back();
+        string child_decl_name = child.instance_path.back();
         VulErrorContextGuard child_guard("processing child instance " + child_class_name);
 
-        if (ctx.module.instances.find(child_instance_name) == ctx.module.instances.end()) {
-            throw VulException("Instance " + child_instance_name + " not found in module instances");
+        if (ctx.module.instances.find(child_decl_name) == ctx.module.instances.end()) {
+            throw VulException("Instance " + child_decl_name + " not found in module instances");
         }
-        const auto &inst = ctx.module.instances.at(child_instance_name);
+        const auto &inst = ctx.module.instances.at(child_decl_name);
 
-        vector<string> child_port_lines;
-        child_port_lines.push_back(".clk(clk)");
-        child_port_lines.push_back(".rstn(rstn)");
+        auto emit_child_instance = [&](const string &child_instance_name) {
+            vector<string> child_port_lines;
+            child_port_lines.push_back(".clk(clk)");
+            child_port_lines.push_back(".rstn(rstn)");
 
-        for (const auto &req_entry : child.requests) {
-            const auto &req = req_entry.second;
-            const string &req_name = req_entry.first;
-            string sv_array_str = req.is_arrayed ? ("[" + std::to_string(req.array_size) + "]") : "";
-            VulReqServConnection conn;
-            bool connected = false;
-            for (const auto &c : ctx.module.req_connections) {
-                if (c.req_instance == child_instance_name && c.req_name == req_name) {
-                    conn = c;
-                    connected = true;
-                    break;
+            for (const auto &req_entry : child.requests) {
+                const auto &req = req_entry.second;
+                const string &req_name = req_entry.first;
+                string sv_array_str = req.is_arrayed ? ("[" + std::to_string(req.array_size) + "]") : "";
+                ResolvedReqServConnection conn;
+                bool connected = false;
+                connected = resolveConnectionForConcreteRequest(ctx.module, ctx.local_configlib, child_instance_name, req_name, conn);
+                if (!connected) {
+                    throw VulException("Request " + req_name + " of instance " + child_instance_name + " is not connected");
                 }
-            }
-            if (!connected) {
-                throw VulException("Request " + req_name + " of instance " + child_instance_name + " is not connected");
-            }
-            // CR-CS 需要wire，子实例-子实例
-            // CR-S 需要wire，子实例-逻辑子模块
-            if (conn.serv_instance != "" || ctx.module.services.find(conn.serv_name) != ctx.module.services.end()) {
-                string conn_str = conn_to_str(conn);
-                ctx.rtl_decl.push_back("wire " + conn_str + "_valid" + sv_array_str + ";\n");
-                child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + conn_str + "_valid)" );
-                if (req.has_handshake) {
-                    ctx.rtl_decl.push_back("wire " + conn_str + "_ready" + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + conn_str + "_ready)" );
-                }
-                for (const auto &arg : req.args) {
-                    uint32_t offset = 0;
-                    std::vector<FlatField> out;
-                    flatten_type_signature(arg.type, ctx.local_bundlelib, arg.name, offset, out);
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_arg_" + arg.name  + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")" );
-                }
-                for (const auto &ret : req.rets) {
-                    uint32_t offset = 0;
-                    std::vector<FlatField> out;
-                    flatten_type_signature(ret.type, ctx.local_bundlelib, ret.name, offset, out);
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_ret_" + ret.name + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")" );
-                }
-            } else {
-                // CR-R 不需要wire，直接从子实例端口连到模块端口
-                child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + reqservVldPort(conn.serv_name) + ")" );
-                if (req.has_handshake) {
-                    child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + reqservRdyPort(conn.serv_name) + ")" );
-                }
-                for (const auto &arg : req.args) {
-                    child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + reqservArgPort(conn.serv_name, arg.name) + ")" );
-                }
-                for (const auto &ret : req.rets) {
-                    child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + reqservArgPort(conn.serv_name, ret.name) + ")" );
-                }
-            }
-        }
-        for (const auto &srv_entry : child.services) {
-            const auto &srv = srv_entry.second;
-            const string &srv_name = srv_entry.first;
-            VulReqServConnection conn;
-            bool connected = false;
-            for (const auto &c : ctx.module.req_connections) {
-                if (c.serv_instance == child_instance_name && c.serv_name == srv_name) {
-                    conn = c;
-                    connected = true;
-                    break;
-                }
-            }
-            bool logic_ref = (inst.referenced_services.find(srv_name) != inst.referenced_services.end());
-            if (!connected && !logic_ref) {
-                continue; // service port is not connected and not referenced in logic, skip
-            }
-            if (connected && conn.req_instance == "") {
-                // S-CS 不需要wire，直接从子实例端口连到模块端口
-                child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(conn.req_name) + ")" );
-                if (srv.has_handshake) {
-                    child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(conn.req_name) + ")" );
-                }
-                for (const auto &arg : srv.args) {
-                    child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(conn.req_name, arg.name) + ")" );
-                }
-                for (const auto &ret : srv.rets) {
-                    child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(conn.req_name, ret.name) + ")" );
-                }
-            } else if (connected) {
-                // CR-CS 需要wire，子实例-子实例，但wire已经在Req侧生成，这里只连接子实例的端口
-                string conn_str = conn_to_str(conn);
-                child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + conn_str + "_valid)" );
-                if (srv.has_handshake) {
-                    child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + conn_str + "_ready)" );
-                }
-                for (const auto &arg : srv.args) {
-                    child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")" );
-                }
-                for (const auto &ret : srv.rets) {
-                    child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")" );
-                }
-            } else {
-                // L-CS 需要wire，逻辑子模块-子实例，同时在 HLS 函数里设置 helper function
-                string sv_array_str = srv.is_arrayed ? ("[" + std::to_string(srv.array_size) + "]") : "";
-                auto arrayed_port_decl = [&](const string &base_name) -> string {
-                    if (srv.is_arrayed) {
-                        return "std::array<" + base_name + ", " + std::to_string(srv.array_size) + ">";
-                    } else {
-                        return base_name;
+                if (conn.conn.serv_instance != "" || ctx.module.services.find(conn.conn.serv_name) != ctx.module.services.end()) {
+                    string conn_str = conn_to_str(conn);
+                    ctx.rtl_decl.push_back("wire " + conn_str + "_valid" + sv_array_str + ";\n");
+                    child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + conn_str + "_valid)");
+                    if (req.has_handshake) {
+                        ctx.rtl_decl.push_back("wire " + conn_str + "_ready" + sv_array_str + ";\n");
+                        child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + conn_str + "_ready)");
                     }
-                };
-                string child_serv_name = child_instance_name + "_" + srv_name;
-                ctx.rtl_decl.push_back("wire " + reqservVldPort(child_serv_name) + sv_array_str + ";\n");
-                child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(child_serv_name) + ")" );
-                ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " & " + reqservVldPort(child_serv_name));
-                ctx.rtl_logicports.push_back("." + reqservVldPort(child_serv_name) + "(" + reqservVldPort(child_serv_name) + ")");
-                if (srv.has_handshake) {
-                    ctx.rtl_decl.push_back("wire " + reqservRdyPort(child_serv_name) + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(child_serv_name) + ")" );
-                    ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " & " + reqservRdyPort(child_serv_name));
-                    ctx.rtl_logicports.push_back("." + reqservRdyPort(child_serv_name) + "(" + reqservRdyPort(child_serv_name) + ")");
-                }
-                vector<ArgPort> arg_ports;
-                vector<ArgPort> ret_ports;
-                for (const auto &arg : srv.args) {
-                    arg_ports.push_back(procArg(arg, ctx.local_bundlelib));
-                }
-                for (const auto &ret : srv.rets) {
-                    ret_ports.push_back(procArg(ret, ctx.local_bundlelib));
-                }
-                for (const auto &arg : arg_ports) {
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(arg.width - 1) + ":0] " + reqservArgPort(child_serv_name, arg.name) + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")" );
-                    ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & " + reqservArgPort(child_serv_name, arg.name));
-                    ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")");
-                }
-                for (const auto &ret : ret_ports) {
-                    ctx.rtl_decl.push_back("wire [" + std::to_string(ret.width - 1) + ":0] " + reqservArgPort(child_serv_name, ret.name) + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")" );
-                    ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & " + reqservArgPort(child_serv_name, ret.name));
-                    ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")");
-                }
-                if (srv.is_arrayed) {
-                    for (uint32_t idx = 0; idx < srv.array_size; ++idx) {
-                        ctx.hls_init.push_back(reqservVldPort(child_serv_name) + "[" + std::to_string(idx) + "] = false;\n");
+                    for (const auto &arg : req.args) {
+                        uint32_t offset = 0;
+                        std::vector<FlatField> out;
+                        flatten_type_signature(arg.type, ctx.local_bundlelib, arg.name, offset, out);
+                        ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_arg_" + arg.name + sv_array_str + ";\n");
+                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")");
+                    }
+                    for (const auto &ret : req.rets) {
+                        uint32_t offset = 0;
+                        std::vector<FlatField> out;
+                        flatten_type_signature(ret.type, ctx.local_bundlelib, ret.name, offset, out);
+                        ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_ret_" + ret.name + sv_array_str + ";\n");
+                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")");
                     }
                 } else {
-                    ctx.hls_init.push_back(reqservVldPort(child_serv_name) + " = false;\n");
-                }
-
-                const string helper_struct_name = "__ChildServiceHelper__" + child_serv_name;
-                const string helper_var_name = "__child_service_helper__" + child_serv_name;
-                const string array_size_str = std::to_string(srv.array_size);
-
-                ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
-                ctx.hls_header.push_back("  " + arrayed_port_decl("bool") + " & " + " vld_ports;\n");
-                if (srv.has_handshake) {
-                    ctx.hls_header.push_back("  const " + arrayed_port_decl("bool") + " & " + " rdy_ports;\n");
-                }
-                for (const auto &arg : arg_ports) {
-                    ctx.hls_header.push_back("  " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & " + " arg_" + arg.name + ";\n");
-                }
-                for (const auto &ret : ret_ports) {
-                    ctx.hls_header.push_back("  const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & " + " ret_" + ret.name + ";\n");
-                }
-                ctx.hls_header.push_back("\n");
-                ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
-                ctx.hls_header.push_back("  " + srv.returnType() + " call(" + srv.signatureArgOnly() + ") {\n");
-                ctx.hls_header.push_back("    static_assert(IDX < " + array_size_str + ", \"Service port index out of range\");\n");
-                string sel_str = srv.is_arrayed ? ("[IDX]") : "";
-                ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
-                for (const auto &arg : arg_ports) {
-                    for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("    (arg_" + arg.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                    string top_suffix = wildcardTopPortSuffix(conn.conn.req_indices, conn.req_instance_indices);
+                    child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + reqservVldPort(conn.conn.serv_name) + top_suffix + ")");
+                    if (req.has_handshake) {
+                        child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + reqservRdyPort(conn.conn.serv_name) + top_suffix + ")");
+                    }
+                    for (const auto &arg : req.args) {
+                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + reqservArgPort(conn.conn.serv_name, arg.name) + top_suffix + ")");
+                    }
+                    for (const auto &ret : req.rets) {
+                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + reqservArgPort(conn.conn.serv_name, ret.name) + top_suffix + ")");
                     }
                 }
-                for (const auto &ret : ret_ports) {
-                    for (const auto &field : ret.flat_fields) {
-                        ctx.hls_header.push_back("    " + field.name + " = (ret_" + ret.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+            }
+            for (const auto &srv_entry : child.services) {
+                const auto &srv = srv_entry.second;
+                const string &srv_name = srv_entry.first;
+                ResolvedReqServConnection conn;
+                bool connected = false;
+                connected = resolveConnectionForConcreteService(ctx.module, ctx.local_configlib, child_instance_name, srv_name, conn);
+                bool logic_ref = false;
+                for (const auto &use : ctx.module.child_service_uses) {
+                    if (use.instance_name == child_instance_name && use.service_name == srv_name) {
+                        logic_ref = true;
+                        break;
                     }
                 }
-                if (srv.has_handshake) {
-                    ctx.hls_header.push_back("    return rdy_ports" + sel_str + ";\n");
+                if (!connected && !logic_ref) {
+                    continue;
                 }
-                ctx.hls_header.push_back("  }\n");
-                ctx.hls_header.push_back("};\n");
+                if (connected && conn.conn.req_instance == "") {
+                    string top_suffix = wildcardTopPortSuffix(conn.conn.serv_indices, conn.serv_instance_indices);
+                    child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(conn.conn.req_name) + top_suffix + ")");
+                    if (srv.has_handshake) {
+                        child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(conn.conn.req_name) + top_suffix + ")");
+                    }
+                    for (const auto &arg : srv.args) {
+                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(conn.conn.req_name, arg.name) + top_suffix + ")");
+                    }
+                    for (const auto &ret : srv.rets) {
+                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(conn.conn.req_name, ret.name) + top_suffix + ")");
+                    }
+                } else if (connected) {
+                    string conn_str = conn_to_str(conn);
+                    child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + conn_str + "_valid)");
+                    if (srv.has_handshake) {
+                        child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + conn_str + "_ready)");
+                    }
+                    for (const auto &arg : srv.args) {
+                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")");
+                    }
+                    for (const auto &ret : srv.rets) {
+                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")");
+                    }
+                } else {
+                    string sv_array_str = srv.is_arrayed ? ("[" + std::to_string(srv.array_size) + "]") : "";
+                    auto arrayed_port_decl = [&](const string &base_name) -> string {
+                        if (srv.is_arrayed) {
+                            return "std::array<" + base_name + ", " + std::to_string(srv.array_size) + ">";
+                        } else {
+                            return base_name;
+                        }
+                    };
+                    string child_serv_name = childServiceSignalBase(child_instance_name, srv_name);
+                    ctx.rtl_decl.push_back("wire " + reqservVldPort(child_serv_name) + sv_array_str + ";\n");
+                    child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(child_serv_name) + ")");
+                    ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " & " + reqservVldPort(child_serv_name));
+                    ctx.rtl_logicports.push_back("." + reqservVldPort(child_serv_name) + "(" + reqservVldPort(child_serv_name) + ")");
+                    if (srv.has_handshake) {
+                        ctx.rtl_decl.push_back("wire " + reqservRdyPort(child_serv_name) + sv_array_str + ";\n");
+                        child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(child_serv_name) + ")");
+                        ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " & " + reqservRdyPort(child_serv_name));
+                        ctx.rtl_logicports.push_back("." + reqservRdyPort(child_serv_name) + "(" + reqservRdyPort(child_serv_name) + ")");
+                    }
+                    vector<ArgPort> arg_ports;
+                    vector<ArgPort> ret_ports;
+                    for (const auto &arg : srv.args) {
+                        arg_ports.push_back(procArg(arg, ctx.local_bundlelib));
+                    }
+                    for (const auto &ret : srv.rets) {
+                        ret_ports.push_back(procArg(ret, ctx.local_bundlelib));
+                    }
+                    for (const auto &arg : arg_ports) {
+                        ctx.rtl_decl.push_back("wire [" + std::to_string(arg.width - 1) + ":0] " + reqservArgPort(child_serv_name, arg.name) + sv_array_str + ";\n");
+                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")");
+                        ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & " + reqservArgPort(child_serv_name, arg.name));
+                        ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")");
+                    }
+                    for (const auto &ret : ret_ports) {
+                        ctx.rtl_decl.push_back("wire [" + std::to_string(ret.width - 1) + ":0] " + reqservArgPort(child_serv_name, ret.name) + sv_array_str + ";\n");
+                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")");
+                        ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & " + reqservArgPort(child_serv_name, ret.name));
+                        ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")");
+                    }
+                    if (srv.is_arrayed) {
+                        for (uint32_t idx = 0; idx < srv.array_size; ++idx) {
+                            ctx.hls_init.push_back(reqservVldPort(child_serv_name) + "[" + std::to_string(idx) + "] = false;\n");
+                        }
+                    } else {
+                        ctx.hls_init.push_back(reqservVldPort(child_serv_name) + " = false;\n");
+                    }
+                }
+            }
+            ctx.rtl_inst.push_back(child_class_name + " " + child_instance_name + " (\n");
+            for (size_t i = 0; i < child_port_lines.size(); i++) {
+                ctx.rtl_inst.push_back("  " + child_port_lines[i] + (i == child_port_lines.size() - 1 ? "" : ",") + "\n");
+            }
+            ctx.rtl_inst.push_back(");\n");
+        };
 
-                ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
-                ctx.hls_helpers.push_back("  " + reqservVldPort(child_serv_name) + ",\n");
-                if (srv.has_handshake) {
-                    ctx.hls_helpers.push_back("  " + reqservRdyPort(child_serv_name) + ",\n");
+        if (inst.isArrayed()) {
+            forEachIndexTuple(inst.array_dims, [&](const vector<ConfigRealValue> &indices) {
+                string concrete_name = child_decl_name;
+                for (ConfigRealValue idx : indices) {
+                    concrete_name += "__" + std::to_string(idx);
                 }
-                for (size_t i = 0; i < arg_ports.size(); ++i) {
-                    const auto &arg = arg_ports[i];
-                    ctx.hls_helpers.push_back("  " + reqservArgPort(child_serv_name, arg.name) + ",\n");
-                }
-                for (size_t i = 0; i < ret_ports.size(); ++i) {
-                    const auto &ret = ret_ports[i];
-                    ctx.hls_helpers.push_back("  " + reqservArgPort(child_serv_name, ret.name) + ",\n");
-                }
-                ctx.hls_helpers.push_back("};\n");
-                ctx.hls_helpers.push_back("#define " + child_serv_name + " " + helper_var_name + ".call\n");
-                ctx.hls_final.push_back("#undef " + child_serv_name + "\n");
+                emit_child_instance(concrete_name);
+            });
+        } else {
+            emit_child_instance(child_decl_name);
+        }
+    }
+
+    std::map<string, vector<VulStaticChildServiceUse>> child_service_groups;
+    for (const auto &use : ctx.module.child_service_uses) {
+        child_service_groups[use.alias_name].push_back(use);
+    }
+    for (const auto &group_entry : child_service_groups) {
+        const string &alias_name = group_entry.first;
+        const auto &group = group_entry.second;
+        const auto &target_child = findChildTemplateByName(ctx.module, group.front().instance_name);
+        auto serv_iter = target_child.services.find(group.front().service_name);
+        if (serv_iter == target_child.services.end()) {
+            throw VulException("Service " + group.front().service_name + " not found in child " + target_child.module_name);
+        }
+        const auto &serv = serv_iter->second;
+        vector<ArgPort> arg_ports;
+        vector<ArgPort> ret_ports;
+        for (const auto &arg : serv.args) {
+            arg_ports.push_back(procArg(arg, ctx.local_bundlelib));
+        }
+        for (const auto &ret : serv.rets) {
+            ret_ports.push_back(procArg(ret, ctx.local_bundlelib));
+        }
+
+        const string helper_struct_name = "__ChildServiceHelper__" + alias_name;
+        const string helper_var_name = "__child_service_helper__" + alias_name;
+        const bool is_alias_arrayed = group.front().alias_indexed;
+
+        ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
+        for (size_t i = 0; i < group.size(); ++i) {
+            ctx.hls_header.push_back("  bool & vld_ports_" + std::to_string(i) + ";\n");
+            if (serv.has_handshake) {
+                ctx.hls_header.push_back("  const bool & rdy_ports_" + std::to_string(i) + ";\n");
+            }
+            for (const auto &arg : arg_ports) {
+                ctx.hls_header.push_back("  Int<" + std::to_string(arg.width) + "> & arg_" + arg.name + "_" + std::to_string(i) + ";\n");
+            }
+            for (const auto &ret : ret_ports) {
+                ctx.hls_header.push_back("  const Int<" + std::to_string(ret.width) + "> & ret_" + ret.name + "_" + std::to_string(i) + ";\n");
             }
         }
-        ctx.rtl_inst.push_back(child_class_name + " " + child_instance_name + " (\n");
-        for (size_t i = 0; i < child_port_lines.size(); i++) {
-            ctx.rtl_inst.push_back("  " + child_port_lines[i] + (i == child_port_lines.size() - 1 ? "" : ",") + "\n");
+        ctx.hls_header.push_back("\n");
+        ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
+        ctx.hls_header.push_back("  " + serv.returnType() + " call(" + serv.signatureArgOnly() + ") {\n");
+        ctx.hls_header.push_back("    static_assert(IDX < " + std::to_string(is_alias_arrayed ? group.size() : 1) + ", \"Implicit request index out of range\");\n");
+        for (size_t i = 0; i < group.size(); ++i) {
+            string branch = (i == 0 ? "if constexpr" : "else if constexpr");
+            ctx.hls_header.push_back("    " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
+            ctx.hls_header.push_back("      vld_ports_" + std::to_string(i) + " = true;\n");
+            for (const auto &arg : arg_ports) {
+                for (const auto &field : arg.flat_fields) {
+                    ctx.hls_header.push_back("      (arg_" + arg.name + "_" + std::to_string(i) + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                }
+            }
+            for (const auto &ret : ret_ports) {
+                for (const auto &field : ret.flat_fields) {
+                    ctx.hls_header.push_back("      " + field.name + " = (ret_" + ret.name + "_" + std::to_string(i) + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                }
+            }
+            if (serv.has_handshake) {
+                ctx.hls_header.push_back("      return rdy_ports_" + std::to_string(i) + ";\n");
+            } else if (serv.returnType() == "void") {
+                ctx.hls_header.push_back("      return;\n");
+            }
+            ctx.hls_header.push_back("    }\n");
         }
-        ctx.rtl_inst.push_back(");\n");
+        ctx.hls_header.push_back("  }\n");
+        ctx.hls_header.push_back("};\n");
+
+        ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
+        for (size_t i = 0; i < group.size(); ++i) {
+            const string signal_base = childServiceSignalBase(group[i].instance_name, group[i].service_name);
+            ctx.hls_helpers.push_back("  " + reqservVldPort(signal_base) + ",\n");
+            if (serv.has_handshake) {
+                ctx.hls_helpers.push_back("  " + reqservRdyPort(signal_base) + ",\n");
+            }
+            for (const auto &arg : arg_ports) {
+                ctx.hls_helpers.push_back("  " + reqservArgPort(signal_base, arg.name) + ",\n");
+            }
+            for (const auto &ret : ret_ports) {
+                ctx.hls_helpers.push_back("  " + reqservArgPort(signal_base, ret.name) + ",\n");
+            }
+        }
+        ctx.hls_helpers.push_back("};\n");
+        ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
+        ctx.hls_final.push_back("#undef " + alias_name + "\n");
     }
 }
 

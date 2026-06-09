@@ -9,6 +9,7 @@
 #include <iostream>
 #include <fstream>
 #include <deque>
+#include <unordered_set>
 #include <vector>
 #include <string>
 
@@ -152,6 +153,7 @@ int simgenStatic(const SimGenArgs &args) {
 
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
+    std::unordered_set<std::string> generated_module_paths;
     bfs_queue.push_back(project.top_module_instance);
     while (!bfs_queue.empty()) {
         auto mod_instance = bfs_queue.front();
@@ -160,10 +162,15 @@ int simgenStatic(const SimGenArgs &args) {
             bfs_queue.push_back(child);
         }
 
+        const std::string decl_path = mod_instance->simDeclPath();
+        if (!generated_module_paths.insert(decl_path).second) {
+            continue;
+        }
+
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
         auto codes = simgen::genStaticModuleCodeHpp(*mod_instance, trace_table[mod_instance->instance_id]);
-        writeLinesToFile(codes.decl, (out_path / (mod_instance->simDeclPath())).string());
+        writeLinesToFile(codes.decl, (out_path / decl_path).string());
         writeLinesToFile(codes.impl, (out_path / (mod_instance->simImplPath())).string());
         for (const auto &res_file : codes.resource_files) {
             std::filesystem::path src_file = proj_path / res_file;

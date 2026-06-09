@@ -24,11 +24,286 @@
 #include "configexpr.hpp"
 #include "toposort.hpp"
 #include "cppparse.hpp"
+#include "stringop.hpp"
 #include <cassert>
 #include <functional>
 #include <iostream>
+#include <optional>
 
 using std::make_shared;
+
+namespace {
+
+struct ParsedInstanceExpr {
+    string base_name;
+    vector<string> index_exprs;
+};
+
+static bool isIdentStart(char c) {
+    return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
+}
+
+static bool isIdentChar(char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+}
+
+static ParsedInstanceExpr parseInstanceExpr(const string &expr_raw) {
+    const string expr = stringop::trim(expr_raw);
+    if (expr.empty()) {
+        return {};
+    }
+
+    size_t pos = 0;
+    if (!isIdentStart(expr[pos])) {
+        throw VulException("Invalid instance expression: '" + expr + "'");
+    }
+    while (pos < expr.size() && isIdentChar(expr[pos])) {
+        ++pos;
+    }
+
+    ParsedInstanceExpr out;
+    out.base_name = expr.substr(0, pos);
+
+    while (pos < expr.size()) {
+        while (pos < expr.size() && std::isspace(static_cast<unsigned char>(expr[pos]))) {
+            ++pos;
+        }
+        if (pos >= expr.size()) {
+            break;
+        }
+        if (expr[pos] != '[') {
+            throw VulException("Invalid instance expression: '" + expr + "'");
+        }
+        const size_t begin = ++pos;
+        int depth = 1;
+        bool in_string = false;
+        bool in_char = false;
+        bool escape = false;
+        for (; pos < expr.size(); ++pos) {
+            const char c = expr[pos];
+            if (in_string || in_char) {
+                if (escape) {
+                    escape = false;
+                } else if (c == '\\') {
+                    escape = true;
+                } else if (in_string && c == '"') {
+                    in_string = false;
+                } else if (in_char && c == '\'') {
+                    in_char = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+                continue;
+            }
+            if (c == '\'') {
+                in_char = true;
+                continue;
+            }
+            if (c == '[') {
+                ++depth;
+            } else if (c == ']') {
+                --depth;
+                if (depth == 0) {
+                    break;
+                }
+            }
+        }
+        if (pos >= expr.size() || expr[pos] != ']') {
+            throw VulException("Unmatched '[' in instance expression: '" + expr + "'");
+        }
+        out.index_exprs.push_back(stringop::trim(expr.substr(begin, pos - begin)));
+        ++pos;
+    }
+    return out;
+}
+
+static string arrayInstanceName(const string &base_name, const vector<ConfigRealValue> &indices) {
+    string out = base_name;
+    for (ConfigRealValue idx : indices) {
+        out += "__" + std::to_string(idx);
+    }
+    return out;
+}
+
+static string replaceLoopVars(const string &expr, const vector<ConfigRealValue> &loop_vars) {
+    string out;
+    out.reserve(expr.size() * 2);
+    for (char c : expr) {
+        if (c == '$') {
+            out += "__v0";
+        } else if (c == '?') {
+            out += "__v1";
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+static ConfigRealValue evalExprWithLoopVars(
+    const string &expr,
+    const VulStaticConfigLib &config_lib,
+    const vector<ConfigRealValue> &loop_vars
+) {
+    VulStaticConfigLib eval_cfg = config_lib;
+    if (loop_vars.size() > 0) {
+        eval_cfg["__v0"] = loop_vars[0];
+    }
+    if (loop_vars.size() > 1) {
+        eval_cfg["__v1"] = loop_vars[1];
+    }
+    return calculateConstexprValue(replaceLoopVars(expr, loop_vars), eval_cfg);
+}
+
+static const VulStaticInstanceDecl &requireInstanceDecl(
+    const unordered_map<InstanceName, VulStaticInstanceDecl> &instances,
+    const string &name,
+    const string &ctx
+) {
+    auto it = instances.find(name);
+    if (it == instances.end()) {
+        throw VulException("Instance '" + name + "' not found while " + ctx);
+    }
+    return it->second;
+}
+
+template<typename Fn>
+static void forEachIndexTuple(const vector<ConfigRealValue> &dims, Fn fn) {
+    vector<ConfigRealValue> indices(dims.size(), 0);
+    std::function<void(size_t)> dfs = [&](size_t dim) {
+        if (dim == dims.size()) {
+            fn(indices);
+            return;
+        }
+        for (ConfigRealValue idx = 0; idx < dims[dim]; ++idx) {
+            indices[dim] = idx;
+            dfs(dim + 1);
+        }
+    };
+    if (dims.empty()) {
+        fn(indices);
+    } else {
+        dfs(0);
+    }
+}
+
+static bool hasLoopVar(const string &expr) {
+    return expr.find('$') != string::npos || expr.find('?') != string::npos;
+}
+
+static bool hasWildcard(const string &expr) {
+    return expr.find('*') != string::npos;
+}
+
+static VulConnIndexExpr parseConnIndexExpr(const string &expr_raw) {
+    const string expr = stringop::trim(expr_raw);
+    if (expr.empty()) {
+        throw VulException("Empty array index expression");
+    }
+    if (expr == "*") {
+        VulConnIndexExpr out;
+        out.kind = VulConnIndexKind::Wildcard;
+        out.expr = expr;
+        return out;
+    }
+
+    auto parse_loop_var = [&](char symbol, int32_t loop_dim) -> std::optional<VulConnIndexExpr> {
+        const size_t pos = expr.find(symbol);
+        if (pos == string::npos) return std::nullopt;
+        if (expr.find(symbol, pos + 1) != string::npos) {
+            return std::nullopt;
+        }
+        if (expr.find(symbol == '$' ? '?' : '$') != string::npos) {
+            return std::nullopt;
+        }
+        string lhs = stringop::trim(expr.substr(0, pos));
+        string rhs = stringop::trim(expr.substr(pos + 1));
+        int64_t offset = 0;
+        if (!lhs.empty()) {
+            return std::nullopt;
+        }
+        if (!rhs.empty()) {
+            if (rhs[0] == '+') {
+                offset = std::stoll(stringop::trim(rhs.substr(1)));
+            } else if (rhs[0] == '-') {
+                offset = -std::stoll(stringop::trim(rhs.substr(1)));
+            } else {
+                return std::nullopt;
+            }
+        }
+        VulConnIndexExpr out;
+        out.kind = VulConnIndexKind::LoopVar;
+        out.loop_dim = loop_dim;
+        out.offset = offset;
+        out.expr = expr;
+        return out;
+    };
+
+    if (auto parsed = parse_loop_var('$', 0)) return *parsed;
+    if (auto parsed = parse_loop_var('?', 1)) return *parsed;
+
+    if (hasLoopVar(expr)) {
+        VulConnIndexExpr out;
+        out.kind = VulConnIndexKind::GeneralExpr;
+        out.expr = expr;
+        return out;
+    }
+
+    VulConnIndexExpr out;
+    out.kind = VulConnIndexKind::ConstantExpr;
+    out.expr = expr;
+    return out;
+}
+
+static vector<VulConnIndexExpr> parseConnIndices(const ParsedInstanceExpr &parsed) {
+    vector<VulConnIndexExpr> out;
+    out.reserve(parsed.index_exprs.size());
+    for (const auto &expr : parsed.index_exprs) {
+        out.push_back(parseConnIndexExpr(expr));
+    }
+    return out;
+}
+
+static bool tryResolveConcreteInstance(
+    const ParsedInstanceExpr &parsed,
+    const VulStaticInstanceDecl &decl,
+    const VulStaticConfigLib &config_lib,
+    const vector<ConfigRealValue> &loop_vars,
+    string &concrete_name
+) {
+    if (parsed.index_exprs.size() != decl.array_dims.size()) {
+        throw VulException("Dimension mismatch when resolving instance '" + parsed.base_name + "'");
+    }
+    vector<ConfigRealValue> indices;
+    indices.reserve(parsed.index_exprs.size());
+    for (size_t i = 0; i < parsed.index_exprs.size(); ++i) {
+        const string &expr = parsed.index_exprs[i];
+        if (hasWildcard(expr)) {
+            throw VulException("Wildcard '*' is only allowed in module boundary connections");
+        }
+        ConfigRealValue idx = evalExprWithLoopVars(expr, config_lib, loop_vars);
+        if (idx < 0 || idx >= decl.array_dims[i]) {
+            return false;
+        }
+        indices.push_back(idx);
+    }
+    concrete_name = decl.isArrayed() ? arrayInstanceName(parsed.base_name, indices) : parsed.base_name;
+    return true;
+}
+
+static vector<size_t> collectWildcardDims(const ParsedInstanceExpr &parsed) {
+    vector<size_t> dims;
+    for (size_t i = 0; i < parsed.index_exprs.size(); ++i) {
+        if (stringop::trim(parsed.index_exprs[i]) == "*") {
+            dims.push_back(i);
+        }
+    }
+    return dims;
+}
+
+} // namespace
 
 VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulStaticConfigLib &config_lib) {
     VulStaticReqServ static_req;
@@ -196,14 +471,18 @@ void instantiateModule(
         VulStaticInstanceDecl static_inst;
         static_inst.name = inst.name;
         static_inst.module_name = inst.module_name;
+        for (const auto &dim_expr : inst.array_dims) {
+            ConfigRealValue dim_value = calculateConstexprValue(dim_expr, local_config_lib);
+            if (dim_value <= 0) {
+                throw VulException("Child instance array dimension must be positive for '" + inst.name + "'");
+            }
+            static_inst.array_dims.push_back(dim_value);
+        }
         for (const auto &param_override : inst.parameter_overrides) {
             const string &param_name = param_override.first;
             const string &param_value_str = param_override.second;
             ConfigRealValue param_value = calculateConstexprValue(param_value_str, local_config_lib);
             static_inst.parameter_overrides[param_name] = param_value;
-        }
-        for (const auto &serv : inst.referenced_services) {
-            static_inst.referenced_services.insert(serv);
         }
         instance.instances[inst.name] = static_inst;
     }
@@ -217,28 +496,226 @@ void instantiateModule(
     }
 
     // req-serv connections
-    instance.req_connections = temp.req_connections;
+    instance.req_connections.clear();
+    for (const auto &temp_conn : temp.req_connections) {
+        VulReqServConnection conn = temp_conn;
+        const ParsedInstanceExpr req_expr = parseInstanceExpr(temp_conn.req_instance);
+        const ParsedInstanceExpr serv_expr = parseInstanceExpr(temp_conn.serv_instance);
+        const bool req_is_top = temp_conn.req_instance.empty();
+        const bool serv_is_top = temp_conn.serv_instance.empty();
+
+        conn.req_instance_base = req_expr.base_name;
+        conn.req_indices = parseConnIndices(req_expr);
+        conn.serv_instance_base = serv_expr.base_name;
+        conn.serv_indices = parseConnIndices(serv_expr);
+
+        auto validate_child_ref = [&](const ParsedInstanceExpr &expr, const vector<VulConnIndexExpr> &indices, const string &ctx, bool allow_wildcard) {
+            if (expr.base_name.empty()) return;
+            const auto &decl = requireInstanceDecl(instance.instances, expr.base_name, ctx);
+            if (expr.index_exprs.size() != decl.array_dims.size()) {
+                throw VulException("Dimension mismatch for array instance '" + expr.base_name + "'");
+            }
+            size_t wildcard_count = 0;
+            for (const auto &idx : indices) {
+                if (idx.kind == VulConnIndexKind::Wildcard) {
+                    ++wildcard_count;
+                    if (!allow_wildcard) {
+                        throw VulException("Wildcard '*' is only allowed in module boundary connections");
+                    }
+                }
+            }
+            if (wildcard_count > 1) {
+                throw VulException("Only one '*' wildcard is supported in a module boundary connection");
+            }
+        };
+
+        if (!req_is_top) {
+            validate_child_ref(req_expr, conn.req_indices, "processing request side connection", serv_is_top);
+        }
+        if (!serv_is_top) {
+            validate_child_ref(serv_expr, conn.serv_indices, "processing service side connection", req_is_top);
+        }
+
+        if (!req_is_top && !serv_is_top) {
+            const auto &req_decl = requireInstanceDecl(instance.instances, req_expr.base_name, "checking request side");
+            const auto &serv_decl = requireInstanceDecl(instance.instances, serv_expr.base_name, "checking service side");
+            vector<ConfigRealValue> loop_dims(2, -1);
+            vector<int32_t> source_loop_dim_pos(2, -1);
+            for (size_t i = 0; i < conn.req_indices.size(); ++i) {
+                const auto &idx = conn.req_indices[i];
+                if (idx.kind == VulConnIndexKind::GeneralExpr) {
+                    throw VulException(
+                        "Loop variables on source instance '" + req_expr.base_name +
+                        "' must appear alone in one dimension, such as [$] or [?]"
+                    );
+                }
+                if (idx.kind != VulConnIndexKind::LoopVar) continue;
+                if (idx.offset != 0) {
+                    throw VulException(
+                        "Loop variables on source instance '" + req_expr.base_name +
+                        "' cannot use offsets; use [$] or [?] instead of '" + idx.expr + "'"
+                    );
+                }
+                const int32_t loop_dim = idx.loop_dim;
+                if (loop_dim < 0 || static_cast<size_t>(loop_dim) >= loop_dims.size()) {
+                    throw VulException("Loop variable index out of range in '" + req_expr.base_name + "'");
+                }
+                if (source_loop_dim_pos[loop_dim] >= 0) {
+                    throw VulException("Loop variable appears multiple times on source instance '" + req_expr.base_name + "'");
+                }
+                source_loop_dim_pos[loop_dim] = static_cast<int32_t>(i);
+                loop_dims[loop_dim] = req_decl.array_dims[i];
+            }
+
+            auto validate_loop_var_uses = [&](const vector<VulConnIndexExpr> &indices, const string &instance_name) {
+                for (const auto &idx : indices) {
+                    if (idx.kind == VulConnIndexKind::ConstantExpr || idx.kind == VulConnIndexKind::Wildcard) {
+                        continue;
+                    }
+                    if (idx.kind == VulConnIndexKind::LoopVar) {
+                        if (idx.loop_dim < 0 || static_cast<size_t>(idx.loop_dim) >= loop_dims.size() || source_loop_dim_pos[idx.loop_dim] < 0) {
+                            throw VulException("Loop variable used in destination instance '" + instance_name + "' is not defined on the source side");
+                        }
+                        continue;
+                    }
+                    if (idx.kind == VulConnIndexKind::GeneralExpr) {
+                        if (idx.expr.find('$') != string::npos && source_loop_dim_pos[0] < 0) {
+                            throw VulException("Destination expression '" + idx.expr + "' uses '$' without a matching source-side [$]");
+                        }
+                        if (idx.expr.find('?') != string::npos && source_loop_dim_pos[1] < 0) {
+                            throw VulException("Destination expression '" + idx.expr + "' uses '?' without a matching source-side [?]");
+                        }
+                    }
+                }
+            };
+            validate_loop_var_uses(conn.serv_indices, serv_expr.base_name);
+
+            vector<ConfigRealValue> loop_vars(2, 0);
+            std::function<void(size_t)> validate_dest_eval = [&](size_t var_id) {
+                if (var_id == loop_dims.size()) {
+                    for (size_t dim = 0; dim < conn.serv_indices.size(); ++dim) {
+                        const auto &idx = conn.serv_indices[dim];
+                        if (idx.kind == VulConnIndexKind::Wildcard) {
+                            throw VulException("Wildcard '*' is only allowed in module boundary connections");
+                        }
+                        if (idx.kind == VulConnIndexKind::ConstantExpr || idx.kind == VulConnIndexKind::GeneralExpr) {
+                            (void)evalExprWithLoopVars(idx.expr, local_config_lib, loop_vars);
+                        }
+                    }
+                    return;
+                }
+                if (source_loop_dim_pos[var_id] < 0) {
+                    validate_dest_eval(var_id + 1);
+                    return;
+                }
+                for (ConfigRealValue idx = 0; idx < loop_dims[var_id]; ++idx) {
+                    loop_vars[var_id] = idx;
+                    validate_dest_eval(var_id + 1);
+                }
+            };
+            validate_dest_eval(0);
+        } else {
+            const ParsedInstanceExpr &child_expr = req_is_top ? serv_expr : req_expr;
+            const vector<VulConnIndexExpr> &child_indices = req_is_top ? conn.serv_indices : conn.req_indices;
+            if (!child_expr.base_name.empty()) {
+                const auto &child_decl = requireInstanceDecl(instance.instances, child_expr.base_name, "checking module boundary connection");
+                if (child_decl.isArrayed() && child_indices.empty()) {
+                    throw VulException("Array child instance '" + child_expr.base_name + "' requires explicit indices in connection");
+                }
+                for (const auto &idx : child_indices) {
+                    if (idx.kind == VulConnIndexKind::LoopVar || idx.kind == VulConnIndexKind::GeneralExpr) {
+                        throw VulException("Loop variables are only allowed in internal array connection rules");
+                    }
+                }
+            }
+        }
+
+        instance.req_connections.push_back(std::move(conn));
+    }
+
+    // child service uses
+    instance.child_service_uses.clear();
+    for (const auto &temp_use : temp.child_service_uses) {
+        const ParsedInstanceExpr child_expr = parseInstanceExpr(temp_use.instance_expr);
+        const auto &child_decl = requireInstanceDecl(instance.instances, child_expr.base_name, "processing USE_CHILD_SERVICE_PORT");
+        if (child_expr.index_exprs.empty()) {
+            if (child_decl.isArrayed()) {
+                throw VulException("Array child instance '" + child_expr.base_name + "' requires explicit indices in USE_CHILD_SERVICE_PORT");
+            }
+            VulStaticChildServiceUse use;
+            use.alias_name = temp_use.alias_name;
+            use.instance_name = child_expr.base_name;
+            use.service_name = temp_use.service_name;
+            instance.child_service_uses.push_back(std::move(use));
+            continue;
+        }
+        if (child_expr.index_exprs.size() != child_decl.array_dims.size()) {
+            throw VulException("Dimension mismatch for child instance '" + child_expr.base_name + "' in USE_CHILD_SERVICE_PORT");
+        }
+        vector<size_t> wildcard_dims = collectWildcardDims(child_expr);
+        if (wildcard_dims.size() > 1) {
+            throw VulException("Only one '*' wildcard is supported in USE_CHILD_SERVICE_PORT");
+        }
+        if (wildcard_dims.empty()) {
+            string concrete_name;
+            if (!tryResolveConcreteInstance(child_expr, child_decl, local_config_lib, {}, concrete_name)) {
+                throw VulException("Indexed child instance out of range in USE_CHILD_SERVICE_PORT");
+            }
+            VulStaticChildServiceUse use;
+            use.alias_name = temp_use.alias_name;
+            use.instance_name = concrete_name;
+            use.service_name = temp_use.service_name;
+            instance.child_service_uses.push_back(std::move(use));
+            continue;
+        }
+
+        const size_t wildcard_dim = wildcard_dims[0];
+        for (ConfigRealValue wildcard_idx = 0; wildcard_idx < child_decl.array_dims[wildcard_dim]; ++wildcard_idx) {
+            vector<ConfigRealValue> concrete_indices;
+            concrete_indices.reserve(child_expr.index_exprs.size());
+            bool valid = true;
+            for (size_t dim = 0; dim < child_expr.index_exprs.size(); ++dim) {
+                if (dim == wildcard_dim && stringop::trim(child_expr.index_exprs[dim]) == "*") {
+                    concrete_indices.push_back(wildcard_idx);
+                    continue;
+                }
+                ConfigRealValue idx = calculateConstexprValue(child_expr.index_exprs[dim], local_config_lib);
+                if (idx < 0 || idx >= child_decl.array_dims[dim]) {
+                    valid = false;
+                    break;
+                }
+                concrete_indices.push_back(idx);
+            }
+            if (!valid) {
+                continue;
+            }
+            VulStaticChildServiceUse use;
+            use.alias_name = temp_use.alias_name;
+            use.instance_name = arrayInstanceName(child_expr.base_name, concrete_indices);
+            use.service_name = temp_use.service_name;
+            use.alias_indexed = true;
+            use.alias_index = wildcard_idx;
+            instance.child_service_uses.push_back(std::move(use));
+        }
+    }
 
     // helper codes
     instance.helper_codes = temp.helper_codes;
 }
 
 void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance) {
-    unordered_map<string, LogicBlockCall> valid_function_names;
+    vector<std::pair<string, LogicBlockCall>> valid_function_names;
     for (const auto &req_entry : module_instance.requests) {
         LogicBlockCall call;
         call.instance = "";
         call.port = req_entry.first;
-        valid_function_names[req_entry.first] = call;
+        valid_function_names.push_back({req_entry.first, call});
     }
-    for (const auto &inst_entry : module_instance.instances) {
-        const auto &inst = inst_entry.second;
-        for (const auto &serv : inst.referenced_services) {
-            LogicBlockCall call;
-            call.instance = inst_entry.first;
-            call.port = serv;
-            valid_function_names[inst_entry.first + "_" + serv] = call;
-        }
+    for (const auto &use : module_instance.child_service_uses) {
+        LogicBlockCall call;
+        call.instance = use.instance_name;
+        call.port = use.service_name;
+        valid_function_names.push_back({use.alias_name, call});
     }
     for (auto &serv_entry: module_instance.serv_logic_blocks) {
         auto &serv_lb = serv_entry.second;
@@ -266,7 +743,31 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
                 return child;
             }
         }
+        for (const auto &[inst_name, inst] : mod->instances) {
+            if (!inst.isArrayed()) {
+                continue;
+            }
+            if (child_name == inst_name || child_name.rfind(inst_name + "__", 0) == 0) {
+                for (auto &child : mod->children) {
+                    if (!child->instance_path.empty() && child->instance_path.back() == inst_name) {
+                        return child;
+                    }
+                }
+            }
+        }
         return nullptr;
+    };
+    auto child_req_name_match = [](const shared_ptr<VulStaticModuleInstance> &child, const InstanceName &conn_req_instance) -> bool {
+        if (conn_req_instance == child->instance_path.back()) {
+            return true;
+        }
+        if (child->parent) {
+            auto inst_it = child->parent->instances.find(child->instance_path.back());
+            if (inst_it != child->parent->instances.end() && inst_it->second.isArrayed()) {
+                return conn_req_instance.rfind(child->instance_path.back() + "__", 0) == 0;
+            }
+        }
+        return false;
     };
     auto pack_lb_id = [](uint32_t instance_id, uint32_t block_id) -> uint64_t {
         return ((uint64_t)instance_id << 32) | block_id;
@@ -302,9 +803,10 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
                 bool found_conn = false;
                 for (const auto &conn : cur->req_connections) {
                     if (conn.req_instance == "" && conn.req_name == port) {
-                        cur = find_child_ptr_by_name(cur, conn.serv_instance);
+                        const string &target_name = conn.serv_instance_base.empty() ? conn.serv_instance : conn.serv_instance_base;
+                        cur = find_child_ptr_by_name(cur, target_name);
                         if (cur == nullptr) {
-                            throw VulException("Invalid Req-Serv connection: instance '" + conn.serv_instance + "' not found in instance '" + instance->instance_path.back() + "'");
+                            throw VulException("Invalid Req-Serv connection: instance '" + target_name + "' not found in instance '" + instance->instance_path.back() + "'");
                         }
                         port = conn.serv_name;
                         found_conn = true;
@@ -324,7 +826,8 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
         // CR-CS: connected to another child's service
         bool found_conn = false;
         for (const auto &conn : parent->req_connections) {
-            if (conn.req_instance == cur->instance_path.back() && conn.req_name == port) {
+            const string &req_name_match = conn.req_instance_base.empty() ? conn.req_instance : conn.req_instance_base;
+            if (child_req_name_match(cur, req_name_match) && conn.req_name == port) {
                 if (conn.serv_instance == "") {
                     // connected to parent's service/request
                     cur = parent;
@@ -332,9 +835,10 @@ uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance,
                     is_serv_call = (parent->requests.find(conn.serv_name) == parent->requests.end());
                 } else {
                     // connected to another child's service
-                    cur = find_child_ptr_by_name(parent, conn.serv_instance);
+                    const string &target_name = conn.serv_instance_base.empty() ? conn.serv_instance : conn.serv_instance_base;
+                    cur = find_child_ptr_by_name(parent, target_name);
                     if (cur == nullptr) {
-                        throw VulException("Invalid Req-Serv connection: instance '" + conn.serv_instance + "' not found in instance '" + parent->instance_path.back() + "'");
+                        throw VulException("Invalid Req-Serv connection: instance '" + target_name + "' not found in instance '" + parent->instance_path.back() + "'");
                     }
                     port = conn.serv_name;
                     is_serv_call = true;

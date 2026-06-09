@@ -9,6 +9,7 @@
 #include <iostream>
 #include <fstream>
 #include <deque>
+#include <unordered_set>
 #include <vector>
 #include <string>
 
@@ -99,6 +100,7 @@ int main(int argc, char * argv[]) {
 
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
+    std::unordered_set<std::string> generated_module_paths;
     bfs_queue.push_back(project.top_module_instance);
     while (!bfs_queue.empty()) {
         auto mod_instance = bfs_queue.front();
@@ -107,10 +109,15 @@ int main(int argc, char * argv[]) {
             bfs_queue.push_back(child);
         }
 
+        const std::string hls_path = mod_instance->rtlHlsPath();
+        if (!generated_module_paths.insert(hls_path).second) {
+            continue;
+        }
+
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
         auto codes = rtlgen::genModuleRTL(*mod_instance, project.global_configlib, project.global_bundlelib);
-        writeLinesToFile(codes.logic_hls_codes, (out_path / (mod_instance->rtlHlsPath())).string());
+        writeLinesToFile(codes.logic_hls_codes, (out_path / hls_path).string());
         writeLinesToFile(codes.rtl_skeleten_codes, (out_path / (mod_instance->rtlSvPath())).string());
         for (const auto &res_file : codes.resource_files) {
             std::filesystem::path src_file = std::filesystem::path(proj_dir) / res_file;

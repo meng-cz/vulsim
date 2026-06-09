@@ -28,6 +28,7 @@
 #include "configexpr.hpp"
 #include "bundlelib.h"
 
+#include <algorithm>
 #include <map>
 
 using std::pair;
@@ -42,20 +43,74 @@ typedef string ArgName;
 using InstanceName = string;
 using CCodeLine = string;
 
+enum class VulConnIndexKind {
+    ConstantExpr,
+    LoopVar,
+    GeneralExpr,
+    Wildcard,
+};
+
+struct VulConnIndexExpr {
+    VulConnIndexKind kind = VulConnIndexKind::ConstantExpr;
+    int32_t loop_dim = -1; // 0 for '$', 1 for '?'
+    int64_t offset = 0;
+    string expr; // original constant/general expression or "*" for wildcard
+
+    inline string toString() const {
+        if (kind == VulConnIndexKind::Wildcard) {
+            return "*";
+        }
+        if (kind == VulConnIndexKind::LoopVar) {
+            string out = (loop_dim == 0 ? "$" : "?");
+            if (offset > 0) out += "+" + std::to_string(offset);
+            if (offset < 0) out += std::to_string(offset);
+            return out;
+        }
+        return expr;
+    }
+};
+
+inline bool operator==(const VulConnIndexExpr &a, const VulConnIndexExpr &b) {
+    return std::tie(a.kind, a.loop_dim, a.offset, a.expr) ==
+           std::tie(b.kind, b.loop_dim, b.offset, b.expr);
+}
+
 struct VulReqServConnection {
     InstanceName    req_instance;
     ReqServName     req_name;       // should be ServiceName when req_instance is TopInterface
+    InstanceName    req_instance_base;
+    vector<VulConnIndexExpr> req_indices;
     InstanceName    serv_instance;
     ReqServName     serv_name;      // should be RequestName when serv_instance is TopInterface
+    InstanceName    serv_instance_base;
+    vector<VulConnIndexExpr> serv_indices;
 
     inline string toString() const {
-        return "'" + req_instance + "'.'" + req_name + "' -> '" + serv_instance + "'.'" + serv_name + "'";
+        string req_side = "'" + req_instance + "'.'" + req_name + "'";
+        if (!req_indices.empty()) {
+            req_side = "'" + req_instance_base + "'";
+            for (const auto &idx : req_indices) {
+                req_side += "[" + idx.toString() + "]";
+            }
+            req_side += ".'" + req_name + "'";
+        }
+        string serv_side = "'" + serv_instance + "'.'" + serv_name + "'";
+        if (!serv_indices.empty()) {
+            serv_side = "'" + serv_instance_base + "'";
+            for (const auto &idx : serv_indices) {
+                serv_side += "[" + idx.toString() + "]";
+            }
+            serv_side += ".'" + serv_name + "'";
+        }
+        return req_side + " -> " + serv_side;
     }
 };
 
 inline bool operator==(const VulReqServConnection &a, const VulReqServConnection &b) {
-    return std::tie(a.req_instance, a.req_name, a.serv_instance, a.serv_name) ==
-           std::tie(b.req_instance, b.req_name, b.serv_instance, b.serv_name);
+    return std::tie(a.req_instance, a.req_name, a.req_instance_base, a.req_indices,
+                    a.serv_instance, a.serv_name, a.serv_instance_base, a.serv_indices) ==
+           std::tie(b.req_instance, b.req_name, b.req_instance_base, b.req_indices,
+                    b.serv_instance, b.serv_name, b.serv_instance_base, b.serv_indices);
 }
 
 
@@ -146,8 +201,14 @@ using VulTempTickBlock = vector<string>;
 struct VulTempInstance {
     string name;
     string module_name;
+    vector<string> array_dims;
     vector<pair<string, string>> parameter_overrides; // pair of parameter name and value
-    vector<string> referenced_services;
+};
+
+struct VulTempChildServiceUse {
+    string instance_expr;
+    string service_name;
+    string alias_name;
 };
 
 struct VulTempBRAM {
@@ -190,6 +251,7 @@ struct VulTempModule {
     vector<VulTempInstance> instances;
     vector<VulTempTickBlock> tick_blocks;
     vector<VulReqServConnection>  req_connections;
+    vector<VulTempChildServiceUse> child_service_uses;
     vector<string> helper_codes;
 };
 
@@ -223,8 +285,20 @@ struct VulTickBlock {
 struct VulStaticInstanceDecl {
     InstanceName        name;
     ModuleName          module_name;
-    unordered_set<ReqServName> referenced_services;
+    vector<ConfigRealValue> array_dims;
     VulStaticConfigLib parameter_overrides;
+
+    inline bool isArrayed() const {
+        return !array_dims.empty();
+    }
+};
+
+struct VulStaticChildServiceUse {
+    ReqServName alias_name;
+    InstanceName instance_name;
+    ReqServName service_name;
+    bool alias_indexed = false;
+    ConfigRealValue alias_index = 0;
 };
 
 struct VulStaticArg {
@@ -349,6 +423,27 @@ struct VulStaticQueue {
 
 struct VulStaticModuleInstance {
 
+    inline vector<string> normalizedInstancePath() const {
+        vector<const VulStaticModuleInstance *> chain;
+        const VulStaticModuleInstance *cur = this;
+        while (cur != nullptr) {
+            chain.push_back(cur);
+            cur = cur->parent.get();
+        }
+        std::reverse(chain.begin(), chain.end());
+
+        vector<string> out;
+        out.reserve(chain.size());
+        for (const auto *node : chain) {
+            if (!node->instance_decl_name.empty() && !node->instance_array_indices.empty()) {
+                out.push_back(node->instance_decl_name);
+            } else if (!node->instance_path.empty()) {
+                out.push_back(node->instance_path.back());
+            }
+        }
+        return out;
+    }
+
     shared_ptr<VulStaticModuleInstance> parent;
     vector<shared_ptr<VulStaticModuleInstance>> children;
 
@@ -360,35 +455,35 @@ struct VulStaticModuleInstance {
 
     inline string simClassName() const {
         string name = module_name;
-        for (const auto &inst : instance_path) {
+        for (const auto &inst : normalizedInstancePath()) {
             name += "_" + inst;
         }
         return name;
     };
     inline string simDeclPath() const {
         string path = "";
-        for (const auto &inst : instance_path) {
+        for (const auto &inst : normalizedInstancePath()) {
             path += "/" + inst;
         }
         return path.substr(1) + ".decl.hpp";
     }
     inline string simImplPath() const {
         string path = "";
-        for (const auto &inst : instance_path) {
+        for (const auto &inst : normalizedInstancePath()) {
             path += "/" + inst;
         }
         return path.substr(1) + ".impl.hpp";
     }
     inline string rtlHlsPath() const {
         string path = "";
-        for (const auto &inst : instance_path) {
+        for (const auto &inst : normalizedInstancePath()) {
             path += "/" + inst;
         }
         return path.substr(1) + ".logic.cpp";
     }
     inline string rtlSvPath() const {
         string path = "";
-        for (const auto &inst : instance_path) {
+        for (const auto &inst : normalizedInstancePath()) {
             path += "/" + inst;
         }
         return path.substr(1) + ".sv";
@@ -422,9 +517,13 @@ struct VulStaticModuleInstance {
     unordered_map<InstanceName, VulStaticInstanceDecl> instances;
 
     vector<VulReqServConnection>  req_connections;
+    vector<VulStaticChildServiceUse> child_service_uses;
 
     unordered_set<ReqServName> exported_services; // services that are connected to parent instance, and should not be connected or called within the module itself
     vector<VulInstanceID> update_seq; // topological order of instance update in simulation
+
+    InstanceName instance_decl_name; // empty for top / synthetic instances
+    vector<ConfigRealValue> instance_array_indices; // empty for scalar instance or top
 };
 
 void instantiateModule(
