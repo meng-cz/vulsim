@@ -13,14 +13,15 @@
 
 ## User Guide
 
-- [1. VulCPP 简介（Get Started）](./doc/vulcpp/1-intro.md)
-- [2. VulCPP header 常量与数据结构定义](./doc/vulcpp/2-header.md)
-- [3. VulCPP 硬件模块定义](./doc/vulcpp/3-module.md)
-- [4. VulCPP Main 模块（Test Harness）定义](./doc/vulcpp/4-Main.md)
-- [5. VulCPP 无符号任意宽度整数类型 UInt](./doc/vulcpp/5-uint.md)
-- [6. VulCPP 通用块内存组件 BRAM](./doc/vulcpp/6-bram.md)
-- [7. VulCPP 通用队列组件 QUEUE](./doc/vulcpp/7-queue.md)
-- [8. VulCPP 波形追踪与调试](./doc/vulcpp/8-debugging.md)
+- [1. VulCPP 简介（Get Started）](./doc/userguide/1-intro.md)
+- [2. VulCPP header 常量与数据结构定义](./doc/userguide/2-header.md)
+- [3. VulCPP 硬件模块定义](./doc/userguide/3-module.md)
+- [4. VulCPP Main 模块（Test Harness）定义](./doc/userguide/4-Main.md)
+- [5. VulCPP 无符号任意宽度整数类型 UInt](./doc/userguide/5-uint.md)
+- [6. VulCPP 通用块内存组件 BRAM](./doc/userguide/6-bram.md)
+- [7. VulCPP 通用队列组件 QUEUE](./doc/userguide/7-queue.md)
+- [8. VulCPP 阵列化子实例](./doc/userguide/8-arrayization.md)
+- [9. VulCPP 波形追踪与调试](./doc/userguide/9-debugging.md)
 
 ## 构建
 
