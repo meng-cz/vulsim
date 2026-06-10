@@ -3,12 +3,13 @@
 
 #include <defhelper.hpp>
 
-CONST(QUEUE_SIZE, 8);
+CONFIG(QUEUE_SIZE, 8);
 
 QUEUE(q, uint32_t, QUEUE_SIZE);
 
 SERVICE_READY(deq, q.deqvalid(), RESP(uint32_t) data) {
-    data = q.deqnext();
+    data = q.front();
+    q.deqnext();
 }
 
 REGISTER(cycle, uint32_t) {
@@ -21,5 +22,4 @@ TICK_IMPL() {
         q.enqnext(cycle);
     }
 }
-
 

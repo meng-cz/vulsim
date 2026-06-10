@@ -16,7 +16,8 @@ void test_empty_and_basic_enq_deq() {
     q.apply_next_tick();
 
     assert(q.deqvalid());
-    assert(q.deqnext() == 10);
+    assert(q.front() == 10);
+    q.deqnext();
     assert(q.enqready());
     q.apply_next_tick();
 
@@ -47,15 +48,18 @@ void test_fifo_order() {
     q.apply_next_tick();
 
     assert(q.deqvalid());
-    assert(q.deqnext() == 11);
+    assert(q.front() == 11);
+    q.deqnext();
     q.apply_next_tick();
 
     assert(q.deqvalid());
-    assert(q.deqnext() == 22);
+    assert(q.front() == 22);
+    q.deqnext();
     q.apply_next_tick();
 
     assert(q.deqvalid());
-    assert(q.deqnext() == 33);
+    assert(q.front() == 33);
+    q.deqnext();
     q.apply_next_tick();
 
     assert(!q.deqvalid());
@@ -70,7 +74,8 @@ void test_enq_and_deq_same_tick_apply_together() {
     q.apply_next_tick();
 
     assert(q.deqvalid());
-    assert(q.deqnext() == 7);
+    assert(q.front() == 7);
+    q.deqnext();
     assert(!q.enqready());
 
     // This enqueue is blocked because queue is still full in this cycle.
@@ -82,10 +87,12 @@ void test_enq_and_deq_same_tick_apply_together() {
     q.apply_next_tick();
 
     assert(q.deqvalid());
-    assert(q.deqnext() == 8);
+    assert(q.front() == 8);
+    q.deqnext();
     q.apply_next_tick();
     assert(q.deqvalid());
-    assert(q.deqnext() == 9);
+    assert(q.front() == 9);
+    q.deqnext();
     q.apply_next_tick();
 }
 
@@ -108,30 +115,75 @@ void test_clrnext() {
     assert(q.enqnext(300));
     q.apply_next_tick();
     assert(q.deqvalid());
-    assert(q.deqnext() == 300);
+    assert(q.front() == 300);
+    q.deqnext();
+}
+
+void test_clrnext_drops_same_cycle_enq() {
+    VulQueue<int, 4> q;
+
+    assert(q.enqnext(100));
+    q.apply_next_tick();
+    assert(q.deqvalid());
+
+    q.clrnext();
+    assert(q.enqnext(200));
+    q.apply_next_tick();
+
+    assert(!q.deqvalid());
+    assert(q.enqready());
+}
+
+void test_front_does_not_schedule_deq() {
+    VulQueue<int, 2> q;
+
+    assert(q.enqready());
+    assert(q.enqready());
+    assert(q.enqnext(10));
+    q.apply_next_tick();
+
+    assert(q.deqvalid());
+    assert(q.deqvalid());
+    assert(q.front() == 10);
+    assert(q.front() == 10);
+    q.apply_next_tick();
+
+    assert(q.deqvalid());
+    assert(q.front() == 10);
+    q.deqnext();
+    q.apply_next_tick();
+    assert(!q.deqvalid());
 }
 
 void test_mp_basic_pack_enq_deq() {
     VulQueueMP<int, 8, 3, 2> q;
 
     assert(q.enqreqdy() == 3);
+    assert(q.enqreqdy() == 3);
+    assert(q.deqvalid() == 0);
     assert(q.deqvalid() == 0);
 
     std::array<int, 3> in = {1, 2, 3};
     assert(q.enqnext(in, 3) == 3);
-    assert(q.enqreqdy() == 0);
+    assert(q.enqreqdy() == 3);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 2);
-    const auto &out0 = q.deqnext(2);
+    assert(q.deqvalid() == 2);
+    const auto &out0 = q.front(2);
     assert(out0[0] == 1);
     assert(out0[1] == 2);
-    assert(q.deqvalid() == 0);
+    const auto &out0_again = q.front(2);
+    assert(out0_again[0] == 1);
+    assert(out0_again[1] == 2);
+    q.deqnext(2);
+    assert(q.deqvalid() == 2);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 1);
-    const auto &out1 = q.deqnext(1);
+    const auto &out1 = q.front(1);
     assert(out1[0] == 3);
+    q.deqnext(1);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 0);
@@ -151,15 +203,17 @@ void test_mp_partial_accept_and_fifo() {
     q.apply_next_tick();
 
     assert(q.deqvalid() == 3);
-    const auto &out0 = q.deqnext(3);
+    const auto &out0 = q.front(3);
     assert(out0[0] == 10);
     assert(out0[1] == 11);
     assert(out0[2] == 12);
+    q.deqnext(3);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 1);
-    const auto &out1 = q.deqnext(1);
+    const auto &out1 = q.front(1);
     assert(out1[0] == 13);
+    q.deqnext(1);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 0);
@@ -177,22 +231,42 @@ void test_mp_same_tick_deq_not_free_for_enq_and_clr() {
 
     // Full queue, dequeue in this tick does not free enqueue space immediately.
     assert(q.enqreqdy() == 0);
-    const auto &out0 = q.deqnext(2);
+    const auto &out0 = q.front(2);
     assert(out0[0] == 1);
     assert(out0[1] == 2);
+    q.deqnext(2);
     std::array<int, 2> in2 = {5, 6};
     assert(q.enqnext(in2, 2) == 0);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 2);
-    const auto &out1 = q.deqnext(2);
+    const auto &out1 = q.front(2);
     assert(out1[0] == 3);
     assert(out1[1] == 4);
+    q.deqnext(2);
 
     // Clear takes effect in next apply.
     q.clrnext();
-    assert(q.deqvalid() == 0);
+    assert(q.deqvalid() == 2);
     q.apply_next_tick();
+    assert(q.deqvalid() == 0);
+    assert(q.enqreqdy() == 2);
+}
+
+void test_mp_clrnext_drops_same_cycle_enq() {
+    VulQueueMP<int, 4, 2, 2> q;
+
+    std::array<int, 2> in0 = {1, 2};
+    std::array<int, 2> in1 = {3, 4};
+
+    assert(q.enqnext(in0, 2) == 2);
+    q.apply_next_tick();
+    assert(q.deqvalid() == 2);
+
+    q.clrnext();
+    assert(q.enqnext(in1, 2) == 2);
+    q.apply_next_tick();
+
     assert(q.deqvalid() == 0);
     assert(q.enqreqdy() == 2);
 }
@@ -205,9 +279,12 @@ int main() {
     test_fifo_order();
     test_enq_and_deq_same_tick_apply_together();
     test_clrnext();
+    test_clrnext_drops_same_cycle_enq();
+    test_front_does_not_schedule_deq();
     test_mp_basic_pack_enq_deq();
     test_mp_partial_accept_and_fifo();
     test_mp_same_tick_deq_not_free_for_enq_and_clr();
+    test_mp_clrnext_drops_same_cycle_enq();
 
     std::cout << "All tests passed!" << std::endl;
     return 0;

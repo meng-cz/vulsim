@@ -75,7 +75,7 @@ struct VulStaticTypeSignature {
 
     string toString() const {
         if (uint_length > 0) {
-            return std::string(UIntClassName) + std::to_string(uint_length) + ">";
+            return std::string(UIntClassName) + "<" + std::to_string(uint_length) + ">";
         } else {
             return type;
         }

@@ -26,6 +26,7 @@
 #include "configexpr.hpp"
 #include "cppparse.hpp"
 #include "stringop.hpp"
+#include "vullib.hpp"
 
 using namespace cppparse;
 using namespace stringop;
@@ -643,7 +644,7 @@ public:
         VulTempBRAM bram;
         bram.name = entry.args[0];
         bram.data_type = entry.args[1];
-        bram.addr_width = entry.args[2];
+        bram.addr_size = entry.args[2];
         bram.read_ports = entry.args[3];
         bram.write_ports = entry.args[4];
         context.temp.brams.push_back(std::move(bram));
@@ -660,7 +661,7 @@ public:
         VulTempBRAM bram;
         bram.name = entry.args[0];
         bram.data_type = entry.args[1];
-        bram.addr_width = entry.args[2];
+        bram.addr_size = entry.args[2];
         bram.read_ports = "";
         bram.write_ports = "";
         context.temp.brams.push_back(std::move(bram));
@@ -677,7 +678,7 @@ public:
         VulTempDigitalROM rom;
         rom.name = entry.args[0];
         rom.data_width = entry.args[1];
-        rom.addr_width = entry.args[2];
+        rom.addr_size = entry.args[2];
         rom.read_ports = entry.args[3];
         rom.init_path = entry.args[4];
         context.temp.roms.push_back(std::move(rom));
@@ -955,19 +956,37 @@ VulStaticTestHarnessModule _parseTestModule(
         if (line.rfind(prefix, 0) != 0) {
             continue;
         }
-        size_t first_quote = line.find('"');
+        size_t first_quote = line.find('<');
+        char closing_char = '>';
+        if (first_quote == string::npos) {
+            first_quote = line.find('"');
+            closing_char = '"';
+        }
         if (first_quote == string::npos) {
             continue;
         }
-        size_t second_quote = line.find('"', first_quote + 1);
+        size_t second_quote = line.find(closing_char, first_quote + 1);
         if (second_quote == string::npos || second_quote <= first_quote + 1) {
             continue;
         }
-        string included_path = line.substr(first_quote + 1, second_quote - first_quote - 1);
-        if (included_path == "header.hpp" || included_path == "header.h") {
-            continue; // skip the header file, which is processed separately
+        string included_path = trim(line.substr(first_quote + 1, second_quote - first_quote - 1));
+        bool escaped = false;
+        for (auto s : VulLibFiles) {
+            if (included_path == s) {
+                escaped = true;
+                break;
+            }
         }
-        context.test.includedHeaders.push_back(line.substr(first_quote + 1, second_quote - first_quote - 1));
+        for (auto s : VulEscapedHeaders) {
+            if (included_path == s) {
+                escaped = true;
+                break;
+            }
+        }
+        if (escaped) {
+            continue;
+        }
+        context.test.includedHeaders.push_back(included_path);
     }
 
     vector<MacroEntry> macro_entries = findAllMacroEntries(code_lines);

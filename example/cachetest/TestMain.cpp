@@ -5,7 +5,6 @@
 #include "header.hpp"
 
 #include <array>
-#include <random>
 
 GLOBAL() {
 
@@ -84,7 +83,13 @@ SIMULATION() {
         line.valid = true;
     };
 
-    std::mt19937_64 rng(0x5a17deadc0de1234ULL);
+    uint64_t rng_state = 0x5a17deadc0de1234ULL;
+    auto next_rand = [&]() -> uint64_t {
+        rng_state ^= rng_state << 7;
+        rng_state ^= rng_state >> 9;
+        rng_state ^= rng_state << 8;
+        return rng_state;
+    };
 
     bool should_hit_next = false;
     Int<DATA_WIDTH> expected_data_next = 0;
@@ -143,14 +148,14 @@ SIMULATION() {
             }
         } else {
             // 阶段4：可复现随机混合，偏向热点和重复访问。
-            bool hot = (rng() & 3ULL) != 0; // 75% 热点访问
-            uint64_t index_raw = hot ? (rng() % kHotLines) : (rng() % kNumLines);
+            bool hot = (next_rand() & 3ULL) != 0; // 75% 热点访问
+            uint64_t index_raw = hot ? (next_rand() % kHotLines) : (next_rand() % kNumLines);
             Int<INDEX_WIDTH> index = Int<INDEX_WIDTH>(index_raw);
-            uint64_t tag_seed = hot ? (rng() % 4ULL) : (rng() % 64ULL);
+            uint64_t tag_seed = hot ? (next_rand() % 4ULL) : (next_rand() % 64ULL);
             Int<TAG_WIDTH> tag = Int<TAG_WIDTH>((tag_seed << 2) ^ (index_raw & 0x3ULL));
             addr = build_addr(tag, index);
-            do_read = (rng() % 100ULL) < 65ULL; // 读多于写，提升 hit 路径覆盖
-            refill_data = build_data(tag, index, test_tick ^ rng());
+            do_read = (next_rand() % 100ULL) < 65ULL; // 读多于写，提升 hit 路径覆盖
+            refill_data = build_data(tag, index, test_tick ^ next_rand());
         }
 
         if (do_read) {

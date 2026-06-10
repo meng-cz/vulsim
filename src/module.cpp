@@ -429,15 +429,35 @@ void instantiateModule(
         instance.wires.push_back(std::move(static_wire));
     }
 
+    auto log2ceil = [](uint64_t x) -> uint64_t {
+        if (x == 0) return 0;
+        uint64_t power = 1;
+        uint64_t exp = 0;
+        while (power < x) {
+            power <<= 1;
+            ++exp;
+        }
+        return exp;
+    };
+
     // brams
     for (const auto &bram : temp.brams) {
         VulErrorContextGuard _err{"Processing BRAM '" + bram.name + "'"};
         VulStaticBRAM static_bram;
         static_bram.name = bram.name;
         static_bram.data_type = parseTypeSignature(bram.data_type, local_config_lib);
-        static_bram.addr_width = calculateConstexprValue(bram.addr_width, local_config_lib);
-        static_bram.read_ports = calculateConstexprValue(bram.read_ports, local_config_lib);
-        static_bram.write_ports = calculateConstexprValue(bram.write_ports, local_config_lib);
+        static_bram.addr_size = calculateConstexprValue(bram.addr_size, local_config_lib);
+        if (static_bram.addr_size <= 1) {
+            throw VulException("BRAM addr_size must be greater than 1");
+        }
+        static_bram.addr_width = static_cast<ConfigRealValue>(log2ceil(static_cast<uint64_t>(static_bram.addr_size)));
+        if (bram.read_ports.empty() || bram.write_ports.empty()) {
+            static_bram.read_ports = 0;
+            static_bram.write_ports = 0;
+        } else {
+            static_bram.read_ports = calculateConstexprValue(bram.read_ports, local_config_lib);
+            static_bram.write_ports = calculateConstexprValue(bram.write_ports, local_config_lib);
+        }
         instance.brams.push_back(std::move(static_bram));
     }
 
@@ -447,7 +467,11 @@ void instantiateModule(
         VulStaticDigitalROM static_rom;
         static_rom.name = rom.name;
         static_rom.data_width = calculateConstexprValue(rom.data_width, local_config_lib);
-        static_rom.addr_width = calculateConstexprValue(rom.addr_width, local_config_lib);
+        static_rom.addr_size = calculateConstexprValue(rom.addr_size, local_config_lib);
+        if (static_rom.addr_size <= 1) {
+            throw VulException("ROM addr_size must be greater than 1");
+        }
+        static_rom.addr_width = static_cast<ConfigRealValue>(log2ceil(static_cast<uint64_t>(static_rom.addr_size)));
         static_rom.read_ports = calculateConstexprValue(rom.read_ports, local_config_lib);
         static_rom.init_path = rom.init_path;
         instance.roms.push_back(std::move(static_rom));

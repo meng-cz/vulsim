@@ -214,7 +214,7 @@ struct VulTempChildServiceUse {
 struct VulTempBRAM {
     string name;
     string data_type;
-    string addr_width;
+    string addr_size;
     string read_ports;
     string write_ports;
 };
@@ -222,7 +222,7 @@ struct VulTempBRAM {
 struct VulTempDigitalROM {
     string name;
     string data_width;
-    string addr_width;
+    string addr_size;
     string read_ports;
     string init_path;
 };
@@ -400,6 +400,7 @@ struct VulStaticWire {
 struct VulStaticBRAM {
     InstanceName name;
     VulStaticTypeSignature data_type;
+    ConfigRealValue addr_size;
     ConfigRealValue addr_width;
     ConfigRealValue read_ports;
     ConfigRealValue write_ports;
@@ -408,6 +409,7 @@ struct VulStaticBRAM {
 struct VulStaticDigitalROM {
     InstanceName name;
     ConfigRealValue data_width;
+    ConfigRealValue addr_size;
     ConfigRealValue addr_width;
     ConfigRealValue read_ports;
     string init_path;

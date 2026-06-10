@@ -7,7 +7,7 @@
 ## 所有在 header.hpp 中可以使用的宏
 
 包括：
-- `CONST(name, value)`
+- `CONFIG(name, value)`
 - `STRUCT(name) { ... }`
 - `ALIAS(name, type)`
 - `ALIAS_ARRAY1(name, type, N)`

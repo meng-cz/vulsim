@@ -38,22 +38,23 @@ using std::string;
 using std::vector;
 
 
-template <typename DataT, uint32_t AddrWidth>
+template <typename DataT, uint32_t Size>
 class VulBRAM1RW {
 public:
-    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(Size > 1, "Size must be greater than 1");
+    static constexpr uint32_t AddrWidth = log2ceil(Size);
     static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
 
     using AddrType = Int<AddrWidth>;
 
 protected:
 
-    std::array<DataT, 1ULL << AddrWidth> memory_;
+    std::array<DataT, Size> memory_{};
 
-    AddrType addr_;
-    DataT write_data_;
-    DataT read_data_;
-    bool write_en_;
+    AddrType addr_{};
+    DataT write_data_{};
+    DataT read_data_{};
+    bool write_en_ = false;
 
 public:
     VulBRAM1RW() : write_en_(false) {}
@@ -71,18 +72,19 @@ public:
     }
 
     void apply_next_tick() {
+        read_data_ = memory_[addr_.template to<uint64_t>()];
         if (write_en_) {
             memory_[addr_.template to<uint64_t>()] = write_data_;
         }
-        read_data_ = memory_[addr_.template to<uint64_t>()];
     }
 };
 
-template <typename DataT, uint32_t AddrWidth, uint32_t ReadPorts, uint32_t WritePorts>
+template <typename DataT, uint32_t Size, uint32_t ReadPorts, uint32_t WritePorts>
 class VulBRAM {
 public:
 
-    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(Size > 1, "Size must be greater than 1");
+    static constexpr uint32_t AddrWidth = log2ceil(Size);
     static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
     static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
     static_assert(WritePorts > 0, "WritePorts must be greater than 0");
@@ -92,14 +94,14 @@ public:
 
 protected:
 
-    std::array<DataT, 1ULL << AddrWidth> memory_;
+    std::array<DataT, Size> memory_{};
 
-    array<AddrType, ReadPorts> read_addresses_;
-    array<DataT, ReadPorts> read_data_;
+    array<AddrType, ReadPorts> read_addresses_{};
+    array<DataT, ReadPorts> read_data_{};
 
-    array<AddrType, WritePorts> write_addresses_;
-    array<DataT, WritePorts> write_data_;
-    uint64_t write_enables_; // 每个位对应一个写端口，1表示该端口有效
+    array<AddrType, WritePorts> write_addresses_{};
+    array<DataT, WritePorts> write_data_{};
+    uint64_t write_enables_ = 0; // 每个位对应一个写端口，1表示该端口有效
 
     template<int I, int N>
     inline void unroll_loop(auto&& f) {
@@ -152,13 +154,14 @@ protected:
 
 };
 
-template <uint32_t DataWidth, uint32_t AddrWidth, uint32_t ReadPorts>
+template <uint32_t DataWidth, uint32_t Size, uint32_t ReadPorts>
 class VulROM {
 
 public:
 
     static_assert(DataWidth > 0, "DataWidth must be greater than 0");
-    static_assert(AddrWidth > 0, "AddrWidth must be greater than 0");
+    static_assert(Size > 1, "Size must be greater than 1");
+    static constexpr uint32_t AddrWidth = log2ceil(Size);
     static_assert(AddrWidth < 64, "AddrWidth must be less than 64");
     static_assert(ReadPorts > 0, "ReadPorts must be greater than 0");
 
@@ -167,10 +170,10 @@ public:
 
 protected:
 
-    array<DataType, 1ULL << AddrWidth> memory_;
+    array<DataType, Size> memory_{};
 
-    array<AddrType, ReadPorts> read_addresses_;
-    array<DataType, ReadPorts> read_data_;
+    array<AddrType, ReadPorts> read_addresses_{};
+    array<DataType, ReadPorts> read_data_{};
 
     template<int I, int N>
     inline void unroll_loop(auto&& f) {
@@ -239,7 +242,7 @@ protected:
             throw std::runtime_error("Cannot open file: " + path);
         }
 
-        constexpr size_t DEPTH = 1ULL << AddrWidth;
+        constexpr size_t DEPTH = Size;
 
         size_t cur_addr = 0;
         std::string line;
@@ -351,7 +354,7 @@ protected:
             throw std::runtime_error("Cannot open file: " + path);
         }
 
-        constexpr size_t DEPTH = 1ULL << AddrWidth;
+        constexpr size_t DEPTH = Size;
 
         size_t cur_addr = 0;
         std::string line;

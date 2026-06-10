@@ -47,6 +47,16 @@ class IntConstBitProxy;
 template <uint32_t BitWidth>
 class IntSignedView;
 
+inline constexpr uint64_t low_mask64(uint32_t bits) {
+    if (bits == 0) {
+        return 0;
+    }
+    if (bits >= 64) {
+        return ~uint64_t(0);
+    }
+    return (uint64_t(1) << bits) - 1;
+}
+
 template <uint32_t BitWidth>
 class Int {
 
@@ -61,7 +71,7 @@ public:
     std::array<uint64_t, NUM_WORDS> data;
     constexpr void mask_high_bits() {
         if constexpr (BitWidth % WORD_BITS != 0) {
-            data.back() &= (uint64_t(1) << (BitWidth % WORD_BITS)) - 1;
+            data.back() &= low_mask64(BitWidth % WORD_BITS);
         }
     }
 
@@ -227,7 +237,7 @@ constexpr Int<BitWidth>::Int(const IntSignedView<OtherBitWidth>& other) : data{}
             const uint32_t ext_start_off = OtherBitWidth % WORD_BITS;
 
             if (ext_start_off != 0) {
-                data[ext_start_word] |= ~((uint64_t(1) << ext_start_off) - 1);
+                data[ext_start_word] |= ~low_mask64(ext_start_off);
                 for (uint32_t i = ext_start_word + 1; i < NUM_WORDS; ++i) {
                     data[i] = ~uint64_t(0);
                 }
@@ -272,7 +282,7 @@ constexpr Int<DstBitWidth> Int<BitWidth>::get_bits(uint32_t hi, uint32_t lo) con
         if (bits >= 64) {
             return ~uint64_t(0);
         }
-        return (uint64_t(1) << bits) - 1;
+        return low_mask64(bits);
     };
 
     if constexpr (BitWidth <= WORD_BITS && DstBitWidth <= WORD_BITS) {
@@ -334,7 +344,7 @@ constexpr void Int<BitWidth>::set_bits(uint32_t hi, uint32_t lo, const Int<SrcBi
         if (bits >= 64) {
             return ~uint64_t(0);
         }
-        return (uint64_t(1) << bits) - 1;
+        return low_mask64(bits);
     };
 
     auto word_mask = [&](uint32_t bit_in_word, uint32_t bits) constexpr -> uint64_t {
@@ -410,7 +420,7 @@ constexpr void Int<BitWidth>::set_bits_from_range(uint32_t hi, uint32_t lo, cons
         if (bits >= 64) {
             return ~uint64_t(0);
         }
-        return (uint64_t(1) << bits) - 1;
+        return low_mask64(bits);
     };
 
     auto word_mask = [&](uint32_t bit_in_word, uint32_t bits) constexpr -> uint64_t {
@@ -717,7 +727,7 @@ constexpr bool Int<BitWidth>::reduce_and() const {
         if constexpr (LAST_BITS == 0) {
             return data[0] == ~uint64_t(0);
         } else {
-            return data[0] == ((uint64_t(1) << LAST_BITS) - 1);
+            return data[0] == low_mask64(LAST_BITS);
         }
     } else {
         for (uint32_t i = 0; i + 1 < NUM_WORDS; ++i) {
@@ -728,7 +738,7 @@ constexpr bool Int<BitWidth>::reduce_and() const {
         if constexpr (LAST_BITS == 0) {
             return data[NUM_WORDS - 1] == ~uint64_t(0);
         } else {
-            return data[NUM_WORDS - 1] == ((uint64_t(1) << LAST_BITS) - 1);
+            return data[NUM_WORDS - 1] == low_mask64(LAST_BITS);
         }
     }
 }
@@ -741,7 +751,7 @@ constexpr bool Int<BitWidth>::reduce_xor() const {
         if constexpr (LAST_BITS == 0) {
             parity = std::popcount(data[0]) & 1U;
         } else {
-            const uint64_t mask = (uint64_t(1) << LAST_BITS) - 1;
+            const uint64_t mask = low_mask64(LAST_BITS);
             parity = std::popcount(data[0] & mask) & 1U;
         }
     } else {
@@ -752,7 +762,7 @@ constexpr bool Int<BitWidth>::reduce_xor() const {
         if constexpr (LAST_BITS == 0) {
             parity ^= (std::popcount(data[NUM_WORDS - 1]) & 1U);
         } else {
-            const uint64_t mask = (uint64_t(1) << LAST_BITS) - 1;
+            const uint64_t mask = low_mask64(LAST_BITS);
             parity ^= (std::popcount(data[NUM_WORDS - 1] & mask) & 1U);
         }
     }
@@ -989,7 +999,7 @@ constexpr auto operator+(const Int<BitWidth>& lhs, T rhs) {
     constexpr uint32_t RESULT_BIT_WIDTH = BitWidth + 1;
 
     if constexpr (BitWidth < 64) {
-        constexpr uint64_t MASK = (uint64_t(1) << BitWidth) - 1;
+        constexpr uint64_t MASK = low_mask64(BitWidth);
         const uint64_t l = lhs.data[0] & MASK;
         uint64_t r = 0;
         if constexpr (std::is_signed_v<ValueT>) {
@@ -1070,8 +1080,7 @@ constexpr auto operator-(const Int<BitWidth>& lhs, T rhs) {
     constexpr uint32_t RESULT_BIT_WIDTH = BitWidth;
 
     if constexpr (RESULT_BIT_WIDTH <= 64) {
-        constexpr uint64_t MASK = (RESULT_BIT_WIDTH == 64) ? ~uint64_t(0)
-                                                            : ((uint64_t(1) << RESULT_BIT_WIDTH) - 1);
+        constexpr uint64_t MASK = low_mask64(RESULT_BIT_WIDTH);
         const uint64_t l = lhs.data[0] & MASK;
         uint64_t r = 0;
         if constexpr (std::is_signed_v<ValueT>) {
@@ -1097,8 +1106,7 @@ constexpr auto operator-(T lhs, const Int<BitWidth>& rhs) {
     constexpr uint32_t RESULT_BIT_WIDTH = BitWidth;
 
     if constexpr (RESULT_BIT_WIDTH <= 64) {
-        constexpr uint64_t MASK = (RESULT_BIT_WIDTH == 64) ? ~uint64_t(0)
-                                                            : ((uint64_t(1) << RESULT_BIT_WIDTH) - 1);
+        constexpr uint64_t MASK = low_mask64(RESULT_BIT_WIDTH);
         uint64_t l = 0;
         if constexpr (std::is_signed_v<ValueT>) {
             l = static_cast<uint64_t>(static_cast<int64_t>(lhs)) & MASK;
@@ -1166,7 +1174,7 @@ constexpr auto operator*(const LhsOperand& lhs_operand, const RhsOperand& rhs_op
             if (bits == 64) {
                 return static_cast<int64_t>(v);
             }
-            const uint64_t mask = (uint64_t(1) << bits) - 1;
+            const uint64_t mask = low_mask64(bits);
             v &= mask;
             const uint64_t sign = uint64_t(1) << (bits - 1);
             if (v & sign) {
@@ -1205,7 +1213,7 @@ constexpr auto operator*(const LhsOperand& lhs_operand, const RhsOperand& rhs_op
                         constexpr uint32_t REM = LHS_BIT_WIDTH % 64;
                         if constexpr (REM != 0) {
                             if (i == LAST) {
-                                const uint64_t low_mask = (uint64_t(1) << REM) - 1;
+                                const uint64_t low_mask = low_mask64(REM);
                                 w |= ~low_mask;
                             }
                         }
@@ -1229,7 +1237,7 @@ constexpr auto operator*(const LhsOperand& lhs_operand, const RhsOperand& rhs_op
                         constexpr uint32_t REM = RHS_BIT_WIDTH % 64;
                         if constexpr (REM != 0) {
                             if (i == LAST) {
-                                const uint64_t low_mask = (uint64_t(1) << REM) - 1;
+                                const uint64_t low_mask = low_mask64(REM);
                                 w |= ~low_mask;
                             }
                         }
@@ -1379,16 +1387,6 @@ constexpr Int<BitWidth> operator~(const Int<BitWidth>& value) {
 }
 
 namespace uint_impl_detail {
-constexpr uint64_t low_mask64(uint32_t bits) {
-    if (bits == 0) {
-        return 0;
-    }
-    if (bits >= 64) {
-        return ~uint64_t(0);
-    }
-    return (uint64_t(1) << bits) - 1;
-}
-
 template <bool IsSigned, uint32_t BitWidth>
 constexpr bool operand_negative(const Int<BitWidth>& v) {
     if constexpr (!IsSigned) {
@@ -1792,7 +1790,7 @@ constexpr Int<LhsBitWidth> operator>>(const IntSignedView<LhsBitWidth>& lhs_sign
         uint64_t v = lhs.data[0];
         if (neg) {
             if constexpr (LhsBitWidth < 64) {
-                v |= ~uint_impl_detail::low_mask64(LhsBitWidth);
+                v |= ~low_mask64(LhsBitWidth);
             }
             v = static_cast<uint64_t>(static_cast<int64_t>(v) >> shift);
         } else {
@@ -1823,7 +1821,7 @@ constexpr Int<LhsBitWidth> operator>>(const IntSignedView<LhsBitWidth>& lhs_sign
 
             if (fill_word < WORDS) {
                 if (fill_off != 0) {
-                    out.data[fill_word] |= ~uint_impl_detail::low_mask64(fill_off);
+                    out.data[fill_word] |= ~low_mask64(fill_off);
                     for (uint32_t i = fill_word + 1; i < WORDS; ++i) {
                         out.data[i] = ~uint64_t(0);
                     }

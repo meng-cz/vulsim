@@ -8,15 +8,18 @@
 
 ```cpp
 // 多端口 BRAM：datatype 是数据类型（例如 UInt<32>）
-BRAM(name, datatype, addrwidth, readports, writeports);
+BRAM(name, datatype, size, readports, writeports);
 
 // 单端口 1RW BRAM：datatype 是数据类型（例如 UInt<32>）
-BRAM_1RW(name, datatype, addrwidth);
+BRAM_1RW(name, datatype, size);
 
-// ROM：datawidth/addrwidth/readports 为编译期常量
+// ROM：datawidth/size/readports 为编译期常量
 // init_path 会被宏自动字符串化，写法示例见下文（不加双引号）
-ROM(name, datawidth, addrwidth, readports, init_path);
+ROM(name, datawidth, size, readports, init_path);
 ```
+
+这里的 `size` 表示存储体元素个数，不是地址位宽。地址类型位宽由库内部按 `log2ceil(size)` 自动推导。
+当前实现要求 `size > 1`。另外，当 `size` 不是 2 的幂时，地址类型仍会扩展到 `log2ceil(size)` 位；若上层给出超出 `[0, size)` 的地址，模拟行为未定义。
 
 ## 6.2 多端口 BRAM 读写接口
 
@@ -44,7 +47,7 @@ void write(const UInt<addrwidth> &addr, const datatype &data);
 示例：
 
 ```cpp
-BRAM(myram, UInt<32>, 10, 2, 1);
+BRAM(myram, UInt<32>, 1024, 2, 1);
 
 TICK_IMPL() {
     UInt<32> data0 = myram.readdata<0>(); // 上周期在端口0发的读请求在本周期返回数据
@@ -63,6 +66,7 @@ TICK_IMPL() {
 - `req(addr, data, true)` 表示写请求。
 - `req(addr, data, false)` 表示读请求（`data` 参数被忽略）。
 - 同一周期多次调用 `req` 时，仅最后一次调用生效。
+- 同周期对同一地址同时发起读写语义时，返回的是写入前旧值。
 
 接口定义：
 
@@ -74,7 +78,7 @@ const datatype& readdata() const;
 示例：
 
 ```cpp
-BRAM_1RW(myram, UInt<32>, 10);
+BRAM_1RW(myram, UInt<32>, 1024);
 
 TICK_IMPL() {
     myram.req(0x3FF, 0xDEADBEEF, true);
@@ -99,7 +103,7 @@ const UInt<datawidth> readdata() const;
 声明示例：
 
 ```cpp
-ROM(inst_rom, 32, 10, 1, data/program.hex);
+ROM(inst_rom, 32, 1024, 1, data/program.hex);
 ```
 
 说明：
@@ -112,4 +116,3 @@ ROM(inst_rom, 32, 10, 1, data/program.hex);
 - 支持地址跳转：`@<hex_addr>`。
 - 十六进制 token 支持可选 `0x/0X` 前缀，支持 `_` 分隔符。
 - 二进制 token 支持 `0/1` 与 `_` 分隔符（对应 `VulROM(path, false)` 构造方式）。
-

@@ -65,8 +65,8 @@ public:
     }
 
 protected:
-    T data_;
-    T next_;
+    T data_{};
+    T next_{};
     uint32_t pending_write_ports_ = WRPortNum;
 };
 
@@ -93,8 +93,8 @@ public:
     }
 
 protected:
-    T next_buffer_;
-    T data_;
+    T next_buffer_{};
+    T data_{};
 };
 
 template<typename T, uint32_t WRPortNum = 1>
@@ -188,9 +188,12 @@ protected:
 public:
 
     VulStorageNextArrayDirtyImpl() : curr_(), pending_() {}
-    VulStorageNextArrayDirtyImpl(const T &initial_value) {
+    VulStorageNextArrayDirtyImpl(const T &initial_value) : curr_(), pending_() {
         for (auto &elem : curr_) {
             elem = initial_value;
+        }
+        for (auto &slot : pending_) {
+            slot.value = initial_value;
         }
     }
 
@@ -418,4 +421,3 @@ public:
 
 using vulstorage::VulStorageNext;
 using vulstorage::VulStorageNextArray;
-

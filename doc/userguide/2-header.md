@@ -52,7 +52,7 @@
 "PARAM_B" = "PARAM_A + 1"
 ```
 
-## CONST(name, value)
+## CONFIG(name, value)
 
 定义一个全局常量：
 - `name`：常量的名称

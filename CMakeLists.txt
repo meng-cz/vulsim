@@ -42,14 +42,14 @@ endforeach()
 add_custom_target(copy_project_dirs ALL
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/vullib"
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/example"
-    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/vulcppdocs"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/userguide"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/vullib"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/example"
             "${CMAKE_CURRENT_BINARY_DIR}/example"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/doc/vulcpp"
-            "${CMAKE_CURRENT_BINARY_DIR}/vulcppdocs"
+            "${CMAKE_CURRENT_SOURCE_DIR}/doc/userguide"
+            "${CMAKE_CURRENT_BINARY_DIR}/userguide"
     ${VULLIB_COPY_COMMANDS}
-    COMMENT "Copying vullib, example, and vulcppdocs into build directory"
+    COMMENT "Copying vullib, example, and userguide into build directory"
 )

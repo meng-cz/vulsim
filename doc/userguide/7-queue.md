@@ -95,7 +95,7 @@ void clrnext();
 ### 7.5.1 队列定义与服务导出（`FIFO.hpp`）
 
 ```cpp
-CONST(QUEUE_SIZE, 8);
+CONFIG(QUEUE_SIZE, 8);
 QUEUE(q, uint32_t, QUEUE_SIZE);
 
 SERVICE_READY(deq, q.deqvalid(), RESP(uint32_t) data) {

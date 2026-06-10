@@ -1388,13 +1388,17 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  const " + data_type_str + "& deqnext() {\n");
-            ctx.hls_header.push_back("    " + port_deqready + " = true;\n");
+            ctx.hls_header.push_back("  " + data_type_str + " front() const {\n");
             ctx.hls_header.push_back("    " + data_type_str + " value;\n");
             for (const auto &field : data_fields) {
                 ctx.hls_header.push_back("    " + field.name + " = " + port_deqdata + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
             }
             ctx.hls_header.push_back("    return value;\n");
+            ctx.hls_header.push_back("  }\n");
+            ctx.hls_header.push_back("\n");
+
+            ctx.hls_header.push_back("  void deqnext() {\n");
+            ctx.hls_header.push_back("    " + port_deqready + " = true;\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
@@ -1511,14 +1515,11 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  const " + deqdata_type_str + " & deqnext(const " + deqvalid_type_str + " num = " + deq_width_str + ") {\n");
-            ctx.hls_header.push_back("    const " + deqvalid_type_str + " req = (num < " + deq_width_str + ") ? num : " + deq_width_str + ";\n");
-            ctx.hls_header.push_back("    const " + deqvalid_type_str + " valid = deqvalid();\n");
-            ctx.hls_header.push_back("    const " + deqvalid_type_str + " accepted = (req < valid) ? req : valid;\n");
-            ctx.hls_header.push_back("    " + port_deqvalid + " = accepted;\n");
+            ctx.hls_header.push_back("  " + deqdata_type_str + " front(const " + deqvalid_type_str + " num = " + deq_width_str + ") const {\n");
+            ctx.hls_header.push_back("    (void)num;\n");
             ctx.hls_header.push_back("    " + deqdata_type_str + " deq_buf;\n");
             for (uint32_t i = 0; i < (uint32_t)que.deq_width; ++i) {
-                ctx.hls_header.push_back("    if (accepted > " + std::to_string(i) + ") {\n");
+                ctx.hls_header.push_back("    if (deqvalid() > " + std::to_string(i) + ") {\n");
                 ctx.hls_header.push_back("      auto &value = deq_buf[" + std::to_string(i) + "];\n");
                 for (const auto &field : data_fields) {
                     ctx.hls_header.push_back("      " + field.name + " = " + port_deqdata + "[" + std::to_string(i) + "](" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
@@ -1526,6 +1527,14 @@ void _procQueues(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("    }\n");
             }
             ctx.hls_header.push_back("    return deq_buf;\n");
+            ctx.hls_header.push_back("  }\n");
+            ctx.hls_header.push_back("\n");
+
+            ctx.hls_header.push_back("  void deqnext(const " + deqvalid_type_str + " num = " + deq_width_str + ") {\n");
+            ctx.hls_header.push_back("    const " + deqvalid_type_str + " req = (num < " + deq_width_str + ") ? num : " + deq_width_str + ";\n");
+            ctx.hls_header.push_back("    const " + deqvalid_type_str + " valid = deqvalid();\n");
+            ctx.hls_header.push_back("    const " + deqvalid_type_str + " accepted = (req < valid) ? req : valid;\n");
+            ctx.hls_header.push_back("    " + port_deqready + " = accepted;\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
@@ -1607,8 +1616,11 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             throw VulException("BRAM data width must be positive");
         }
 
-        if (bram.addr_width <= 0) {
-            throw VulException("BRAM addr_width must be positive");
+        if (bram.addr_size <= 1) {
+            throw VulException("BRAM addr_size must be greater than 1");
+        }
+        if (bram.addr_width < 0) {
+            throw VulException("BRAM addr_width must be non-negative");
         }
         const uint32_t addr_width = static_cast<uint32_t>(bram.addr_width);
         const bool is_1rw = (bram.read_ports == 0 || bram.write_ports == 0);
@@ -1867,8 +1879,11 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
         if (rom.data_width <= 0) {
             throw VulException("ROM data_width must be positive");
         }
-        if (rom.addr_width <= 0) {
-            throw VulException("ROM addr_width must be positive");
+        if (rom.addr_size <= 1) {
+            throw VulException("ROM addr_size must be greater than 1");
+        }
+        if (rom.addr_width < 0) {
+            throw VulException("ROM addr_width must be non-negative");
         }
         if (rom.read_ports <= 0) {
             throw VulException("ROM read_ports must be positive");

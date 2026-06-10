@@ -1039,11 +1039,11 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         if (bram.read_ports == 0 || bram.write_ports == 0) {
             bram_class = BlockRAM1RWClassName + "<" +
                 bram.data_type.toString() + ", " +
-                std::to_string(bram.addr_width) + ">";
+                std::to_string(bram.addr_size) + ">";
         } else {
             bram_class = BlockRAMClassName + "<" +
             bram.data_type.toString() + ", " +
-            std::to_string(bram.addr_width) + ", " + 
+            std::to_string(bram.addr_size) + ", " + 
             std::to_string(bram.read_ports) + ", " +
             std::to_string(bram.write_ports) + ">";
         }
@@ -1056,7 +1056,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         VulErrorContextGuard context_guard("processing rom " + rom.name);
         string rom_class = ROMClassName + "<" +
             std::to_string(rom.data_width) + ", " +
-            std::to_string(rom.addr_width) + ", " + 
+            std::to_string(rom.addr_size) + ", " + 
             std::to_string(rom.read_ports) + ">";
 
         decl_private_field.push_back(rom_class + " " + rom.name + "{\"" + rom.init_path + "\"};\n");
@@ -1571,7 +1571,7 @@ vector<string> genStaticTestHarnessHpp(
     out_lines.push_back("\n");
 
     for (const auto &includes : test_module.includedHeaders) {
-        out_lines.push_back("#include \"" + includes + "\"\n");
+        out_lines.push_back("#include <" + includes + ">\n");
     }
     out_lines.push_back("\n");
 

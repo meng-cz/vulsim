@@ -38,8 +38,6 @@
 
 #define HELPER()  inline namespace helper
 
-#define CONST(name, value) constexpr int64_t name = value;
-
 #define CONFIG(name, value) constexpr int64_t name = value;
 
 #define PARAMETER(name, value) constexpr int64_t name = value;
@@ -95,11 +93,11 @@
 
 #define CONNECT_S_CS(srcserv, dstmod, dstserv) ;
 
-#define BRAM(name, datatype, addrwidth, readports, writeports) VulBRAM<datatype, addrwidth, readports, writeports> name;
+#define BRAM(name, datatype, size, readports, writeports) VulBRAM<datatype, size, readports, writeports> name;
 
-#define BRAM_1RW(name, datatype, addrwidth) VulBRAM1RW<datatype, addrwidth> name;
+#define BRAM_1RW(name, datatype, size) VulBRAM1RW<datatype, size> name;
 
-#define ROM(name, datawidth, addrwidth, readports, init_path) VulROM<datawidth, addrwidth, readports> name(#init_path);
+#define ROM(name, datawidth, size, readports, init_path) VulROM<datawidth, size, readports> name(#init_path);
 
 #define QUEUE(name, type, depth) VulQueue<type, depth> name;
 

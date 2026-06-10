@@ -11,7 +11,7 @@
 
 STRUCT(ReadStageReg) {
     Int<ADDR_WIDTH> addr;
-    bool valid = false;
+    bool valid;
 };
 
 STRUCT(TagEntry) {
@@ -21,8 +21,8 @@ STRUCT(TagEntry) {
 
 // Register
 
-BRAM(tag_array, TagEntry, INDEX_WIDTH, 1, 1);
-BRAM(data_array, Int<DATA_WIDTH>, INDEX_WIDTH, 1, 1);
+BRAM(tag_array, TagEntry, INDEX_SIZE, 1, 1);
+BRAM(data_array, Int<DATA_WIDTH>, INDEX_SIZE, 1, 1);
 
 REGISTER(read_stage, ReadStageReg) {
     read_stage.addr = 0;
@@ -80,4 +80,3 @@ TICK_IMPL() {
         read_stage.setnext(s0);
     }
 }
-

@@ -5,6 +5,7 @@
 #include "argparse.hpp"
 #include "breakpoint.hpp"
 #include "trace.hpp"
+#include "vullib.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -227,22 +228,11 @@ int simgenStatic(const SimGenArgs &args) {
     {
         VulErrorContextGuard _err("copying runtime library files");
 
-        vector<std::string> runtime_files = {
-            "common.h",
-            "vullib.h",
-            "main.cpp",
-            "pipe.hpp",
-            "storage.hpp",
-            "uint.hpp",
-            "ram.hpp",
-            "queue.hpp",
-            "vcdrecord.hpp",
-        };
         std::filesystem::path lib_path(lib_dir);
         if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
             throw VulException("Library directory does not exist: " + lib_dir);
         }
-        for (const auto &filename : runtime_files) {
+        for (auto filename : VulLibFiles) {
             std::filesystem::path src_file = lib_path / filename;
             if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
                 throw VulException("Runtime library file does not exist: " + src_file.string());
