@@ -25,9 +25,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
+#include <deque>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -44,10 +47,14 @@
 （5）提供函数接口close，结束记录阶段，关闭文件并清理资源。
  */
 
-// struct VCDPauseCondition {
-//     string signal_name;
-//     string expected_value;
-// };
+#ifndef VULSIM_TRACE_BREAK_CONDITION_SPEC_DEFINED
+#define VULSIM_TRACE_BREAK_CONDITION_SPEC_DEFINED
+struct TraceBreakConditionSpec {
+    std::string signal_name;
+    std::string expected_bits;
+    std::string expected_display;
+};
+#endif
 
 class GlobalVCDRecord {
 public:
@@ -74,6 +81,44 @@ public:
         return id;
     }
 
+    void set_break_history_cycles(uint64_t cycle_count) {
+        ensure_state(State::Registering, "set_break_history_cycles");
+        break_history_cycles_ = cycle_count;
+    }
+
+    void add_break_point(const std::vector<TraceBreakConditionSpec> &conditions, const std::string &expr_text) {
+        ensure_state(State::Registering, "add_break_point");
+        if (conditions.empty()) {
+            throw std::runtime_error("Breakpoint must contain at least one condition");
+        }
+
+        BreakPoint bp;
+        bp.expr_text = expr_text;
+        for (const auto &cond_spec : conditions) {
+            if (cond_spec.signal_name.empty()) {
+                throw std::runtime_error("Breakpoint condition signal name cannot be empty");
+            }
+            auto it = std::find_if(signals_.begin(), signals_.end(), [&](const SignalInfo &sig) {
+                return sig.name == cond_spec.signal_name;
+            });
+            if (it == signals_.end()) {
+                throw std::runtime_error("Breakpoint signal is not registered for tracing: " + cond_spec.signal_name);
+            }
+            if (cond_spec.expected_bits.size() != it->width) {
+                throw std::runtime_error(
+                    "Breakpoint expected value width does not match traced signal width: " + cond_spec.signal_name
+                );
+            }
+            bp.conditions.push_back(BreakCondition{
+                static_cast<uint32_t>(std::distance(signals_.begin(), it)),
+                cond_spec.signal_name,
+                cond_spec.expected_bits,
+                cond_spec.expected_display
+            });
+        }
+        break_points_.push_back(std::move(bp));
+    }
+
     void init(const std::string &filename, uint64_t cycle_time, uint64_t write_interval) {
         ensure_state(State::Registering, "init");
         if (signals_.empty()) {
@@ -86,17 +131,21 @@ public:
             throw std::runtime_error("Cycle time must be greater than 0");
         }
 
-        ofs_.open(filename, std::ios::out | std::ios::trunc);
-        if (!ofs_.is_open()) {
-            throw std::runtime_error("Failed to open VCD file: " + filename);
-        }
-
+        trace_filename_ = filename;
         cycle_time_ = cycle_time;
         write_interval_ = write_interval;
         cycle_count_ = 0;
         buffer_.clear();
+        history_.clear();
+        breakpoint_mode_ = !break_points_.empty();
 
-        write_header();
+        if (!breakpoint_mode_) {
+            ofs_.open(filename, std::ios::out | std::ios::trunc);
+            if (!ofs_.is_open()) {
+                throw std::runtime_error("Failed to open VCD file: " + filename);
+            }
+            write_header(ofs_, std::vector<std::optional<std::string>>(signals_.size(), std::nullopt));
+        }
         state_ = State::Recording;
     }
 
@@ -140,6 +189,14 @@ public:
         ensure_state(State::Recording, "commit");
         ++cycle_count_;
 
+        std::vector<std::optional<std::string>> snapshot_before;
+        if (breakpoint_mode_) {
+            snapshot_before.reserve(signals_.size());
+            for (const auto &sig : signals_) {
+                snapshot_before.push_back(sig.last_bits);
+            }
+        }
+
         std::string cycle_changes;
         for (auto &sig : signals_) {
             if (!sig.has_pending) {
@@ -160,7 +217,13 @@ public:
             buffer_ += cycle_changes;
         }
 
-        if (write_interval_ != 0 && (cycle_count_ % write_interval_ == 0)) {
+        if (breakpoint_mode_) {
+            history_.push_back(CycleFrame{cycle_count_, std::move(snapshot_before), cycle_changes});
+            while (history_.size() > break_history_cycles_) {
+                history_.pop_front();
+            }
+            handle_breakpoints_if_hit();
+        } else if (write_interval_ != 0 && (cycle_count_ % write_interval_ == 0)) {
             flush_buffer();
         }
     }
@@ -171,7 +234,9 @@ public:
         }
 
         if (state_ == State::Recording) {
-            flush_buffer();
+            if (!breakpoint_mode_) {
+                flush_buffer();
+            }
             if (ofs_.is_open()) {
                 ofs_.flush();
                 ofs_.close();
@@ -183,6 +248,11 @@ public:
         cycle_time_ = 0;
         write_interval_ = 0;
         cycle_count_ = 0;
+        break_history_cycles_ = 64;
+        breakpoint_mode_ = false;
+        trace_filename_.clear();
+        history_.clear();
+        break_points_.clear();
         state_ = State::Closed;
     }
 
@@ -200,6 +270,26 @@ private:
         std::optional<std::string> last_bits;
         std::optional<std::string> pending_bits;
         bool has_pending;
+    };
+
+    struct BreakCondition {
+        uint32_t signal_id;
+        std::string signal_name;
+        std::string expected_bits;
+        std::string expected_display;
+    };
+
+    struct BreakPoint {
+        std::string expr_text;
+        std::vector<BreakCondition> conditions;
+        bool last_eval_true = false;
+        bool suppress_until_false = false;
+    };
+
+    struct CycleFrame {
+        uint64_t cycle_index;
+        std::vector<std::optional<std::string>> snapshot_before;
+        std::string changes;
     };
 
 private:
@@ -285,6 +375,82 @@ private:
         return "b" + bits + " " + sig.vcd_id + "\n";
     }
 
+    bool break_point_is_true(const BreakPoint &bp) const {
+        for (const auto &cond : bp.conditions) {
+            const SignalInfo &sig = signals_.at(cond.signal_id);
+            if (!sig.last_bits.has_value() || sig.last_bits.value() != cond.expected_bits) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void suppress_currently_true_breakpoints() {
+        for (auto &bp : break_points_) {
+            const bool cur_true = break_point_is_true(bp);
+            if (cur_true) {
+                bp.suppress_until_false = true;
+            }
+            bp.last_eval_true = cur_true;
+        }
+    }
+
+    void handle_breakpoints_if_hit() {
+        std::vector<size_t> matched_indices;
+        for (size_t i = 0; i < break_points_.size(); ++i) {
+            auto &bp = break_points_[i];
+            const bool cur_true = break_point_is_true(bp);
+            if (!cur_true) {
+                bp.suppress_until_false = false;
+                bp.last_eval_true = false;
+                continue;
+            }
+            if (!bp.last_eval_true && !bp.suppress_until_false) {
+                matched_indices.push_back(i);
+            }
+            bp.last_eval_true = true;
+        }
+        if (matched_indices.empty()) {
+            return;
+        }
+
+        std::cout << "\n[Breakpoint] Hit at cycle " << cycle_count_ << ":\n";
+        for (const auto idx : matched_indices) {
+            std::cout << "  " << break_points_[idx].expr_text << "\n";
+        }
+
+        while (true) {
+            std::cout << "[Breakpoint] Choose action: (d)ump buffered waveform, (c)ontinue, (q)uit: ";
+            std::string choice;
+            if (!std::getline(std::cin, choice)) {
+                choice = "q";
+            }
+            if (choice.empty()) continue;
+            const char ch = choice[0];
+            if (ch == 'd' || ch == 'D') {
+                std::cout << "[Breakpoint] Output VCD file path [default: " << default_break_dump_path() << "]: ";
+                std::string outpath;
+                if (!std::getline(std::cin, outpath)) {
+                    outpath.clear();
+                }
+                if (outpath.empty()) {
+                    outpath = default_break_dump_path();
+                }
+                dump_break_history(outpath);
+                std::cout << "[Breakpoint] Waveform written to " << outpath << "\n";
+                continue;
+            }
+            if (ch == 'c' || ch == 'C') {
+                suppress_currently_true_breakpoints();
+                return;
+            }
+            if (ch == 'q' || ch == 'Q') {
+                close();
+                std::exit(0);
+            }
+        }
+    }
+
     std::vector<std::string> split_signal_path(const std::string &name) const {
         std::vector<std::string> parts;
         std::string cur;
@@ -317,7 +483,7 @@ private:
         std::vector<const SignalInfo *> signals;
     };
 
-    void emit_scope_tree(const ScopeNode &node) {
+    void emit_scope_tree(std::ostream &os, const ScopeNode &node) {
         // Signals inside the same scope are emitted in lexical order.
         std::vector<const SignalInfo *> sorted_signals = node.signals;
         std::sort(sorted_signals.begin(), sorted_signals.end(),
@@ -331,21 +497,17 @@ private:
         for (const auto *sig : sorted_signals) {
             const std::vector<std::string> parts = split_signal_path(sig->name);
             const std::string leaf = parts.empty() ? sig->name : parts.back();
-            ofs_ << "$var wire " << sig->width << " " << sig->vcd_id << " " << leaf << " $end\n";
+            os << "$var wire " << sig->width << " " << sig->vcd_id << " " << leaf << " $end\n";
         }
 
         for (const auto &entry : node.children) {
-            ofs_ << "$scope module " << entry.first << " $end\n";
-            emit_scope_tree(entry.second);
-            ofs_ << "$upscope $end\n";
+            os << "$scope module " << entry.first << " $end\n";
+            emit_scope_tree(os, entry.second);
+            os << "$upscope $end\n";
         }
     }
 
-    void write_header() {
-        if (!ofs_.is_open()) {
-            throw std::runtime_error("VCD file is not open");
-        }
-
+    void write_header(std::ostream &os, const std::vector<std::optional<std::string>> &initial_values) {
         std::time_t now = std::time(nullptr);
         std::tm tm_now;
 #ifdef _WIN32
@@ -354,14 +516,14 @@ private:
         localtime_r(&now, &tm_now);
 #endif
 
-        ofs_ << "$date\n";
-        ofs_ << "  " << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S") << "\n";
-        ofs_ << "$end\n";
-        ofs_ << "$version\n";
-        ofs_ << "  GlobalVCDRecord\n";
-        ofs_ << "$end\n";
-        ofs_ << "$timescale " << cycle_time_ << "ns $end\n";
-        ofs_ << "$scope module logic $end\n";
+        os << "$date\n";
+        os << "  " << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S") << "\n";
+        os << "$end\n";
+        os << "$version\n";
+        os << "  GlobalVCDRecord\n";
+        os << "$end\n";
+        os << "$timescale " << cycle_time_ << "ns $end\n";
+        os << "$scope module logic $end\n";
 
         ScopeNode root;
         for (const auto &sig : signals_) {
@@ -377,20 +539,51 @@ private:
             }
             node->signals.push_back(&sig);
         }
-        emit_scope_tree(root);
+        emit_scope_tree(os, root);
 
-        ofs_ << "$upscope $end\n";
-        ofs_ << "$enddefinitions $end\n";
-        ofs_ << "$dumpvars\n";
-        for (const auto &sig : signals_) {
-            if (sig.width == 1) {
-                ofs_ << "x" << sig.vcd_id << "\n";
+        os << "$upscope $end\n";
+        os << "$enddefinitions $end\n";
+        os << "$dumpvars\n";
+        for (size_t i = 0; i < signals_.size(); ++i) {
+            const auto &sig = signals_[i];
+            const auto &bits = (i < initial_values.size() ? initial_values[i] : std::optional<std::string>{});
+            if (!bits.has_value()) {
+                if (sig.width == 1) {
+                    os << "x" << sig.vcd_id << "\n";
+                } else {
+                    os << "b" << std::string(sig.width, 'x') << " " << sig.vcd_id << "\n";
+                }
+            } else if (sig.width == 1) {
+                os << bits.value()[0] << sig.vcd_id << "\n";
             } else {
-                ofs_ << "b" << std::string(sig.width, 'x') << " " << sig.vcd_id << "\n";
+                os << "b" << bits.value() << " " << sig.vcd_id << "\n";
             }
         }
-        ofs_ << "$end\n";
-        ofs_.flush();
+        os << "$end\n";
+    }
+
+    std::string default_break_dump_path() const {
+        std::ostringstream oss;
+        oss << "break_" << cycle_count_ << ".vcd";
+        return oss.str();
+    }
+
+    void dump_break_history(const std::string &outpath) {
+        std::ofstream dump_ofs(outpath, std::ios::out | std::ios::trunc);
+        if (!dump_ofs.is_open()) {
+            throw std::runtime_error("Failed to open breakpoint dump VCD file: " + outpath);
+        }
+        std::vector<std::optional<std::string>> initial_values(signals_.size(), std::nullopt);
+        if (!history_.empty()) {
+            initial_values = history_.front().snapshot_before;
+        }
+        write_header(dump_ofs, initial_values);
+        for (const auto &frame : history_) {
+            if (frame.changes.empty()) continue;
+            dump_ofs << "#" << (frame.cycle_index * cycle_time_) << "\n";
+            dump_ofs << frame.changes;
+        }
+        dump_ofs.flush();
     }
 
 private:
@@ -400,5 +593,10 @@ private:
     uint64_t cycle_time_ = 0;
     uint64_t write_interval_ = 0;
     uint64_t cycle_count_ = 0;
+    uint64_t break_history_cycles_ = 64;
+    bool breakpoint_mode_ = false;
+    std::string trace_filename_;
     std::string buffer_;
+    std::deque<CycleFrame> history_;
+    std::vector<BreakPoint> break_points_;
 };

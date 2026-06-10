@@ -28,9 +28,25 @@
 #include "ram.hpp"
 #include "queue.hpp"
 
+#include <string>
+#include <vector>
+
+#ifndef VULSIM_TRACE_BREAK_CONDITION_SPEC_DEFINED
+#define VULSIM_TRACE_BREAK_CONDITION_SPEC_DEFINED
+struct TraceBreakConditionSpec {
+    std::string signal_name;
+    std::string expected_bits;
+    std::string expected_display;
+};
+#endif
+
 uint32_t trace_registe_signal(const std::string &signal_name, uint32_t signal_width);
 
 void trace_init(const std::string &filename, uint64_t cycle_time, uint64_t write_interval);
+
+void trace_set_break_history_cycles(uint64_t cycle_count);
+
+void trace_add_break_point(const std::vector<TraceBreakConditionSpec> &conditions, const std::string &expr_text);
 
 void trace_record(uint32_t signal_id, uint64_t signal_value);
 

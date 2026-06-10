@@ -3,6 +3,7 @@
 
 #include "simgen.h"
 #include "argparse.hpp"
+#include "breakpoint.hpp"
 #include "trace.hpp"
 
 #include <filesystem>
@@ -44,6 +45,9 @@ struct SimGenArgs {
     std::string lib_dir;
     std::string trace_file;
     std::string trace_line;
+    std::string break_file;
+    std::string break_line;
+    uint64_t break_cycles = 1024;
 };
 
 int simgenStatic(const SimGenArgs &args) {
@@ -55,6 +59,8 @@ int simgenStatic(const SimGenArgs &args) {
     const string &lib_dir = args.lib_dir;
     const string &trace_file = args.trace_file;
     const string &trace_line = args.trace_line;
+    const string &break_file = args.break_file;
+    const string &break_line = args.break_line;
 
     std::filesystem::path top_path(top_file);
     if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
@@ -151,6 +157,19 @@ int simgenStatic(const SimGenArgs &args) {
 
     auto trace_table = parseTraceOptions(project, trace_matchers);
 
+    if ((!break_file.empty() || !break_line.empty()) && trace_matchers.empty()) {
+        throw VulException("Breakpoints require tracing to be enabled with --trace or --tracefile");
+    }
+
+    std::vector<VulBreakPointSpec> break_specs;
+    if (!break_file.empty() || !break_line.empty()) {
+        VulErrorContextGuard _err("parsing breakpoint descriptions");
+        break_specs = parseBreakSpecs(break_file, break_line, collectTracedSignalWidths(project, trace_table));
+        if (args.break_cycles == 0) {
+            throw VulException("Breakpoint history cycles must be greater than 0");
+        }
+    }
+
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
     std::unordered_set<std::string> generated_module_paths;
@@ -188,7 +207,10 @@ int simgenStatic(const SimGenArgs &args) {
         VulErrorContextGuard _err("generating test harness code");
 
         vector<string> testharness_code = simgen::genStaticTestHarnessHpp(
-            project.test_harness, *project.top_module_instance, /*enable_tracing=*/trace_matchers.size() > 0
+            project.test_harness, *project.top_module_instance,
+            /*enable_tracing=*/trace_matchers.size() > 0,
+            break_specs,
+            args.break_cycles
         );
         writeLinesToFile(testharness_code, (out_path / project.top_module_instance->parent->simDeclPath()).string());
     }
@@ -304,6 +326,16 @@ int main(int argc, char * argv[]) {
     parser.add_argument("--trace")
         .help("tracing signal matcher strings seperated by commas (optional)")
         .default_value(std::string(""));
+    parser.add_argument("-B", "--breakfile")
+        .help("breakpoint description file, one breakpoint expression per line (optional)")
+        .default_value(std::string(""));
+    parser.add_argument("--break")
+        .help("breakpoint expression string joined by && inside one breakpoint (optional)")
+        .default_value(std::string(""));
+    parser.add_argument("--breakcycles")
+        .help("number of recent cycles buffered for breakpoint waveform dump")
+        .scan<'u', uint64_t>()
+        .default_value(uint64_t(64));
     parser.add_argument("--dynamic")
         .help("generate dynamic simulation code instead of static code")
         .default_value(false)
@@ -323,7 +355,10 @@ int main(int argc, char * argv[]) {
     string lib_dir = parser.get<std::string>("--lib");
     string trace_file = parser.get<std::string>("--tracefile");
     string trace_line = parser.get<std::string>("--trace");
-    SimGenArgs args{top_file, main_file, proj_dir, out_dir, lib_dir, trace_file, trace_line};
+    string break_file = parser.get<std::string>("--breakfile");
+    string break_line = parser.get<std::string>("--break");
+    uint64_t break_cycles = parser.get<uint64_t>("--breakcycles");
+    SimGenArgs args{top_file, main_file, proj_dir, out_dir, lib_dir, trace_file, trace_line, break_file, break_line, break_cycles};
 
     try{
         return simgenStatic(args);

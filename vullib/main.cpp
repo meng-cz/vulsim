@@ -34,6 +34,14 @@ void trace_init(const std::string &filename, uint64_t cycle_time, uint64_t write
     global_vcd_record.init(filename, cycle_time, write_interval);
 }
 
+void trace_set_break_history_cycles(uint64_t cycle_count) {
+    global_vcd_record.set_break_history_cycles(cycle_count);
+}
+
+void trace_add_break_point(const std::vector<TraceBreakConditionSpec> &conditions, const std::string &expr_text) {
+    global_vcd_record.add_break_point(conditions, expr_text);
+}
+
 void trace_record(uint32_t signal_id, uint64_t signal_value) {
     global_vcd_record.record(signal_id, signal_value);
 }

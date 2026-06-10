@@ -28,6 +28,7 @@
 #include "type.h"
 
 #include "bundlelib.h"
+#include "breakpoint.hpp"
 #include "configlib.h"
 #include "module.h"
 #include "project.h"
@@ -51,7 +52,13 @@ struct StaticModuleCodeHpp {
 
 StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &module_instance, const vector<VulTracedSignal> &traced_signals);
 
-vector<string> genStaticTestHarnessHpp(const VulStaticTestHarnessModule &test_module, const VulStaticModuleInstance &top_module, bool enable_tracing);
+vector<string> genStaticTestHarnessHpp(
+    const VulStaticTestHarnessModule &test_module,
+    const VulStaticModuleInstance &top_module,
+    bool enable_tracing,
+    const vector<VulBreakPointSpec> &break_specs,
+    uint64_t break_cycles
+);
 
 vector<string> genStaticTestMainHpp(shared_ptr<VulStaticModuleInstance> top_module);
 

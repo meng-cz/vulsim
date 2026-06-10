@@ -37,6 +37,22 @@ namespace simgen {
 
 const string CodeTab = "    ";
 
+inline static std::string cppStringLiteral(const std::string &s) {
+    std::string out = "\"";
+    for (char ch : s) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(ch); break;
+        }
+    }
+    out += "\"";
+    return out;
+}
+
 const string TickFunctionName = "on_current_tick";
 const string ApplyTickFunctionName = "apply_next_tick";
 
@@ -1459,7 +1475,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 vector<string> genStaticTestHarnessHpp(
     const VulStaticTestHarnessModule &test_module,
     const VulStaticModuleInstance &top_module,
-    bool enable_tracing
+    bool enable_tracing,
+    const vector<VulBreakPointSpec> &break_specs,
+    uint64_t break_cycles
 ) {
     
     vector<string> init_field;
@@ -1574,6 +1592,21 @@ vector<string> genStaticTestHarnessHpp(
         out_lines.push_back(line);
     }
     if (enable_tracing) {
+        if (!break_specs.empty()) {
+            out_lines.push_back(CodeTab + "trace_set_break_history_cycles(" + std::to_string(break_cycles) + ");\n");
+            for (const auto &bp : break_specs) {
+                std::string line = CodeTab + "trace_add_break_point({";
+                for (size_t i = 0; i < bp.conditions.size(); ++i) {
+                    if (i > 0) line += ", ";
+                    const auto &cond = bp.conditions[i];
+                    line += "{" + cppStringLiteral(cond.runtime_signal_name) + ", "
+                                 + cppStringLiteral(cond.expected_bits) + ", "
+                                 + cppStringLiteral(cond.expected_display) + "}";
+                }
+                line += "}, " + cppStringLiteral(bp.expr_text) + ");\n";
+                out_lines.push_back(line);
+            }
+        }
         out_lines.push_back(CodeTab + "trace_init(\"trace.vcd\", 1, 1000);\n");
     }
     out_lines.push_back("}\n");
