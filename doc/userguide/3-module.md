@@ -76,6 +76,11 @@ TICK_IMPL() {
 }
 ```
 
+约束：
+- 同一个寄存器写端口在同一个周期内只允许调用一次 `setnext()`。
+- 非 `release` 编译下，重复调用会触发 `assert` 退出。
+- `release` 编译下属于未定义行为。
+
 
 ## REGISTER_MUL(name, type, portnum) { ... }
 
@@ -104,6 +109,10 @@ TICK_IMPL() {
 ```
 
 这个硬件模块中，如果一个周期内，serv1 和 tick 都对 myreg 进行写入，那么 serv1 中对 myreg 的写入会覆盖 tick 中对 myreg 的写入。
+
+注意：
+- 这里允许不同写端口在同一周期写同一个寄存器，并按端口优先级仲裁。
+- 但同一个写端口自身在同一周期内重复调用 `setnext<P>()` 仍然是未定义行为；非 `release` 编译下会触发 `assert`。
 
 ## REGISTER_ARRAY1(name, type, size, portnum) { ... }
 
@@ -135,6 +144,11 @@ TICK_IMPL() {
     myarray.setnext<0>(4, val + 1); // 在下个周期将寄存器数组中索引为 4 的寄存器单元的值更新为 val + 1
 }
 ```
+
+约束：
+- 对于数组中的同一个寄存器单元，同一个写端口在同一周期内只允许调用一次 `setnext<P>(index, ...)`。
+- 非 `release` 编译下，重复调用会触发 `assert` 退出。
+- `release` 编译下属于未定义行为。
 
 ## WIRE(name, type) { ... }
 
@@ -318,7 +332,6 @@ TICK_IMPL() {
 
 如果一个请求包含返回值或包含握手信号（`has_handshake` 为 `true`），则其仅能被连接到一个服务或代码实现，不允许一对多连接。
 反之，如果一个请求不包含返回值且不包含握手信号，则允许一对多连接（广播连接）。
-
 
 
 

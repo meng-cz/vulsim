@@ -39,6 +39,9 @@ public:
     template <uint32_t P = 0>
     void setnext(const T &value) {
         static_assert(P < WRPortNum);
+        assert((issued_write_ports_ & (uint64_t(1) << P)) == 0 &&
+               "VulRegister::setnext() may only be called once per cycle for each write port");
+        issued_write_ports_ |= uint64_t(1) << P;
         if (P < pending_write_ports_) {
             next_ = value;
             pending_write_ports_ = P;
@@ -56,18 +59,21 @@ public:
     void apply_next_tick() {
         data_ = next_;
         pending_write_ports_ = WRPortNum;
+        issued_write_ports_ = 0;
     }
 
     void reset(const T &value) {
         data_ = value;
         next_ = value;
         pending_write_ports_ = WRPortNum;
+        issued_write_ports_ = 0;
     }
 
 protected:
     T data_{};
     T next_{};
     uint32_t pending_write_ports_ = WRPortNum;
+    uint64_t issued_write_ports_ = 0;
 };
 
 template<typename T>
@@ -76,11 +82,15 @@ class VulRegisterImpl1 {
 public:
     template <uint32_t P = 0>
     void setnext(const T &value) {
+        assert(!write_issued_ &&
+               "VulRegister::setnext() may only be called once per cycle for each write port");
         next_buffer_ = value;
+        write_issued_ = true;
     }
 
     void apply_next_tick() {
         data_ = next_buffer_;
+        write_issued_ = false;
     }
 
     operator const T&() const {
@@ -90,11 +100,13 @@ public:
     void reset(const T &value) {
         data_ = value;
         next_buffer_ = value;
+        write_issued_ = false;
     }
 
 protected:
     T next_buffer_{};
     T data_{};
+    bool write_issued_ = false;
 };
 
 template<typename T, uint32_t WRPortNum = 1>
@@ -138,7 +150,7 @@ public:
     template <uint32_t P = 0>
     void setnext(const uint32_t index, const T &value) {
         assert(index < Size);
-        data_[index].setnext<P>(value);
+        data_[index].template setnext<P>(value);
     }
     void apply_next_tick() {
         for (auto &elem : data_) {
@@ -173,9 +185,10 @@ protected:
         T value;
         uint32_t best_prio;
         bool has_write;
+        uint64_t issued_write_ports;
 
         PendingSlot()
-            : value(), best_prio(WRPortNum), has_write(false) {}
+            : value(), best_prio(WRPortNum), has_write(false), issued_write_ports(0) {}
     };
     std::array<T, Size> curr_;
     std::array<PendingSlot, Size> pending_;
@@ -201,6 +214,9 @@ public:
         assert(index < Size);
         static_assert(P < WRPortNum);
         auto &slot = pending_[index];
+        assert((slot.issued_write_ports & (uint64_t(1) << P)) == 0 &&
+               "VulRegisterArray::setnext() may only be called once per cycle for each register write port");
+        slot.issued_write_ports |= uint64_t(1) << P;
         if (!slot.has_write || P < slot.best_prio) {
             slot.value = value;
             slot.best_prio = P;
@@ -216,6 +232,8 @@ public:
             uint32_t index = dirty_indices_[i];
             curr_[index] = pending_[index].value;
             pending_[index].has_write = false;
+            pending_[index].best_prio = WRPortNum;
+            pending_[index].issued_write_ports = 0;
             dirty_flags_[index] = 0;
         }
         dirty_count_ = 0;
@@ -232,6 +250,7 @@ public:
             slot.value = value;
             slot.best_prio = WRPortNum;
             slot.has_write = false;
+            slot.issued_write_ports = 0;
         }
         dirty_count_ = 0;
         dirty_flags_.fill(0);
@@ -242,6 +261,7 @@ public:
             pending_[i].value = values[i];
             pending_[i].best_prio = WRPortNum;
             pending_[i].has_write = false;
+            pending_[i].issued_write_ports = 0;
             dirty_flags_[i] = 0;
         }
         dirty_count_ = 0;
