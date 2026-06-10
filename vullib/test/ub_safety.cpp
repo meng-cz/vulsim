@@ -30,6 +30,7 @@ void test_bram_default_zero_init() {
     assert(ram.readdata<0>() == 0);
 
     VulBRAM1RW<int, 4> ram1rw;
+    ram1rw.req(Int<2>(0), 0, false);
     ram1rw.apply_next_tick();
     assert(ram1rw.readdata() == 0);
 }

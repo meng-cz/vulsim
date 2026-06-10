@@ -35,7 +35,6 @@ template <typename DataT, uint32_t Size>
 class VulBRAM1RW {
 public:
     VulBRAM1RW();
-    VulBRAM1RW(const std::string &path, bool hex);
 
     void req(const AddrType &addr, const DataT &write_data, bool write_en);
     const DataT& readdata() const;
@@ -57,7 +56,10 @@ public:
 ### 2.3 `req(...)`
 
 - 记录下一次 `apply_next_tick()` 要使用的地址、写数据、写使能。
-- 若同一个 tick 内多次调用，后一次会覆盖前一次。
+- `readdata()` 在同一个 tick 内允许调用多次，返回相同的 `read_data_`。
+- `req(...)` 在同一个 tick 内只允许调用一次：
+  - 非 `NDEBUG` 编译下，多次调用会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会被后一次调用覆盖。
 
 ### 2.4 `apply_next_tick()` 的提交顺序
 
@@ -72,6 +74,9 @@ public:
 - 读地址与写地址永远是同一个 `addr_`，因为接口只有一组地址。
 - 对同一个地址在同一次 `apply_next_tick()` 内同时读写时，`readdata()` 看到的是写前旧值。
 - `readdata()` 返回的是最近一次 `apply_next_tick()` 更新后的寄存器值，不是组合读。
+- `readdata()` 仅在“上一周期调用了 `req(..., write_en = false)`”时有效：
+  - 非 `NDEBUG` 编译下，若上一周期没有 `req()`，或上一周期发出的是写请求，则本周期调用 `readdata()` 会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会保留旧的 `read_data_` 内容。
 
 ### 2.6 构造函数说明
 
@@ -89,7 +94,6 @@ template <typename DataT, uint32_t Size, uint32_t ReadPorts, uint32_t WritePorts
 class VulBRAM {
 public:
     VulBRAM();
-    VulBRAM(const std::string &path, bool hex);
 
     template <uint32_t PortIndex>
     void readreq(const AddrType &addr);
@@ -115,14 +119,17 @@ public:
 ### 3.3 `readreq<PortIndex>(addr)`
 
 - 记录该读端口下一次 `apply_next_tick()` 要读取的地址。
-- 同一 tick 内对同一端口多次调用时，后一次覆盖前一次。
+- `readdata<PortIndex>()` 在同一个 tick 内允许调用多次，返回相同的 `read_data_[PortIndex]`。
+- 对同一个读端口，同一 tick 内只允许调用一次：
+  - 非 `NDEBUG` 编译下，多次调用会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会被后一次调用覆盖。
 
 ### 3.4 `write<PortIndex>(addr, data)`
 
 - 记录该写端口的挂起写请求，并把对应使能位置 1。
-- 同一 tick 内对同一写端口多次调用时：
-  - 地址和数据会被后一次覆盖。
-  - 使能位保持为 1。
+- 对同一个写端口，同一 tick 内只允许调用一次：
+  - 非 `NDEBUG` 编译下，多次调用会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会被后一次调用覆盖，且使能位保持为 1。
 
 ### 3.5 `apply_next_tick()` 的提交顺序
 
@@ -134,17 +141,19 @@ public:
    - `memory_[write_addresses_[i]] = write_data_[i]`
 3. 最后将 `write_enables_` 清零。
 
-### 3.6 由此得到的语义
+### 3.6 同地址语义
 
-- 这是“先读后写”的同步 RAM。
+- “先读后写”的同步 RAM。
 - 同一次 `apply_next_tick()` 中，若某读端口读取的地址恰好被某写端口写入，则该读端口读到的是写前旧值。
 - 多写端口写同一地址时，端口索引越大的写端口最后执行，因此最终内存保留最大端口号的写入值。
 - `readdata<PortIndex>()` 返回的是上一次 `apply_next_tick()` 更新后的寄存器值。
+- `readdata<PortIndex>()` 仅在“上一周期该端口调用过 `readreq<PortIndex>()`”时有效：
+  - 非 `NDEBUG` 编译下，若上一周期该端口没有读请求，则本周期调用 `readdata<PortIndex>()` 会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会保留该端口旧的 `read_data_[PortIndex]` 内容。
 
 ### 3.7 构造函数说明
 
 - `VulBRAM()` 默认零初始化。
-- `VulBRAM(const std::string&, bool)` 当前也不使用 `path` 与 `hex` 参数。
 
 ## 4. `VulROM<DataWidth, Size, ReadPorts>`
 
@@ -177,6 +186,13 @@ public:
   - `readreq()` 记录地址
   - `apply_next_tick()` 才把 `memory_[addr]` 取到 `read_data_[i]`
 - `readdata()` 按值返回 `DataType`，不是引用返回。
+- `readdata<PortIndex>()` 在同一个 tick 内允许调用多次，返回相同的 `read_data_[PortIndex]`。
+- 对同一个读端口，`readreq<PortIndex>()` 在同一个 tick 内只允许调用一次：
+  - 非 `NDEBUG` 编译下，多次调用会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会被后一次调用覆盖。
+- `readdata<PortIndex>()` 仅在“上一周期该端口调用过 `readreq<PortIndex>()`”时有效：
+  - 非 `NDEBUG` 编译下，若上一周期该端口没有读请求，则本周期调用 `readdata<PortIndex>()` 会触发 `assert` 退出。
+  - `NDEBUG` 编译下属于未定义行为；当前实现通常会保留该端口旧的 `read_data_[PortIndex]` 内容。
 
 ### 4.3 `readmemh` 装载规则
 
@@ -204,8 +220,4 @@ public:
 
 ## 5. 需求评审建议重点
 
-- BRAM 带文件参数构造函数当前未实际装载文件，是否需要补齐。
 - ROM 是否需要正式支持 `readmemb` 构造入口。
-- 对于 `Size` 不是 2 的幂的情况，当前接口会生成 `log2ceil(Size)` 位地址，但实现没有越界保护；若上层给出超出 `[0, Size)` 的地址，会直接访问越界，建议与需求团队明确是否要求：
-  - 强制 `Size` 为 2 的幂；
-  - 或在模拟库中加入断言/检查。

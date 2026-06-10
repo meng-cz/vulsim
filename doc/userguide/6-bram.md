@@ -26,6 +26,12 @@ ROM(name, datawidth, size, readports, init_path);
 `VulBRAM` 读写时序如下：
 - 读请求当周期给地址，下一周期通过同端口 `readdata` 取数。
 - 写请求在 `apply_next_tick()` 时生效；同一 tick 内可对多个写端口发请求。
+- `readdata<PortIndex>()` 同一周期可多次调用，返回相同结果。
+- 仅当上一周期该端口调用过 `readreq<PortIndex>()` 时，本周期 `readdata<PortIndex>()` 才有效。
+- `readreq<PortIndex>()` / `write<PortIndex>()` 对每个端口同一周期只允许调用一次。
+  非 `release` 编译下多次调用会触发 `assert`；`release` 编译下属于未定义行为。
+- 若上一周期该端口没有 `readreq<PortIndex>()`，则本周期调用 `readdata<PortIndex>()`：
+  非 `release` 编译下会触发 `assert`，`release` 编译下属于未定义行为；当前实现通常保留旧值。
 
 接口定义：
 
@@ -65,8 +71,12 @@ TICK_IMPL() {
 `VulBRAM1RW` 使用共享读写端口：
 - `req(addr, data, true)` 表示写请求。
 - `req(addr, data, false)` 表示读请求（`data` 参数被忽略）。
-- 同一周期多次调用 `req` 时，仅最后一次调用生效。
+- `readdata()` 同一周期可多次调用，返回相同结果。
+- 仅当上一周期调用的是读请求 `req(..., false)` 时，本周期 `readdata()` 才有效。
+- `req()` 同一周期只允许调用一次。非 `release` 编译下多次调用会触发 `assert`；`release` 编译下属于未定义行为。
 - 同周期对同一地址同时发起读写语义时，返回的是写入前旧值。
+- 若上一周期没有 `req()`，或上一周期调用的是写请求 `req(..., true)`，则本周期调用 `readdata()`：
+  非 `release` 编译下会触发 `assert`，`release` 编译下属于未定义行为；当前实现通常保留旧值。
 
 接口定义：
 
@@ -99,6 +109,8 @@ void readreq(const UInt<addrwidth> &addr);
 template <uint32_t PortIndex>
 const UInt<datawidth> readdata() const;
 ```
+
+`readdata<PortIndex>()` 同一周期可多次调用，返回相同结果。仅当上一周期该端口调用过 `readreq<PortIndex>()` 时，本周期 `readdata<PortIndex>()` 才有效；否则非 `release` 编译下会触发 `assert`，`release` 编译下属于未定义行为，当前实现通常保留旧值。`readreq<PortIndex>()` 对每个端口同一周期只允许调用一次；非 `release` 编译下多次调用会触发 `assert`，`release` 编译下属于未定义行为。
 
 声明示例：
 

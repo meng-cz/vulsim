@@ -25,6 +25,7 @@
 #include "common.h"
 #include "uint.hpp"
 
+#include <cassert>
 #include <array>
 #include <vector>
 #include <fstream>
@@ -38,7 +39,7 @@ using std::string;
 using std::vector;
 
 
-template <typename DataT, uint32_t Size>
+template <typename DataT, uint64_t Size>
 class VulBRAM1RW {
 public:
     static_assert(Size > 1, "Size must be greater than 1");
@@ -51,35 +52,49 @@ protected:
 
     std::array<DataT, Size> memory_{};
 
-    AddrType addr_{};
+    uint64_t addr_index_ = 0;
     DataT write_data_{};
     DataT read_data_{};
+    bool read_data_valid_ = false;
     bool write_en_ = false;
+    bool req_issued_ = false;
 
 public:
     VulBRAM1RW() : write_en_(false) {}
 
-    VulBRAM1RW(const string &path, bool hex) : write_en_(false) {}
-
     void req(const AddrType &addr, const DataT &write_data, bool write_en) {
-        addr_ = addr;
+        assert(!req_issued_ && "VulBRAM1RW::req() may only be called once per cycle");
+        const uint64_t addr_index = addr.template to<uint64_t>();
+        assert(addr_index < Size && "Address out of range");
+        addr_index_ = addr_index;
         write_data_ = write_data;
         write_en_ = write_en;
+        req_issued_ = true;
     }
 
     const DataT& readdata() const {
+        assert(read_data_valid_ && "VulBRAM1RW::readdata() is only valid in the cycle after a read request");
         return read_data_;
     }
 
     void apply_next_tick() {
-        read_data_ = memory_[addr_.template to<uint64_t>()];
-        if (write_en_) {
-            memory_[addr_.template to<uint64_t>()] = write_data_;
+        if (!req_issued_) {
+            read_data_valid_ = false;
+        } else if (addr_index_ >= Size) {
+            read_data_valid_ = false;
+        } else if (write_en_) {
+            memory_[addr_index_] = write_data_;
+            read_data_valid_ = false;
+        } else {
+            read_data_ = memory_[addr_index_];
+            read_data_valid_ = true;
         }
+        write_en_ = false;
+        req_issued_ = false;
     }
 };
 
-template <typename DataT, uint32_t Size, uint32_t ReadPorts, uint32_t WritePorts>
+template <typename DataT, uint64_t Size, uint32_t ReadPorts, uint32_t WritePorts>
 class VulBRAM {
 public:
 
@@ -96,10 +111,12 @@ protected:
 
     std::array<DataT, Size> memory_{};
 
-    array<AddrType, ReadPorts> read_addresses_{};
+    array<uint64_t, ReadPorts> read_address_indices_{};
     array<DataT, ReadPorts> read_data_{};
+    array<bool, ReadPorts> read_data_valid_{};
+    array<bool, ReadPorts> readreq_issued_{};
 
-    array<AddrType, WritePorts> write_addresses_{};
+    array<uint64_t, WritePorts> write_address_indices_{};
     array<DataT, WritePorts> write_data_{};
     uint64_t write_enables_ = 0; // 每个位对应一个写端口，1表示该端口有效
 
@@ -114,36 +131,48 @@ protected:
 public:
     VulBRAM() : write_enables_(0) {}
 
-    VulBRAM(const string &path, bool hex) : write_enables_(0) {}
-
     template <uint32_t PortIndex>
     void readreq(const AddrType &addr) {
         static_assert(PortIndex < ReadPorts, "Read port index out of range");
-        read_addresses_[PortIndex] = addr;
+        assert(!readreq_issued_[PortIndex] && "VulBRAM::readreq() may only be called once per cycle for each port");
+        const uint64_t addr_index = addr.template to<uint64_t>();
+        assert(addr_index < Size && "Address out of range");
+        read_address_indices_[PortIndex] = addr_index;
+        readreq_issued_[PortIndex] = true;
     }
 
     template <uint32_t PortIndex>
     const DataT& readdata() const {
         static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        assert(read_data_valid_[PortIndex] && "VulBRAM::readdata() is only valid in the cycle after a read request on that port");
         return read_data_[PortIndex];
     }
 
     template <uint32_t PortIndex>
     void write(const AddrType &addr, const DataT &data) {
         static_assert(PortIndex < WritePorts, "Write port index out of range");
-        write_addresses_[PortIndex] = addr;
+        assert((write_enables_ & (1ULL << PortIndex)) == 0 && "VulBRAM::write() may only be called once per cycle for each port");
+        const uint64_t addr_index = addr.template to<uint64_t>();
+        assert(addr_index < Size && "Address out of range");
+        write_address_indices_[PortIndex] = addr_index;
         write_data_[PortIndex] = data;
         write_enables_ |= 1ULL << PortIndex;
     }
 
     void apply_next_tick() {
         unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = memory_[read_addresses_[i].template to<uint64_t>()];
+            if (readreq_issued_[i] && read_address_indices_[i] < Size) {
+                read_data_[i] = memory_[read_address_indices_[i]];
+                read_data_valid_[i] = true;
+            } else {
+                read_data_valid_[i] = false;
+            }
+            readreq_issued_[i] = false;
         });
         if (write_enables_ != 0) {
             unroll_loop<0, WritePorts>([&](auto i) {
-                if (write_enables_ & (1ULL << i)) {
-                    memory_[write_addresses_[i].template to<uint64_t>()] = write_data_[i];
+                if ((write_enables_ & (1ULL << i)) && write_address_indices_[i] < Size) {
+                    memory_[write_address_indices_[i]] = write_data_[i];
                 }
             });
             write_enables_ = 0;
@@ -154,7 +183,7 @@ protected:
 
 };
 
-template <uint32_t DataWidth, uint32_t Size, uint32_t ReadPorts>
+template <uint32_t DataWidth, uint64_t Size, uint32_t ReadPorts>
 class VulROM {
 
 public:
@@ -172,8 +201,10 @@ protected:
 
     array<DataType, Size> memory_{};
 
-    array<AddrType, ReadPorts> read_addresses_{};
+    array<uint64_t, ReadPorts> read_address_indices_{};
     array<DataType, ReadPorts> read_data_{};
+    array<bool, ReadPorts> read_data_valid_{};
+    array<bool, ReadPorts> readreq_issued_{};
 
     template<int I, int N>
     inline void unroll_loop(auto&& f) {
@@ -196,18 +227,29 @@ public:
     template <uint32_t PortIndex>
     void readreq(const AddrType &addr) {
         static_assert(PortIndex < ReadPorts, "Read port index out of range");
-        read_addresses_[PortIndex] = addr;
+        assert(!readreq_issued_[PortIndex] && "VulROM::readreq() may only be called once per cycle for each port");
+        const uint64_t addr_index = addr.template to<uint64_t>();
+        assert(addr_index < Size && "Address out of range");
+        read_address_indices_[PortIndex] = addr_index;
+        readreq_issued_[PortIndex] = true;
     }
 
     template <uint32_t PortIndex>
     const DataType readdata() const {
         static_assert(PortIndex < ReadPorts, "Read port index out of range");
+        assert(read_data_valid_[PortIndex] && "VulROM::readdata() is only valid in the cycle after a read request on that port");
         return read_data_[PortIndex];
     }
 
     void apply_next_tick() {
         unroll_loop<0, ReadPorts>([&](auto i) {
-            read_data_[i] = memory_[read_addresses_[i].template to<uint64_t>()];
+            if (readreq_issued_[i] && read_address_indices_[i] < Size) {
+                read_data_[i] = memory_[read_address_indices_[i]];
+                read_data_valid_[i] = true;
+            } else {
+                read_data_valid_[i] = false;
+            }
+            readreq_issued_[i] = false;
         });
     }
 
@@ -307,14 +349,14 @@ protected:
                 uint64_t chunk = 0;
                 int nibble_count = 0;
 
-                for (int i = (int)hex.size() - 1; i >= 0; --i) {
-                    uint8_t v = hex_val(hex[i]);
+                for (size_t pos = hex.size(); pos > 0; --pos) {
+                    uint8_t v = hex_val(hex[pos - 1]);
                     chunk |= (uint64_t)v << (4 * nibble_count);
                     nibble_count++;
 
                     if (nibble_count == 16) { // 16 hex = 64bit
-                        size_t hi = std::min(bit_pos + 63, (size_t)DataWidth - 1);
-                        size_t lo = bit_pos;
+                        const uint32_t hi = static_cast<uint32_t>(std::min(bit_pos + 63, static_cast<size_t>(DataWidth - 1)));
+                        const uint32_t lo = static_cast<uint32_t>(bit_pos);
 
                         if (lo < DataWidth) {
                             Int<64> tmp(chunk);
@@ -329,9 +371,10 @@ protected:
 
                 // 剩余不足64bit
                 if (nibble_count > 0) {
-                    size_t hi = std::min(bit_pos + nibble_count * 4 - 1,
-                                        (size_t)DataWidth - 1);
-                    size_t lo = bit_pos;
+                    const uint32_t hi = static_cast<uint32_t>(std::min(
+                        bit_pos + static_cast<size_t>(nibble_count) * 4 - 1,
+                        static_cast<size_t>(DataWidth - 1)));
+                    const uint32_t lo = static_cast<uint32_t>(bit_pos);
 
                     if (lo < DataWidth) {
                         Int<64> tmp(chunk);
@@ -417,16 +460,16 @@ protected:
                 int bit_in_chunk = 0; // 已填入 chunk 的 bit 数
 
                 // 从字符串末尾（LSB）向前处理
-                for (int i = (int)bits.size() - 1; i >= 0; --i) {
-                    if (bits[i] == '1') {
+                for (size_t pos = bits.size(); pos > 0; --pos) {
+                    if (bits[pos - 1] == '1') {
                         chunk |= (uint64_t(1) << bit_in_chunk);
                     }
                     bit_in_chunk++;
 
                     if (bit_in_chunk == 64) {
-                        size_t lo = bit_pos;
+                        const uint32_t lo = static_cast<uint32_t>(bit_pos);
                         if (lo < DataWidth) {
-                            size_t hi = std::min(bit_pos + 63, (size_t)DataWidth - 1);
+                            const uint32_t hi = static_cast<uint32_t>(std::min(bit_pos + 63, static_cast<size_t>(DataWidth - 1)));
                             Int<64> tmp(chunk);
                             d(hi, lo) = tmp;
                         }
@@ -438,10 +481,11 @@ protected:
 
                 // 处理最后不足 64bit 的部分
                 if (bit_in_chunk > 0) {
-                    size_t lo = bit_pos;
+                    const uint32_t lo = static_cast<uint32_t>(bit_pos);
                     if (lo < DataWidth) {
-                        size_t hi = std::min(bit_pos + (size_t)bit_in_chunk - 1,
-                                            (size_t)DataWidth - 1);
+                        const uint32_t hi = static_cast<uint32_t>(std::min(
+                            bit_pos + static_cast<size_t>(bit_in_chunk) - 1,
+                            static_cast<size_t>(DataWidth - 1)));
                         Int<64> tmp(chunk);
                         d(hi, lo) = tmp;
                     }

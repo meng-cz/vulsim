@@ -31,6 +31,10 @@ void test_single_cycle_read_latency() {
     ram.readreq<0>(Int<4>(2));
     ram.apply_next_tick();
     expect_eq(ram.readdata<0>(), 0);
+
+    const auto &value0 = ram.readdata<0>();
+    const auto &value1 = ram.readdata<0>();
+    assert(value0 == value1);
 }
 
 void test_1rw_read_write_same_address_returns_old_value() {
@@ -38,15 +42,17 @@ void test_1rw_read_write_same_address_returns_old_value() {
 
     ram.req(Int<4>(4), Int<16>(0x1357), true);
     ram.apply_next_tick();
-    expect_eq(ram.readdata(), 0);
 
     ram.req(Int<4>(4), Int<16>(0xabcd), true);
     ram.apply_next_tick();
-    expect_eq(ram.readdata(), 0x1357);
 
     ram.req(Int<4>(4), Int<16>(0), false);
     ram.apply_next_tick();
     expect_eq(ram.readdata(), 0xabcd);
+
+    const auto &value0 = ram.readdata();
+    const auto &value1 = ram.readdata();
+    assert(value0 == value1);
 }
 
 void test_multi_read_ports() {
