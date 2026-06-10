@@ -1,6 +1,6 @@
 # `vullib/storage.hpp` 开发文档
 
-本文档描述 `VulStorageNext` 与 `VulStorageNextArray` 的实现语义，重点关注：
+本文档描述 `VulRegister` 与 `VulRegisterArray` 的实现语义，重点关注：
 
 - “当前值”和“下一拍值”的分离方式。
 - 多写端口优先级。
@@ -12,26 +12,26 @@
 
 ```cpp
 template<typename T, uint32_t WRPortNum = 1>
-class VulStorageNext;
+class VulRegister;
 
 template<typename T, uint32_t Size, uint32_t WRPortNum = 1>
-class VulStorageNextArray;
+class VulRegisterArray;
 ```
 
 内部实现按写端口数和数组大小分化：
 
-- `VulStorageNextImpl<T, WRPortNum>`
-- `VulStorageNextImpl1<T>`
-- `VulStorageNextArrayFullImpl<T, Size, WRPortNum>`
-- `VulStorageNextArrayDirtyImpl<T, Size, WRPortNum>`
+- `VulRegisterImpl<T, WRPortNum>`
+- `VulRegisterImpl1<T>`
+- `VulRegisterArrayFullImpl<T, Size, WRPortNum>`
+- `VulRegisterArrayDirtyImpl<T, Size, WRPortNum>`
 
-## 2. `VulStorageNext<T, WRPortNum>`
+## 2. `VulRegister<T, WRPortNum>`
 
 ### 2.1 接口定义
 
 ```cpp
 template<typename T, uint32_t WRPortNum = 1>
-class VulStorageNext {
+class VulRegister {
 public:
     template <uint32_t P = 0>
     void setnext(const T &value);
@@ -54,7 +54,7 @@ public:
 
 ### 3.1 内部行为
 
-- 内部使用 `VulStorageNextImpl1<T>`。
+- 内部使用 `VulRegisterImpl1<T>`。
 - 只有两个状态：
   - `data_`：当前值
   - `next_buffer_`：下一拍值
@@ -75,7 +75,7 @@ public:
 
 ### 4.1 内部行为
 
-- 内部使用 `VulStorageNextImpl<T, WRPortNum>`。
+- 内部使用 `VulRegisterImpl<T, WRPortNum>`。
 - 额外状态 `pending_write_ports_` 表示当前已接受的最高优先级写端口号。
 
 ### 4.2 优先级规则
@@ -102,16 +102,16 @@ public:
 
 - “同优先级重复写入 first-wins” 不是很多用户的直觉，很多系统更常见的是 last-wins，需要确认是否为预期。
 
-## 5. `VulStorageNextArray<T, Size, WRPortNum>`
+## 5. `VulRegisterArray<T, Size, WRPortNum>`
 
 ### 5.1 接口定义
 
 ```cpp
 template<typename T, uint32_t Size, uint32_t WRPortNum = 1>
-class VulStorageNextArray {
+class VulRegisterArray {
 public:
-    VulStorageNextArray();
-    VulStorageNextArray(const T &initial_value);
+    VulRegisterArray();
+    VulRegisterArray(const T &initial_value);
 
     template <uint32_t P = 0>
     void setnext(uint32_t index, const T &value);
@@ -125,25 +125,25 @@ public:
 
 ### 5.2 实现选择
 
-- `Size <= 16` 时使用 `VulStorageNextArrayFullImpl`
-- `Size > 16` 时使用 `VulStorageNextArrayDirtyImpl`
+- `Size <= 16` 时使用 `VulRegisterArrayFullImpl`
+- `Size > 16` 时使用 `VulRegisterArrayDirtyImpl`
 
 两种实现目标是优化策略不同，对外语义应保持一致。
 
-## 6. `VulStorageNextArrayFullImpl`
+## 6. `VulRegisterArrayFullImpl`
 
 ### 6.1 语义
 
-- 内部是 `std::array<VulStorageNext<T, WRPortNum>, Size>`。
+- 内部是 `std::array<VulRegister<T, WRPortNum>, Size>`。
 - 每个元素独立维护自己的当前值与下一拍值。
 - `apply_next_tick()` 会遍历所有元素并提交。
 
 ### 6.2 多次写入规则
 
-- 同一个数组元素的写入规则与标量 `VulStorageNext` 完全一致。
+- 同一个数组元素的写入规则与标量 `VulRegister` 完全一致。
 - 不同数组下标互不影响。
 
-## 7. `VulStorageNextArrayDirtyImpl`
+## 7. `VulRegisterArrayDirtyImpl`
 
 ### 7.1 语义
 
@@ -192,5 +192,5 @@ public:
 ## 9. 待确认项
 
 - 多端口同优先级重复写入采用 first-wins，而不是 last-wins。
-- `setnext()` 的候选值会跨 tick 保持，直到被新的 `setnext()` 覆盖；这不是“必须每拍都重发 next”的一次性协议，需要确认这是否符合团队对 next-storage 的理解。
-- `VulStorageNextArray` 在 `Size <= 16` 与 `Size > 16` 时内部实现不同，但外部没有显式标识，若将来扩展行为必须保证两套实现继续等价。
+- `setnext()` 的候选值会跨 tick 保持，直到被新的 `setnext()` 覆盖；这不是“必须每拍都重发 next”的一次性协议，需要确认这是否符合团队对 next-register 的理解。
+- `VulRegisterArray` 在 `Size <= 16` 与 `Size > 16` 时内部实现不同，但外部没有显式标识，若将来扩展行为必须保证两套实现继续等价。

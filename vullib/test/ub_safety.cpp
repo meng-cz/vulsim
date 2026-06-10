@@ -36,11 +36,11 @@ void test_bram_default_zero_init() {
 }
 
 void test_storage_default_zero_init() {
-    VulStorageNext<int, 2> reg;
+    VulRegister<int, 2> reg;
     reg.apply_next_tick();
     assert(reg.get() == 0);
 
-    VulStorageNextArray<int, 32, 2> array_reg;
+    VulRegisterArray<int, 32, 2> array_reg;
     array_reg.apply_next_tick();
     for (uint32_t i = 0; i < 32; ++i) {
         assert(array_reg[i] == 0);

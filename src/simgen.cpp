@@ -56,8 +56,8 @@ inline static std::string cppStringLiteral(const std::string &s) {
 const string TickFunctionName = "on_current_tick";
 const string ApplyTickFunctionName = "apply_next_tick";
 
-const string StorageNextClassName = "VulStorageNext";
-const string StorageNextArrayClassName = "VulStorageNextArray";
+const string RegisterClassName = "VulRegister";
+const string RegisterArrayClassName = "VulRegisterArray";
 const string BlockRAMClassName = "VulBRAM";
 const string BlockRAM1RWClassName = "VulBRAM1RW";
 const string ROMClassName = "VulROM";
@@ -970,7 +970,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             base_type = std::string(UIntClassName) + "<" + std::to_string(sig.uint_length) + ">";
         }
         if (!reg.dims.empty()) {
-            type_str += StorageNextArrayClassName + "<" + base_type;
+            type_str += RegisterArrayClassName + "<" + base_type;
             for (const auto &dim : reg.dims) {
                 type_str += "," + std::to_string(dim);
             }
@@ -987,9 +987,9 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             decl_private_field.push_back("\n");
         } else {
             if (reg.ports > 1) {
-                type_str = StorageNextClassName + "<" + base_type + ", " + std::to_string(reg.ports) + ">";
+                type_str = RegisterClassName + "<" + base_type + ", " + std::to_string(reg.ports) + ">";
             } else {
-                type_str = StorageNextClassName + "<" + base_type + ">";
+                type_str = RegisterClassName + "<" + base_type + ">";
             }
 
             decl_private_field.push_back(type_str + " " + reg.name + ";\n");

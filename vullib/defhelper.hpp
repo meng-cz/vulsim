@@ -50,11 +50,11 @@
 
 #define STRUCT(name) struct name
 
-#define REGISTER(name, type) VulStorageNext<type> name; void __##name##_reset(type& name)
+#define REGISTER(name, type) VulRegister<type> name; void __##name##_reset(type& name)
 
-#define REGISTER_MUL(name, type, portnum) VulStorageNext<type, portnum> name; void __##name##_reset(type& name)
+#define REGISTER_MUL(name, type, portnum) VulRegister<type, portnum> name; void __##name##_reset(type& name)
 
-#define REGISTER_ARRAY1(name, type, size, portnum) VulStorageNextArray<type, size, portnum> name; void __##name##_reset(type name[size])
+#define REGISTER_ARRAY1(name, type, size, portnum) VulRegisterArray<type, size, portnum> name; void __##name##_reset(type name[size])
 
 #define WIRE(name, type) type name; void __##name##_reset(type& name)
 
