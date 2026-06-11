@@ -29,7 +29,7 @@
  */
 
 #include <inttypes.h>
-#include <uint.hpp>
+#include <fixint.hpp>
 #include <ram.hpp>
 #include <storage.hpp>
 #include <queue.hpp>

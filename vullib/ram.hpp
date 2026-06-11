@@ -23,7 +23,7 @@
 #pragma once
 
 #include "common.h"
-#include "uint.hpp"
+#include "fixint.hpp"
 
 #include <cassert>
 #include <array>
@@ -265,8 +265,8 @@ protected:
 
     static inline std::string trim(const std::string &s) {
         size_t l = 0, r = s.size();
-        while (l < r && std::isspace((unsigned char)s[l])) l++;
-        while (r > l && std::isspace((unsigned char)s[r - 1])) r--;
+        while (l < r && std::isspace(static_cast<unsigned char>(s[l]))) l++;
+        while (r > l && std::isspace(static_cast<unsigned char>(s[r - 1]))) r--;
         return s.substr(l, r - l);
     }
 
@@ -343,6 +343,20 @@ protected:
 
                 // 写入 DataType
                 DataType d;
+                auto write_chunk = [&](uint32_t lo, const Int<64>& tmp) {
+                    if (lo >= DataWidth) {
+                        return;
+                    }
+                    if (lo + 64 <= DataWidth) {
+                        d.template pick<64>(lo) = tmp;
+                    } else {
+                        if constexpr (DataWidth % 64 != 0) {
+                            d.template pick<DataWidth % 64>(lo) = Int<DataWidth % 64>(tmp);
+                        } else {
+                            assert(false && "partial chunk is only valid for non-64-aligned widths");
+                        }
+                    }
+                };
 
                 // 逐 64bit chunk 写入（从低位开始）
                 size_t bit_pos = 0;
@@ -351,17 +365,12 @@ protected:
 
                 for (size_t pos = hex.size(); pos > 0; --pos) {
                     uint8_t v = hex_val(hex[pos - 1]);
-                    chunk |= (uint64_t)v << (4 * nibble_count);
+                    chunk |= static_cast<uint64_t>(v) << (4 * nibble_count);
                     nibble_count++;
 
                     if (nibble_count == 16) { // 16 hex = 64bit
-                        const uint32_t hi = static_cast<uint32_t>(std::min(bit_pos + 63, static_cast<size_t>(DataWidth - 1)));
                         const uint32_t lo = static_cast<uint32_t>(bit_pos);
-
-                        if (lo < DataWidth) {
-                            Int<64> tmp(chunk);
-                            d(hi, lo) = tmp;
-                        }
+                        write_chunk(lo, Int<64>(chunk));
 
                         bit_pos += 64;
                         chunk = 0;
@@ -371,15 +380,8 @@ protected:
 
                 // 剩余不足64bit
                 if (nibble_count > 0) {
-                    const uint32_t hi = static_cast<uint32_t>(std::min(
-                        bit_pos + static_cast<size_t>(nibble_count) * 4 - 1,
-                        static_cast<size_t>(DataWidth - 1)));
                     const uint32_t lo = static_cast<uint32_t>(bit_pos);
-
-                    if (lo < DataWidth) {
-                        Int<64> tmp(chunk);
-                        d(hi, lo) = tmp;
-                    }
+                    write_chunk(lo, Int<64>(chunk));
                 }
 
                 memory_[cur_addr] = d;
@@ -452,6 +454,20 @@ protected:
                 }
 
                 DataType d; // 如需默认清零，请确保 Int 默认构造为 0
+                auto write_chunk = [&](uint32_t lo, const Int<64>& tmp) {
+                    if (lo >= DataWidth) {
+                        return;
+                    }
+                    if (lo + 64 <= DataWidth) {
+                        d.template pick<64>(lo) = tmp;
+                    } else {
+                        if constexpr (DataWidth % 64 != 0) {
+                            d.template pick<DataWidth % 64>(lo) = Int<DataWidth % 64>(tmp);
+                        } else {
+                            assert(false && "partial chunk is only valid for non-64-aligned widths");
+                        }
+                    }
+                };
 
                 // 从 LSB 开始打包（与 Verilog 一致：右侧为低位）
                 // 按 64bit 分块写入 Int
@@ -468,11 +484,7 @@ protected:
 
                     if (bit_in_chunk == 64) {
                         const uint32_t lo = static_cast<uint32_t>(bit_pos);
-                        if (lo < DataWidth) {
-                            const uint32_t hi = static_cast<uint32_t>(std::min(bit_pos + 63, static_cast<size_t>(DataWidth - 1)));
-                            Int<64> tmp(chunk);
-                            d(hi, lo) = tmp;
-                        }
+                        write_chunk(lo, Int<64>(chunk));
                         bit_pos += 64;
                         chunk = 0;
                         bit_in_chunk = 0;
@@ -482,13 +494,7 @@ protected:
                 // 处理最后不足 64bit 的部分
                 if (bit_in_chunk > 0) {
                     const uint32_t lo = static_cast<uint32_t>(bit_pos);
-                    if (lo < DataWidth) {
-                        const uint32_t hi = static_cast<uint32_t>(std::min(
-                            bit_pos + static_cast<size_t>(bit_in_chunk) - 1,
-                            static_cast<size_t>(DataWidth - 1)));
-                        Int<64> tmp(chunk);
-                        d(hi, lo) = tmp;
-                    }
+                    write_chunk(lo, Int<64>(chunk));
                 }
 
                 memory_[cur_addr] = d;

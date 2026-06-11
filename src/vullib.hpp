@@ -32,7 +32,7 @@ inline constexpr std::array<std::string_view, 8> VulLibFiles = {
     "queue.hpp",
     "ram.hpp",
     "storage.hpp",
-    "uint.hpp",
+    "fixint.hpp",
     "vcdrecord.hpp",
     "main.cpp",
 };

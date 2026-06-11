@@ -1,59 +1,47 @@
-# `vullib/uint.hpp` 开发文档
+# `vullib/fixint.hpp` 开发文档
 
-本文档描述 `Int<BitWidth>` 及其相关代理、签名视图和运算符的当前实现语义。它是开发文档，不是用户入门手册。
+本文档描述当前 `Int<BitWidth>` 实现语义。历史上的 `vullib/uint.hpp` 已被 `vullib/fixint.hpp` 取代；代码应包含 `fixint.hpp` 或通过 `vullib.h` 间接使用。
 
 ## 1. 核心类型
 
 ```cpp
-template <uint32_t BitWidth>
-class Int;
-
-template <uint32_t BitWidth>
-class IntSignedView;
-
-template <uint32_t BitWidth>
-class IntRangeProxy;
-
-template <uint32_t BitWidth>
-class IntConstRangeProxy;
-
-template <uint32_t BitWidth>
-class IntBitProxy;
-
-template <uint32_t BitWidth>
-class IntConstBitProxy;
+template <uint32_t BitWidth> class Int;
+template <uint32_t ParentBitWidth, uint32_t SliceBitWidth> class IntSliceRef;
+template <uint32_t ParentBitWidth, uint32_t SliceBitWidth> class IntConstSliceRef;
+template <uint32_t ParentBitWidth> class IntBitRef;
+template <uint32_t ParentBitWidth> class IntConstBitRef;
+template <typename Operand> class IntSignedView;
+template <typename Operand> struct IntOperandTraits;
 ```
 
-## 2. `Int<BitWidth>` 的数据模型
+`IntOperandTraits` 是运算符统一推导入口，用于取得：
+- 操作数是否是 fixint operand。
+- 操作数编译期位宽。
+- 操作数是否按 signed view 解释。
+- 操作数运行时 `Int<W>` 值。
 
+## 2. 数据模型
+
+`Int<BitWidth>` 满足：
 - `BitWidth > 0`。
-- 以下成员是公开可见的：
+- `WORD_BITS == 64`。
+- `NUM_WORDS == (BitWidth + 63) / 64`。
+- `IDX_WIDTH == log2ceil(BitWidth)`。
+- 底层 word 小端排列：`data[0]` 保存最低 64 位。
 
-```cpp
-static constexpr uint32_t WORD_BITS;
-static constexpr uint32_t NUM_WORDS;
-static constexpr uint32_t IDX_WIDTH;
-std::array<uint64_t, NUM_WORDS> data;
-constexpr std::array<uint64_t, NUM_WORDS> get_data() const;
-```
+`data` 是私有成员。需要访问位内容应使用公开 API：
+- `to<T>()`
+- `at<Hi, Lo>()`
+- `at<Idx>()`
+- `pick<DstWidth>(idx)`
+- `pick(idx)`
+- `Cat`/`Repeat`/运算符
 
-- 内部按 64 位 word 存储：
+当前大量自由函数作为 `Int` 友元访问 raw data，以便实现高效运算；调用方不应依赖 raw data 布局作为公开 ABI。
 
-```cpp
-static constexpr uint32_t WORD_BITS = 64;
-static constexpr uint32_t NUM_WORDS = (BitWidth + 63) / 64;
-static constexpr uint32_t IDX_WIDTH = log2ceil(BitWidth);
+## 3. 构造、赋值与视图转换
 
-std::array<uint64_t, NUM_WORDS> data;
-```
-
-- 最低有效位在 `data[0]` 的最低位。
-- 若 `BitWidth` 不是 64 的整数倍，最高 word 的无效高位会通过 `mask_high_bits()` 清零。
-- `data` 是公开成员，因此调用方可以直接改写底层 word；若绕过公开接口手动写入，需要自行保证高位 mask 规则成立。
-
-## 3. 构造与转换
-
-### 3.1 公开接口
+公开构造：
 
 ```cpp
 constexpr Int();
@@ -65,247 +53,156 @@ constexpr Int(T value);
 template <uint32_t OtherBitWidth>
 constexpr Int(const Int<OtherBitWidth>& other);
 
-template <uint32_t OtherBitWidth>
-constexpr Int(const IntSignedView<OtherBitWidth>& other);
-
-template <typename T> requires std::is_integral_v<T>
-constexpr T to() const;
-
-constexpr IntSignedView<BitWidth> sint() const;
+template <typename Operand>
+constexpr Int(const Operand& operand); // Int/Ref/SignView operand
 ```
 
-### 3.2 无符号 `Int -> Int` 转换
+赋值规则：
+- `Int = 标准整数`：按整数 signedness 选择符号扩展或截断。
+- `Int = Int<OtherWidth>`：按无符号位向量转换。
+- `Int = Ref`：通过 Ref 的 `Int<W>` 值转换。
+- `Int = SignView`：按源符号位扩展或截断。
 
-- `Int<OtherBitWidth>` 构造到 `Int<BitWidth>` 时：
-  - 只复制低位 word。
-  - 若目标更宽，高位补零。
-  - 若目标更窄，高位截断。
+`to<T>()` 支持导出为标准整数类型，按目标类型 signedness 返回低位并在需要时做符号扩展。
 
-### 3.3 `IntSignedView` 转换
+`sint()` 返回 `IntSignedView<...>`。signed view 不持有新数据，只改变后续构造、赋值、比较、乘法和右移中对 bit pattern 的解释方式。
 
-- `sint()` 不修改底层 bit 模式，只创建一个“按有符号解释”的视图。
-- 用 `IntSignedView<OtherBitWidth>` 构造 `Int<BitWidth>` 时：
-  - 若目标更宽，则按源最高位做符号扩展。
-  - 若目标更窄，则截断到低 `BitWidth` 位。
+## 4. Slice 与 Bit Ref
 
-### 3.4 整数构造
-
-- 从原生整型 `T` 构造时：
-  - 低 64 位写入 `data[0]`
-  - 若 `T` 为有符号且目标宽度超过 64 位，负数会向高 word 填充全 1
-  - 最后统一做高位 mask
-
-### 3.5 `to<T>()`
-
-- 返回低 `sizeof(T) * 8` 位。
-- 对无符号目标类型：
-  - 直接截断/拼接低位。
-- 对有符号目标类型：
-  - 若 `BitWidth < T` 位宽，则以 `Int` 的最高有效位作为符号位做符号扩展。
-  - 若 `BitWidth >= T` 位宽，则直接截断到目标位宽。
-
-### 3.6 待确认项
-
-- `to<T>()` 的模板约束使用 `std::is_integral_v<T>`，通常不把 GCC/Clang 的 `__int128` 视为标准 integral；源码中虽然有大于 64 位的拼接分支，但该接口对 `__int128` 是否打算正式支持，需要确认。
-
-## 4. 切片与 bit 访问
-
-### 4.1 公开接口
+静态 API：
 
 ```cpp
-constexpr IntRangeProxy<BitWidth> operator()(uint32_t hi, uint32_t lo);
-constexpr IntConstRangeProxy<BitWidth> operator()(uint32_t hi, uint32_t lo) const;
+template <uint32_t Hi, uint32_t Lo>
+constexpr auto at();
 
-constexpr IntBitProxy<BitWidth> operator()(uint32_t bit);
-constexpr IntConstBitProxy<BitWidth> operator()(uint32_t bit) const;
-
-template <uint32_t DstBitWidth>
-constexpr IntRangeProxy<BitWidth> range_at(Int<IDX_WIDTH> idx);
-
-template <uint32_t DstBitWidth>
-constexpr IntConstRangeProxy<BitWidth> range_at(Int<IDX_WIDTH> idx) const;
-
-constexpr IntBitProxy<BitWidth> bit_at(Int<IDX_WIDTH> idx);
-constexpr IntConstBitProxy<BitWidth> bit_at(Int<IDX_WIDTH> idx) const;
+template <uint32_t Idx>
+constexpr auto at();
 ```
 
-### 4.2 规则
-
-- `operator()(hi, lo)`：
-  - 要求 `hi >= lo`
-  - 要求 `hi < BitWidth`
-- `operator()(bit)`：
-  - 要求 `bit < BitWidth`
-- `range_at<DstBitWidth>(idx)`：
-  - 实际返回 `[idx + DstBitWidth - 1 : idx]`
-  - 是否越界由代理构造时的 `assert` 检查
-- `bit_at(idx)`：
-  - 实际返回第 `idx` 位
-
-### 4.3 代理对象赋值语义
-
-- `IntRangeProxy` 支持从：
-  - `Int<SrcBitWidth>`
-  - 原生整型
-  - `IntRangeProxy`
-  - `IntConstRangeProxy`
-  赋值。
-- 当源和目标来自同一个 `Int` 对象并且区间可能重叠时，实现会先创建快照，再赋值。
-- 因此重叠范围赋值不会出现“边写边读破坏源值”的问题。
-
-### 4.4 截断规则
-
-- 目标区间宽度若小于源宽度，则仅复制源低位部分。
-- 源区间宽度若小于目标区间宽度，则只覆盖低位，其余高位被清零后保持 0。
-
-## 5. 基础逻辑操作
-
-### 5.1 公开接口
+动态 API：
 
 ```cpp
-constexpr bool reduce_or() const;
-constexpr bool reduce_and() const;
-constexpr bool reduce_xor() const;
+template <uint32_t DstBitWidth, typename IdxT>
+constexpr auto pick(IdxT idx);
 
-template <uint32_t K>
-constexpr Int<BitWidth * K> repeat() const;
-
-template <uint32_t OtherBitWidth>
-constexpr Int<BitWidth + OtherBitWidth> cat(const Int<OtherBitWidth>& other) const;
-
-template <uint32_t FirstBitWidth, uint32_t... RestBitWidths>
-constexpr auto Cat(const Int<FirstBitWidth>& first, const Int<RestBitWidths>&... rest);
+template <typename IdxT>
+constexpr auto pick(IdxT idx);
 ```
 
-### 5.2 规则
+`const Int` 返回 const Ref。
 
-- `reduce_or()`：任意位为 1 则返回 `true`。
-- `reduce_and()`：所有有效位均为 1 才返回 `true`。
-- `reduce_xor()`：返回有效位 1 的个数奇偶校验。
-- `repeat<K>()`：
-  - 把当前 bit 模式重复 `K` 次
-  - 返回宽度为 `BitWidth * K`
-- `cat(other)`：
-  - 当前对象作为高位
-  - `other` 作为低位
-- `Cat(a, b, c, ...)`：
-  - 保持参数书写顺序，高参数在高位，后参数在低位
+Slice 赋值：
+- 接受同宽 `Int/Ref/SignView`。
+- 接受标准整数。
+- 不接受不同宽 `Int/Ref` 的隐式赋值；调用方应显式构造目标宽度。
+
+Bit 赋值：
+- 接受 `bool`、标准整数、`Int<1>`、其他 Bit/SignView。
+- 不接受宽度不为 1 的 operand。
+
+同一 `Int` 内的 Slice/Bit 互相赋值会先经 `Int<DstWidth>` 中转，避免重叠区间边读边写破坏源值。
+
+## 5. 归约、重复与拼接
+
+```cpp
+template <typename Operand> constexpr bool ReduceAnd(const Operand& operand);
+template <typename Operand> constexpr bool ReduceOr(const Operand& operand);
+template <typename Operand> constexpr bool ReduceXor(const Operand& operand);
+
+template <uint32_t N, typename Operand>
+constexpr auto Repeat(const Operand& operand);
+
+template <typename... Operands>
+constexpr auto Cat(const Operands&... operands);
+```
+
+规则：
+- 这些函数仅接受无符号 `Int/Ref` operand。
+- signed view 被拒绝。
+- `Repeat<N>` 要求 `N > 0`，返回 `Int<width(operand) * N>`。
+- `Cat(a, b, c)` 中 `a` 位于最高位，`c` 位于最低位，返回总宽度之和的 `Int`。
 
 ## 6. 算术运算
 
-### 6.1 加法
+加法：
 
 ```cpp
-Int<A> + Int<B>  -> Int<max(A, B) + 1>
-Int<W> + T       -> Int<W + 1>
-T + Int<W>       -> Int<W + 1>
+Int<A> + Int<B> -> Int<max(A, B) + 1>
+Int<W> + integral -> Int<W + 1>
+integral + Int<W> -> Int<W + 1>
 ```
 
-规则：
+只接受无符号 `Int/Ref`。标准整数会先构造成另一侧同宽 `Int`，再复用主重载。
 
-- 按无符号位向量做加法。
-- `Int + signed T` 时，`T` 会先以 `W` 位 two's complement 形式参与运算。
-
-### 6.2 减法
+减法：
 
 ```cpp
 Int<A> - Int<B> -> Int<max(A, B)>
-Int<W> - T      -> Int<W>
-T - Int<W>      -> Int<W>
--Int<W>         -> Int<W>
+Int<W> - integral -> Int<W>
+integral - Int<W> -> Int<W>
 ```
 
-规则：
+只接受无符号 `Int/Ref`，不额外保存借位。
 
-- 结果位宽不额外扩一位。
-- 按固定位宽 two's complement 语义截断。
-
-### 6.3 乘法
+取负：
 
 ```cpp
-Int<A> * Int<B>         -> Int<A + B>
-IntSignedView<A> * ...  -> Int<A + B>
-... * IntSignedView<B>  -> Int<A + B>
+-operand -> Int<width(operand)>
 ```
 
-规则：
+接受无符号 `Int/Ref` 和 signed view，按补码规则取负。
 
-- 只要任一操作数是 `IntSignedView`，该操作数按有符号数解释。
-- 两个普通 `Int` 相乘按无符号解释。
-- 返回位宽恒为两侧位宽之和。
+乘法：
+
+```cpp
+lhs * rhs -> Int<width(lhs) + width(rhs)>
+```
+
+接受无符号 `Int/Ref` 和 signed view。任一操作数是 signed view 时，该操作数按有符号补码解释。
 
 ## 7. 位运算
-
-### 7.1 支持的运算
 
 ```cpp
 operator&
 operator|
 operator^
 operator~
+operator<<
+operator>>
 ```
 
-### 7.2 规则
-
-- 对等宽 `Int` 的位运算结果仍是相同位宽。
-- 代理对象参与位运算时，会先被转换成目标 `Int<BitWidth>`，然后再做运算。
-- 不存在自动“取两者较宽位宽”的位运算重载；使用代理时结果位宽通常由另一侧 `Int` 决定。
+规则：
+- `& | ^` 要求两侧都是等宽无符号 `Int/Ref`，结果同宽。
+- `~` 接受一个无符号 `Int/Ref`，结果同宽。
+- `& | ^` 与标准整数混合时，整数先构造成另一侧同宽 `Int`。
+- `<<` 左侧接受无符号 `Int/Ref`，右侧接受无符号 `Int/Ref` 或标准整数，结果宽度等于左侧宽度。
+- `>>` 左侧接受 `Int/Ref/SignView`，其中 unsigned 视图执行逻辑右移，signed view 执行算术右移。右侧接受无符号 `Int/Ref` 或标准整数。
+- signed view 不接受 `& | ^ ~ <<`，也不能作为移位量。
+- signed 标准整数作为移位量时，负数会触发 `assert`；移位量大于或等于左侧宽度时返回全 0。
 
 ## 8. 比较运算
 
-### 8.1 支持的运算
+等值比较：
+- `== !=` 只接受等宽无符号 `Int/Ref`。
+- 与标准整数混合时，仅接受 unsigned 标准整数。
+- 不接受 signed view。
 
-```cpp
-== != < <= > >=
-```
+数值比较：
+- `< <= > >=` 接受等宽 `Int/Ref/SignView`。
+- 每个操作数可独立指定是否 signed view。
+- 与 signed 标准整数比较时，整数会构造成同宽 `Int` 并以 `.sint()` 参与比较。
+- 与 unsigned 标准整数比较时，整数按无符号视图参与比较。
 
-支持以下组合：
+## 9. 当前未实现的旧 API
 
-- `Int` 与 `Int`
-- `Int` 与 `IntSignedView`
-- `IntSignedView` 与 `IntSignedView`
-- 上述任一类型与原生整型
+旧 `uint.hpp` 中以下 API 不属于当前 `fixint.hpp`：
+- `operator()(hi, lo)` / `operator()(bit)`：改用 `at<Hi, Lo>()` / `at<Idx>()`。
+- `range_at` / `bit_at`：改用 `pick<DstWidth>(idx)` / `pick(idx)`。
+- 成员 `reduce_*`：改用 `ReduceAnd/ReduceOr/ReduceXor`。
+- 成员 `repeat<K>()` / `cat(other)`：改用 `Repeat<K>(x)` / `Cat(a, b, ...)`。
 
-### 8.2 规则
+## 10. 维护注意事项
 
-- 若操作数包含 `IntSignedView`，则该操作数按有符号扩展比较。
-- 与原生整型比较时：
-  - 若原生整型是有符号类型，则先构造成同位宽 `Int`，再转成 `.sint()` 参与比较。
-  - 若原生整型是无符号类型，则按普通 `Int` 参与比较。
-
-## 9. 移位运算
-
-### 9.1 支持的运算
-
-```cpp
-Int<W> << Int<S>
-Int<W> >> Int<S>
-IntSignedView<W> >> Int<S>
-
-Int<W> << integral
-Int<W> >> integral
-IntSignedView<W> >> integral
-```
-
-### 9.2 规则
-
-- 左移与逻辑右移结果位宽保持 `W` 不变。
-- 算术右移只对 `IntSignedView` 版本定义。
-- 若移位量大于等于 `W`：
-  - 左移结果全 0
-  - 逻辑右移结果全 0
-  - 算术右移结果为：
-    - 原值非负则全 0
-    - 原值为负则全 1（再按位宽 mask）
-- 对原生有符号移位量参数，代码中使用 `assert(rhs >= 0)`；负移位量在 debug 下会触发断言，release 下不应依赖其行为。
-
-## 10. 默认值与有效位
-
-- 默认构造 `Int()` 为全 0。
-- 所有公开构造和大多数运算在结尾都会调用 `mask_high_bits()`，保证无效高位为 0。
-- 因此比较、切片、repeat、cat、移位等操作默认按“有效位有限、无效高位清零”理解。
-
-## 11. 待确认项
-
-- 与原生 signed 整数混合比较/运算时，采用的是“先截断到目标位宽，再按 two's complement 解释”的规则，需要确认这正是团队想要的硬件语义。
-- 代理对象参与位运算时的结果位宽不是自动取最大宽度，而由重载形式决定；这点需要在评审中确认是否足够直观。
+- 运算符尽量通过 `IntOperandTraits` 接入，避免为每种 Ref 单独写重载。
+- 不同宽度的 Slice 赋值应保持显式转换要求，防止静默截断。
+- 涉及跨 64 位边界的逻辑必须覆盖 `BitWidth == 64`、`BitWidth % 64 == 0`、`BitWidth % 64 != 0` 三类路径。

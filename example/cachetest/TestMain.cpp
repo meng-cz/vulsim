@@ -25,10 +25,13 @@ SERVICE(readresp_s1, ARG(bool) hit, ARG(Int<DATA_WIDTH>) data) {
             printf("%ld: Error: expected a hit but got a miss.\n", test_tick);
             exit(1);
         } else if (data != expected_data) {
-            printf("%ld: Error: expected data 0x%016lx but got 0x%016lx.\n", test_tick, expected_data.data[0], data.data[0]);
+            printf("%ld: Error: expected data 0x%016lx but got 0x%016lx.\n",
+                   test_tick,
+                   expected_data.to<uint64_t>(),
+                   data.to<uint64_t>());
             exit(1);
         } else {
-            // printf("%ld: Hit with correct data: 0x%016lx\n", test_tick, data.data[0]);
+            // printf("%ld: Hit with correct data: 0x%016lx\n", test_tick, data.to<uint64_t>());
         }
     } else {
         if (hit) {
@@ -58,25 +61,25 @@ SIMULATION() {
     }
 
     auto build_addr = [](Int<TAG_WIDTH> tag, Int<INDEX_WIDTH> index) {
-        return (Int<ADDR_WIDTH>(tag) << INDEX_WIDTH) | Int<ADDR_WIDTH>(index);
+        return Cat(tag, index);
     };
 
     auto build_data = [](Int<TAG_WIDTH> tag, Int<INDEX_WIDTH> index, uint64_t salt) {
-        Int<DATA_WIDTH> mixed = (Int<DATA_WIDTH>(Int<ADDR_WIDTH>(tag)) << INDEX_WIDTH) | Int<DATA_WIDTH>(index);
+        Int<DATA_WIDTH> mixed = Cat(tag, index);
         return mixed ^ Int<DATA_WIDTH>(salt * 0x9e3779b97f4a7c15ULL);
     };
 
     auto model_read = [&](Int<ADDR_WIDTH> addr, bool& hit, Int<DATA_WIDTH>& data) {
-        Int<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
-        Int<INDEX_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
+        Int<TAG_WIDTH> tag = addr.at<ADDR_WIDTH - 1, INDEX_WIDTH>();
+        Int<INDEX_WIDTH> index = addr.at<INDEX_WIDTH - 1, 0>();
         const auto& line = cache[index.to<uint64_t>()];
         hit = line.valid && (line.tag == tag);
         data = line.data;
     };
 
     auto model_refill = [&](Int<ADDR_WIDTH> addr, Int<DATA_WIDTH> data) {
-        Int<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
-        Int<INDEX_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
+        Int<TAG_WIDTH> tag = addr.at<ADDR_WIDTH - 1, INDEX_WIDTH>();
+        Int<INDEX_WIDTH> index = addr.at<INDEX_WIDTH - 1, 0>();
         auto& line = cache[index.to<uint64_t>()];
         line.data = data;
         line.tag = tag;

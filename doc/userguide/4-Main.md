@@ -31,7 +31,7 @@ inline constexpr std::array<std::string_view, 7> VulLibFiles = {
     "queue.hpp",
     "ram.hpp",
     "storage.hpp",
-    "uint.hpp",
+    "fixint.hpp",
     "vcdrecord.hpp",
 };
 inline constexpr std::array<std::string_view, 4> VulEscapedHeaders = {
@@ -168,6 +168,5 @@ SERVICE_LOGIC_IMPL(recv, ARG(uint8_t) a, RESP(uint8_t) b) {
 **对 RESP 定义的参数的读取是非法的，RESP 参数在进入逻辑函数时其值是未定义的**
 
 **由 VulCPP 事务连接器生成调用，无法在行为代码中直接调用这个函数**
-
 
 

@@ -42,15 +42,15 @@ SERVICE(read_s0, ARG(Int<ADDR_WIDTH>) addr)  {
     s0.addr = addr;
     s0.valid = true;
     read_stage.setnext(s0);
-    Int<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
+    Int<INDEX_WIDTH> index = addr.at<INDEX_WIDTH - 1, 0>();
     tag_array.readreq<0>(index);
     data_array.readreq<0>(index);
     read_inputed = true;
 }
 
 SERVICE(refill_s0, ARG(Int<ADDR_WIDTH>) addr, ARG(Int<DATA_WIDTH>) data) {
-    Int<ADDR_WIDTH> index = addr(INDEX_WIDTH - 1, 0);
-    Int<TAG_WIDTH> tag = addr(ADDR_WIDTH - 1, INDEX_WIDTH);
+    Int<INDEX_WIDTH> index = addr.at<INDEX_WIDTH - 1, 0>();
+    Int<TAG_WIDTH> tag = addr.at<ADDR_WIDTH - 1, INDEX_WIDTH>();
     TagEntry tag_entry;
     tag_entry.tag = tag;
     tag_entry.valid = true;
@@ -64,7 +64,7 @@ TICK_IMPL() {
     bool hit = false;
     Int<DATA_WIDTH> read_data;
     if (read_stage.get().valid) {
-        Int<TAG_WIDTH> tag = read_stage.get().addr(ADDR_WIDTH - 1, INDEX_WIDTH);
+        Int<TAG_WIDTH> tag = read_stage.get().addr.at<ADDR_WIDTH - 1, INDEX_WIDTH>();
         TagEntry tag_entry = tag_array.readdata<0>();
         Int<TAG_WIDTH> read_tag = tag_entry.tag;
         bool valid = tag_entry.valid;

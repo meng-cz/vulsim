@@ -2032,7 +2032,7 @@ RTLGenResult genModuleRTL(
     auto &hls = result.logic_hls_codes;
     hls.push_back("#include <array>\n");
     hls.push_back("#include <cstdint>\n");
-    hls.push_back("#include <uint.hpp>\n");
+    hls.push_back("#include <fixint.hpp>\n");
     hls.push_back("\n");
     hls.push_back("using int128_t = __int128_t;\n");
     hls.push_back("using uint128_t = __uint128_t;\n");

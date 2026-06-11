@@ -55,6 +55,16 @@ concept HasFixintNot = requires(const T& value) {
     ~value;
 };
 
+template <typename L, typename R>
+concept HasFixintShl = requires(const L& lhs, const R& rhs) {
+    lhs << rhs;
+};
+
+template <typename L, typename R>
+concept HasFixintShr = requires(const L& lhs, const R& rhs) {
+    lhs >> rhs;
+};
+
 template <typename T>
 concept HasFixintReduceAnd = requires(const T& value) {
     ReduceAnd(value);
@@ -956,6 +966,107 @@ void test_bitwise_ops() {
     static_assert(!HasFixintXor<decltype(std::declval<Int<8>>().sint()), int>);
 }
 
+void test_shift_ops() {
+    Int<8> a = 0b10110001;
+
+    auto shl_one = a << 1;
+    auto shl_zero = a << 0;
+    auto shl_width = a << 8;
+    auto shl_over = a << 9;
+    static_assert(std::is_same_v<decltype(shl_one), Int<8>>);
+    expect_eq(shl_one, Int<8>(0b01100010));
+    expect_eq(shl_zero, a);
+    expect_eq(shl_width, Int<8>(0));
+    expect_eq(shl_over, Int<8>(0));
+
+    auto shr_one = a >> 1;
+    auto shr_width = a >> 8;
+    auto shr_over = a >> 9;
+    static_assert(std::is_same_v<decltype(shr_one), Int<8>>);
+    expect_eq(shr_one, Int<8>(0b01011000));
+    expect_eq(shr_width, Int<8>(0));
+    expect_eq(shr_over, Int<8>(0));
+
+    Int<4> sh2 = 2;
+    expect_eq(a << sh2, Int<8>(0b11000100));
+    expect_eq(a >> sh2, Int<8>(0b00101100));
+
+    Int<8> shift_src = 0b00100010;
+    expect_eq(a << shift_src.at<1, 0>(), Int<8>(0b11000100));
+    expect_eq(a >> std::as_const(shift_src).at<1, 0>(), Int<8>(0b00101100));
+    expect_eq(a << int8_t(2), Int<8>(0b11000100));
+    expect_eq(a >> int8_t(2), Int<8>(0b00101100));
+    expect_eq(a << true, Int<8>(0b01100010));
+
+    Int<8> refs = 0b11010110;
+    auto slice_left = refs.at<7, 4>() << 1;
+    auto slice_right = std::as_const(refs).at<7, 4>() >> 1;
+    auto bit_left_zero = refs.at<1>() << 0;
+    auto bit_left_one = refs.at<1>() << 1;
+    auto bit_right_zero = refs.at<1>() >> 0;
+    static_assert(std::is_same_v<decltype(slice_left), Int<4>>);
+    static_assert(std::is_same_v<decltype(bit_left_zero), Int<1>>);
+    expect_eq(slice_left, Int<4>(0xA));
+    expect_eq(slice_right, Int<4>(0x6));
+    expect_eq(bit_left_zero, Int<1>(1));
+    expect_eq(bit_left_one, Int<1>(0));
+    expect_eq(bit_right_zero, Int<1>(1));
+
+    Int<8> neg = 0xF0;
+    Int<8> pos = 0x70;
+    expect_eq(neg.sint() >> 1, Int<8>(0xF8));
+    expect_eq(neg.sint() >> 4, Int<8>(0xFF));
+    expect_eq(neg.sint() >> 8, Int<8>(0));
+    expect_eq(pos.sint() >> 2, Int<8>(0x1C));
+
+    Int<130> wide = 0;
+    wide.at<0>() = true;
+    wide.at<63>() = true;
+    auto wide_left = wide << 66;
+    static_assert(std::is_same_v<decltype(wide_left), Int<130>>);
+    expect_eq(Int<1>(wide_left.at<66>()), Int<1>(1));
+    expect_eq(Int<1>(wide_left.at<129>()), Int<1>(1));
+    expect_eq(Int<1>(wide_left.at<65>()), Int<1>(0));
+
+    Int<130> logical = 0;
+    logical.at<0>() = true;
+    logical.at<64>() = true;
+    logical.at<129>() = true;
+    auto wide_right = logical >> Int<7>(64);
+    expect_eq(Int<1>(wide_right.at<0>()), Int<1>(1));
+    expect_eq(Int<1>(wide_right.at<65>()), Int<1>(1));
+    expect_eq(Int<1>(wide_right.at<64>()), Int<1>(0));
+
+    Int<130> shift_wide = 0;
+    shift_wide.at<64>() = true;
+    expect_eq(logical << shift_wide, Int<130>(0));
+    expect_eq(logical >> shift_wide, Int<130>(0));
+    expect_eq(logical >> 130, Int<130>(0));
+
+    Int<130> wide_neg = Int<130>(-1);
+    expect_eq(wide_neg.sint() >> Int<8>(65), Int<130>(-1));
+    expect_eq(wide_neg.sint() >> 129, Int<130>(-1));
+    expect_eq(wide_neg.sint() >> 130, Int<130>(0));
+
+    static_assert((Int<8>(0x81) << 1) == Int<8>(0x02));
+    static_assert((Int<8>(0x81) >> 7) == Int<8>(0x01));
+    static_assert((Int<8>(0x80).sint() >> 7) == Int<8>(0xFF));
+    static_assert((Int<8>(0x80).sint() >> 8) == Int<8>(0));
+
+    static_assert(HasFixintShl<Int<8>, Int<4>>);
+    static_assert(HasFixintShr<Int<8>, Int<4>>);
+    static_assert(HasFixintShl<Int<8>, int>);
+    static_assert(HasFixintShr<Int<8>, int>);
+    static_assert(HasFixintShr<decltype(std::declval<Int<8>>().sint()), int>);
+    static_assert(HasFixintShl<decltype(std::declval<Int<8>&>().template at<7, 4>()), uint8_t>);
+    static_assert(HasFixintShr<decltype(std::declval<Int<8>&>().template at<7, 4>().sint()), Int<4>>);
+    static_assert(!HasFixintShl<decltype(std::declval<Int<8>>().sint()), Int<4>>);
+    static_assert(!HasFixintShl<Int<8>, decltype(std::declval<Int<4>>().sint())>);
+    static_assert(!HasFixintShr<Int<8>, decltype(std::declval<Int<4>>().sint())>);
+    static_assert(!HasFixintShl<int, Int<8>>);
+    static_assert(!HasFixintShr<int, Int<8>>);
+}
+
 void test_comparison_ops() {
     Int<8> a = 0x10;
     Int<8> b = 0x20;
@@ -1054,10 +1165,6 @@ void test_comparison_ops() {
     static_assert(!HasFixintNe<Int<8>, decltype(std::declval<Int<8>>().sint())>);
     static_assert(!HasFixintEq<decltype(std::declval<Int<8>&>().template at<7, 4>().sint()),
                                decltype(std::declval<Int<8>&>().template at<3, 0>())>);
-    static_assert(!HasFixintEq<Int<8>, int>);
-    static_assert(!HasFixintEq<int, Int<8>>);
-    static_assert(!HasFixintNe<Int<8>, int>);
-    static_assert(!HasFixintNe<int, Int<8>>);
 }
 
 void test_reduce_ops() {
@@ -1230,6 +1337,7 @@ int main() {
     test_unsigned_subtraction();
     test_multiplication();
     test_bitwise_ops();
+    test_shift_ops();
     test_comparison_ops();
     test_reduce_ops();
     test_concat_ops();

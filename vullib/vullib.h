@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "uint.hpp"
+#include "fixint.hpp"
 #include "storage.hpp"
 #include "ram.hpp"
 #include "queue.hpp"

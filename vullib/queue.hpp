@@ -23,7 +23,7 @@
 #pragma once
 
 #include "common.h"
-#include "uint.hpp"
+#include "fixint.hpp"
 #include <array>
 
 template<typename T, uint32_t Depth>

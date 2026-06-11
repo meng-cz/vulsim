@@ -106,6 +106,30 @@ template <typename Operand>
              && !IntOperandTraits<std::remove_cvref_t<Operand>>::IS_SIGNED)
 constexpr auto operator~(const Operand& operand);
 
+template <typename LhsOperand, typename RhsOperand>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID
+             && !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED
+             && !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED)
+constexpr auto operator<<(const LhsOperand& lhs, const RhsOperand& rhs);
+
+template <typename LhsOperand, typename T>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED
+             && std::is_integral_v<std::remove_cvref_t<T>>)
+constexpr auto operator<<(const LhsOperand& lhs, T rhs);
+
+template <typename LhsOperand, typename RhsOperand>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID
+             && !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED)
+constexpr auto operator>>(const LhsOperand& lhs, const RhsOperand& rhs);
+
+template <typename LhsOperand, typename T>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && std::is_integral_v<std::remove_cvref_t<T>>)
+constexpr auto operator>>(const LhsOperand& lhs, T rhs);
+
 template <typename Operand>
     requires(IntOperandTraits<std::remove_cvref_t<Operand>>::VALID
              && !IntOperandTraits<std::remove_cvref_t<Operand>>::IS_SIGNED)
@@ -187,6 +211,9 @@ inline constexpr uint64_t low_mask64(uint32_t bits) {
     }
     return (uint64_t(1) << bits) - 1;
 }
+
+template <uint32_t ShiftBitWidth>
+constexpr bool shift_amount_at_least_width(const Int<ShiftBitWidth>& shift, uint32_t width);
 
 template <uint32_t BitWidth>
 class Int {
@@ -603,6 +630,19 @@ public:
         requires(IntOperandTraits<std::remove_cvref_t<Operand>>::VALID
                  && !IntOperandTraits<std::remove_cvref_t<Operand>>::IS_SIGNED)
     friend constexpr auto operator~(const Operand& operand);
+    template <typename LhsOperand, typename RhsOperand>
+        requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+                 && IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID
+                 && !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED
+                 && !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED)
+    friend constexpr auto operator<<(const LhsOperand& lhs, const RhsOperand& rhs);
+    template <typename LhsOperand, typename RhsOperand>
+        requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+                 && IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID
+                 && !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED)
+    friend constexpr auto operator>>(const LhsOperand& lhs, const RhsOperand& rhs);
+    template <uint32_t ShiftBitWidth>
+    friend constexpr bool shift_amount_at_least_width(const Int<ShiftBitWidth>& shift, uint32_t width);
     template <typename Operand>
         requires(IntOperandTraits<std::remove_cvref_t<Operand>>::VALID
                  && !IntOperandTraits<std::remove_cvref_t<Operand>>::IS_SIGNED)
@@ -992,6 +1032,34 @@ constexpr int_operand_int_t<Operand> get_int_operand_value(const Operand& operan
     using Traits = IntOperandTraits<std::remove_cvref_t<Operand>>;
     static_assert(Traits::VALID, "operand is not a supported fixint operand");
     return Traits::get_int(operand);
+}
+
+template <uint32_t ShiftBitWidth>
+constexpr bool shift_amount_at_least_width(const Int<ShiftBitWidth>& shift, uint32_t width) {
+    if constexpr (Int<ShiftBitWidth>::NUM_WORDS > 1) {
+        for (uint32_t i = 1; i < Int<ShiftBitWidth>::NUM_WORDS; ++i) {
+            if (shift.data[i] != 0) {
+                return true;
+            }
+        }
+    }
+    return shift.data[0] >= uint64_t(width);
+}
+
+template <typename T>
+constexpr uint64_t checked_integral_shift_amount(T value) {
+    using RawT = std::remove_cvref_t<T>;
+    static_assert(std::is_integral_v<RawT>, "shift amount must be integral");
+
+    if constexpr (std::is_same_v<RawT, bool>) {
+        return value ? 1 : 0;
+    } else {
+        if constexpr (std::is_signed_v<RawT>) {
+            assert(value >= 0);
+        }
+        using UnsignedT = std::make_unsigned_t<RawT>;
+        return static_cast<uint64_t>(static_cast<UnsignedT>(value));
+    }
 }
 
 template <typename LhsOperand, typename RhsOperand>
@@ -1458,6 +1526,128 @@ constexpr auto operator~(const Operand& operand) {
     return out;
 }
 
+template <typename LhsOperand, typename RhsOperand>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID
+             && !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED
+             && !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED)
+constexpr auto operator<<(const LhsOperand& lhs_operand, const RhsOperand& rhs_operand) {
+    constexpr uint32_t BIT_WIDTH = int_operand_bit_width_v<LhsOperand>;
+    constexpr uint32_t RHS_BIT_WIDTH = int_operand_bit_width_v<RhsOperand>;
+    constexpr uint32_t NUM_WORDS = Int<BIT_WIDTH>::NUM_WORDS;
+
+    const Int<BIT_WIDTH> lhs = get_int_operand_value(lhs_operand);
+    const Int<RHS_BIT_WIDTH> rhs = get_int_operand_value(rhs_operand);
+    Int<BIT_WIDTH> out(0);
+
+    if (shift_amount_at_least_width(rhs, BIT_WIDTH)) {
+        return out;
+    }
+
+    const uint32_t shift = static_cast<uint32_t>(rhs.data[0]);
+    if (shift == 0) {
+        return lhs;
+    }
+
+    const uint32_t word_shift = shift / 64;
+    const uint32_t bit_shift = shift % 64;
+    for (uint32_t i = NUM_WORDS; i > 0; --i) {
+        const uint32_t dst_idx = i - 1;
+        if (dst_idx < word_shift) {
+            continue;
+        }
+
+        const uint32_t src_idx = dst_idx - word_shift;
+        uint64_t word = lhs.data[src_idx] << bit_shift;
+        if (bit_shift != 0 && src_idx > 0) {
+            word |= lhs.data[src_idx - 1] >> (64 - bit_shift);
+        }
+        out.data[dst_idx] = word;
+    }
+    out.mask_high_bits();
+    return out;
+}
+
+template <typename LhsOperand, typename T>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED
+             && std::is_integral_v<std::remove_cvref_t<T>>)
+constexpr auto operator<<(const LhsOperand& lhs_operand, T rhs) {
+    constexpr uint32_t BIT_WIDTH = int_operand_bit_width_v<LhsOperand>;
+    const uint64_t shift = checked_integral_shift_amount(rhs);
+    if (shift >= uint64_t(BIT_WIDTH)) {
+        return Int<BIT_WIDTH>(0);
+    }
+    return lhs_operand << Int<64>(shift);
+}
+
+template <typename LhsOperand, typename RhsOperand>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID
+             && !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED)
+constexpr auto operator>>(const LhsOperand& lhs_operand, const RhsOperand& rhs_operand) {
+    using LhsTraits = IntOperandTraits<std::remove_cvref_t<LhsOperand>>;
+    constexpr uint32_t BIT_WIDTH = LhsTraits::BIT_WIDTH;
+    constexpr uint32_t RHS_BIT_WIDTH = int_operand_bit_width_v<RhsOperand>;
+    constexpr uint32_t NUM_WORDS = Int<BIT_WIDTH>::NUM_WORDS;
+    constexpr uint32_t TOP_BITS = BIT_WIDTH % 64;
+    constexpr uint32_t SIGN_WORD = (BIT_WIDTH - 1) / 64;
+    constexpr uint32_t SIGN_OFF = (BIT_WIDTH - 1) % 64;
+
+    const Int<BIT_WIDTH> lhs = get_int_operand_value(lhs_operand);
+    const Int<RHS_BIT_WIDTH> rhs = get_int_operand_value(rhs_operand);
+    Int<BIT_WIDTH> out(0);
+
+    if (shift_amount_at_least_width(rhs, BIT_WIDTH)) {
+        return out;
+    }
+
+    const uint32_t shift = static_cast<uint32_t>(rhs.data[0]);
+    if (shift == 0) {
+        return lhs;
+    }
+
+    const bool negative = LhsTraits::IS_SIGNED && (((lhs.data[SIGN_WORD] >> SIGN_OFF) & uint64_t(1)) != 0);
+    const uint64_t fill_word = negative ? ~uint64_t(0) : uint64_t(0);
+    auto word_at = [&](uint32_t idx) constexpr {
+        if (idx >= NUM_WORDS) {
+            return fill_word;
+        }
+        uint64_t word = lhs.data[idx];
+        if constexpr (TOP_BITS != 0) {
+            if (negative && idx == NUM_WORDS - 1) {
+                word |= ~low_mask64(TOP_BITS);
+            }
+        }
+        return word;
+    };
+
+    const uint32_t word_shift = shift / 64;
+    const uint32_t bit_shift = shift % 64;
+    for (uint32_t dst_idx = 0; dst_idx < NUM_WORDS; ++dst_idx) {
+        const uint32_t src_idx = dst_idx + word_shift;
+        uint64_t word = word_at(src_idx) >> bit_shift;
+        if (bit_shift != 0) {
+            word |= word_at(src_idx + 1) << (64 - bit_shift);
+        }
+        out.data[dst_idx] = word;
+    }
+    out.mask_high_bits();
+    return out;
+}
+
+template <typename LhsOperand, typename T>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID
+             && std::is_integral_v<std::remove_cvref_t<T>>)
+constexpr auto operator>>(const LhsOperand& lhs_operand, T rhs) {
+    constexpr uint32_t BIT_WIDTH = int_operand_bit_width_v<LhsOperand>;
+    const uint64_t shift = checked_integral_shift_amount(rhs);
+    if (shift >= uint64_t(BIT_WIDTH)) {
+        return Int<BIT_WIDTH>(0);
+    }
+    return lhs_operand >> Int<64>(shift);
+}
+
 template <typename Operand>
     requires(IntOperandTraits<std::remove_cvref_t<Operand>>::VALID
              && !IntOperandTraits<std::remove_cvref_t<Operand>>::IS_SIGNED)
@@ -1570,14 +1760,14 @@ constexpr bool operator==(const LhsOperand& lhs_operand, const RhsOperand& rhs_o
 template <typename IntOperand, typename T>
     requires(IntOperandTraits<std::remove_cvref_t<IntOperand>>::VALID
              && !IntOperandTraits<std::remove_cvref_t<IntOperand>>::IS_SIGNED
-             && std::is_integral_v<std::remove_cvref_t<T>> && !std::is_signed_v<std::remove_cvref_t<T>>)
+             && std::is_integral_v<std::remove_cvref_t<T>>)
 constexpr bool operator==(const IntOperand& lhs_operand, T rhs) {
     constexpr uint32_t BIT_WIDTH = int_operand_bit_width_v<IntOperand>;
     return lhs_operand == Int<BIT_WIDTH>(rhs);
 }
 
 template <typename T, typename IntOperand>
-    requires(std::is_integral_v<std::remove_cvref_t<T>> && !std::is_signed_v<std::remove_cvref_t<T>>
+    requires(std::is_integral_v<std::remove_cvref_t<T>>
              && IntOperandTraits<std::remove_cvref_t<IntOperand>>::VALID
              && !IntOperandTraits<std::remove_cvref_t<IntOperand>>::IS_SIGNED)
 constexpr bool operator==(T lhs, const IntOperand& rhs_operand) {
@@ -1599,13 +1789,13 @@ constexpr bool operator!=(const LhsOperand& lhs, const RhsOperand& rhs) {
 template <typename IntOperand, typename T>
     requires(IntOperandTraits<std::remove_cvref_t<IntOperand>>::VALID
              && !IntOperandTraits<std::remove_cvref_t<IntOperand>>::IS_SIGNED
-             && std::is_integral_v<std::remove_cvref_t<T>> && !std::is_signed_v<std::remove_cvref_t<T>>)
+             && std::is_integral_v<std::remove_cvref_t<T>>)
 constexpr bool operator!=(const IntOperand& lhs, T rhs) {
     return !(lhs == rhs);
 }
 
 template <typename T, typename IntOperand>
-    requires(std::is_integral_v<std::remove_cvref_t<T>> && !std::is_signed_v<std::remove_cvref_t<T>>
+    requires(std::is_integral_v<std::remove_cvref_t<T>>
              && IntOperandTraits<std::remove_cvref_t<IntOperand>>::VALID
              && !IntOperandTraits<std::remove_cvref_t<IntOperand>>::IS_SIGNED)
 constexpr bool operator!=(T lhs, const IntOperand& rhs) {

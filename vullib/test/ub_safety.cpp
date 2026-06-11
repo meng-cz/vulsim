@@ -1,6 +1,6 @@
 #include "ram.hpp"
 #include "storage.hpp"
-#include "uint.hpp"
+#include "fixint.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -11,13 +11,13 @@ namespace {
 
 void test_uint_64bit_mask_paths() {
     Int<64> all_ones = ~Int<64>(0);
-    assert(all_ones.reduce_and());
-    assert(!all_ones.reduce_xor());
+    assert(ReduceAnd(all_ones));
+    assert(!ReduceXor(all_ones));
 
     auto plus_one = all_ones + uint64_t(1);
     static_assert(std::is_same_v<decltype(plus_one), Int<65>>);
-    assert(plus_one(63, 0).template operator Int<64>() == Int<64>(0));
-    assert(static_cast<bool>(plus_one(64)));
+    assert((plus_one.at<63, 0>()) == 0);
+    assert(static_cast<bool>(plus_one.at<64>()));
 
     auto minus_one = Int<64>(0) - uint64_t(1);
     assert(minus_one == Int<64>(~uint64_t(0)));
