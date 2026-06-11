@@ -450,6 +450,23 @@ static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE_READY> _auto_register_SER
 static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE_PRIO> _auto_register_SERVICE_PRIO_handler;
 static VCPPModuleAutoRegisterHandler<VCPPModuleSERVICE_PRIO_READY> _auto_register_SERVICE_PRIO_READY_handler;
 
+class VCPPModuleQUERY : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "QUERY"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 2) {
+            throw VulException("QUERY requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempQuery query;
+        query.name = entry.args[0];
+        query.ret_type = entry.args[1];
+        query.codelines = entry.body;
+        VulErrorContextGuard _err{"Processing QUERY '" + query.name + "' at " + context.getOriginalPosition(entry.pos)};
+        context.temp.queries.push_back(std::move(query));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleQUERY> _auto_register_QUERY_handler;
+
 class VCPPModuleTICK_IMPL : public VCPPModuleHandler {
 public:
     virtual string name() const { return "TICK_IMPL"; }
@@ -564,6 +581,23 @@ public:
     }
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleUSE_CHILD_SERVICE_PORT> _auto_register_USE_CHILD_SERVICE_PORT_handler;
+
+class VCPPModuleUSE_CHILD_QUERY : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "USE_CHILD_QUERY"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 4) {
+            throw VulException("USE_CHILD_QUERY requires exactly 4 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempChildQueryUse use;
+        use.instance_expr = entry.args[0];
+        use.query_name = entry.args[1];
+        use.alias_name = entry.args[2];
+        use.ret_type = entry.args[3];
+        context.temp.child_query_uses.push_back(std::move(use));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleUSE_CHILD_QUERY> _auto_register_USE_CHILD_QUERY_handler;
 
 class VCPPModuleCONNECT_CR_CS : public VCPPModuleHandler {
 public:

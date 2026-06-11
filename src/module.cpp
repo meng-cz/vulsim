@@ -334,6 +334,13 @@ VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulSta
     return static_req;
 }
 
+static VulStaticQuery staticalizeQuery(const VulTempQuery &item, const VulStaticConfigLib &config_lib) {
+    VulStaticQuery query;
+    query.name = item.name;
+    query.ret_type = parseTypeSignature(item.ret_type, config_lib);
+    return query;
+}
+
 void instantiateModule(
     VulStaticModuleInstance &instance,
     const VulTempModule &temp,
@@ -398,6 +405,18 @@ void instantiateModule(
             lb.cond_codelines.push_back("return (" + serv.cond + ");\n");
         }
         instance.serv_logic_blocks[serv_name] = lb;
+    }
+
+    // queries
+    for (const auto &query : temp.queries) {
+        VulErrorContextGuard _err{"Processing query '" + query.name + "'"};
+        instance.queries[query.name] = staticalizeQuery(query, local_config_lib);
+        VulLogicBlock lb;
+        lb.block_id = next_logic_block_id++;
+        lb.with_priority = false;
+        lb.priority = 0;
+        lb.codelines = query.codelines;
+        instance.query_logic_blocks[query.name] = lb;
     }
 
     // registers
@@ -720,6 +739,71 @@ void instantiateModule(
             use.alias_indexed = true;
             use.alias_index = wildcard_idx;
             instance.child_service_uses.push_back(std::move(use));
+        }
+    }
+
+    // child query uses
+    instance.child_query_uses.clear();
+    for (const auto &temp_use : temp.child_query_uses) {
+        const ParsedInstanceExpr child_expr = parseInstanceExpr(temp_use.instance_expr);
+        const auto &child_decl = requireInstanceDecl(instance.instances, child_expr.base_name, "processing USE_CHILD_QUERY");
+        const VulStaticTypeSignature declared_type = parseTypeSignature(temp_use.ret_type, local_config_lib);
+        auto materialize_use = [&](const string &concrete_name, ConfigRealValue alias_index, bool alias_indexed) {
+            VulStaticChildQueryUse use;
+            use.alias_name = temp_use.alias_name;
+            use.instance_name = concrete_name;
+            use.query_name = temp_use.query_name;
+            use.ret_type = declared_type;
+            use.alias_indexed = alias_indexed;
+            use.alias_index = alias_index;
+            instance.child_query_uses.push_back(std::move(use));
+        };
+
+        if (child_expr.index_exprs.empty()) {
+            if (child_decl.isArrayed()) {
+                throw VulException("Array child instance '" + child_expr.base_name + "' requires explicit indices in USE_CHILD_QUERY");
+            }
+            materialize_use(child_expr.base_name, 0, false);
+            continue;
+        }
+        if (child_expr.index_exprs.size() != child_decl.array_dims.size()) {
+            throw VulException("Dimension mismatch for child instance '" + child_expr.base_name + "' in USE_CHILD_QUERY");
+        }
+        vector<size_t> wildcard_dims = collectWildcardDims(child_expr);
+        if (wildcard_dims.size() > 1) {
+            throw VulException("Only one '*' wildcard is supported in USE_CHILD_QUERY");
+        }
+        if (wildcard_dims.empty()) {
+            string concrete_name;
+            if (!tryResolveConcreteInstance(child_expr, child_decl, local_config_lib, {}, concrete_name)) {
+                throw VulException("Indexed child instance out of range in USE_CHILD_QUERY");
+            }
+            materialize_use(concrete_name, 0, false);
+            continue;
+        }
+
+        const size_t wildcard_dim = wildcard_dims[0];
+        for (ConfigRealValue wildcard_idx = 0; wildcard_idx < child_decl.array_dims[wildcard_dim]; ++wildcard_idx) {
+            vector<ConfigRealValue> concrete_indices;
+            concrete_indices.reserve(child_expr.index_exprs.size());
+            bool valid = true;
+            for (size_t dim = 0; dim < child_expr.index_exprs.size(); ++dim) {
+                if (dim == wildcard_dim && stringop::trim(child_expr.index_exprs[dim]) == "*") {
+                    concrete_indices.push_back(wildcard_idx);
+                    continue;
+                }
+                ConfigRealValue idx = calculateConstexprValue(child_expr.index_exprs[dim], local_config_lib);
+                if (idx < 0 || idx >= child_decl.array_dims[dim]) {
+                    valid = false;
+                    break;
+                }
+                concrete_indices.push_back(idx);
+            }
+            if (!valid) {
+                continue;
+            }
+            string concrete_name = arrayInstanceName(child_expr.base_name, concrete_indices);
+            materialize_use(concrete_name, wildcard_idx, true);
         }
     }
 

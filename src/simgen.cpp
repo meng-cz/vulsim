@@ -961,6 +961,22 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         impl_field.push_back("\n");
     }
 
+    // generate query declarations
+    for (const auto &query_entry : mod.queries) {
+        const string &query_name = query_entry.first;
+        const auto &query = query_entry.second;
+        auto lb_iter = mod.query_logic_blocks.find(query_name);
+        if (lb_iter == mod.query_logic_blocks.end()) {
+            throw VulException("Missing logic block for query " + query_name);
+        }
+
+        decl_public_field.push_back(query.ret_type.toString() + " " + query_name + "() const;\n");
+        impl_field.push_back(query.ret_type.toString() + " " + mod_class_name + "::" + query_name + "() const {\n");
+        impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
+        impl_field.push_back("}\n");
+        impl_field.push_back("\n");
+    }
+
     // generate register
     for (const auto &reg : mod.registers) {
         const auto &sig = reg.signature;
@@ -1223,6 +1239,42 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                 string branch = (i == 0 ? "if constexpr" : "else if constexpr");
                 decl_private_field.push_back(CodeTab + branch + " (IDX == " + std::to_string(use.alias_index) + ") {\n");
                 decl_private_field.push_back(CodeTab + CodeTab + call_prefix + childPtrFieldName(mod, use.instance_name) + "->" + use.service_name + "(" + argname + ");\n");
+                decl_private_field.push_back(CodeTab + "}\n");
+            }
+        }
+        decl_private_field.push_back("}\n");
+    }
+
+    std::map<string, vector<VulStaticChildQueryUse>> child_query_groups;
+    for (const auto &use : mod.child_query_uses) {
+        child_query_groups[use.alias_name].push_back(use);
+    }
+    for (const auto &group_entry : child_query_groups) {
+        const string &alias_name = group_entry.first;
+        const auto &group = group_entry.second;
+        const auto &target_child = findChildTemplateByName(mod, group.front().instance_name);
+        auto query_iter = target_child.queries.find(group.front().query_name);
+        if (query_iter == target_child.queries.end()) {
+            throw VulException("Query " + group.front().query_name + " not found in child " + target_child.module_name);
+        }
+        if (!(group.front().ret_type == query_iter->second.ret_type)) {
+            throw VulException("USE_CHILD_QUERY return type mismatch for alias " + alias_name);
+        }
+        const string rettype = query_iter->second.ret_type.toString();
+        const bool is_alias_arrayed = group.front().alias_indexed;
+        if (is_alias_arrayed) {
+            decl_private_field.push_back("template <uint32_t IDX = 0>\n");
+        }
+        decl_private_field.push_back(rettype + " " + alias_name + "() const {\n");
+        if (!is_alias_arrayed) {
+            decl_private_field.push_back(CodeTab + "return " + childPtrFieldName(mod, group.front().instance_name) + "->" + group.front().query_name + "();\n");
+        } else {
+            decl_private_field.push_back(CodeTab + "static_assert(IDX < " + std::to_string(group.size()) + ", \"Child query index out of range\");\n");
+            for (size_t i = 0; i < group.size(); ++i) {
+                const auto &use = group[i];
+                string branch = (i == 0 ? "if constexpr" : "else if constexpr");
+                decl_private_field.push_back(CodeTab + branch + " (IDX == " + std::to_string(use.alias_index) + ") {\n");
+                decl_private_field.push_back(CodeTab + CodeTab + "return " + childPtrFieldName(mod, use.instance_name) + "->" + use.query_name + "();\n");
                 decl_private_field.push_back(CodeTab + "}\n");
             }
         }

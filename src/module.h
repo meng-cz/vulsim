@@ -196,6 +196,12 @@ struct VulTempServ : public VulTempReqServBase {
     vector<string> codelines;
 };
 
+struct VulTempQuery {
+    string name;
+    string ret_type;
+    vector<string> codelines;
+};
+
 using VulTempTickBlock = vector<string>;
 
 struct VulTempInstance {
@@ -209,6 +215,13 @@ struct VulTempChildServiceUse {
     string instance_expr;
     string service_name;
     string alias_name;
+};
+
+struct VulTempChildQueryUse {
+    string instance_expr;
+    string query_name;
+    string alias_name;
+    string ret_type;
 };
 
 struct VulTempBRAM {
@@ -243,6 +256,7 @@ struct VulTempModule {
     vector<VulTempBundle> bundles;
     vector<VulTempReq> requests;
     vector<VulTempServ> services;
+    vector<VulTempQuery> queries;
     vector<VulTempRegister> registers;
     vector<VulTempWire> wires;
     vector<VulTempBRAM> brams;
@@ -252,6 +266,7 @@ struct VulTempModule {
     vector<VulTempTickBlock> tick_blocks;
     vector<VulReqServConnection>  req_connections;
     vector<VulTempChildServiceUse> child_service_uses;
+    vector<VulTempChildQueryUse> child_query_uses;
     vector<string> helper_codes;
 };
 
@@ -297,6 +312,15 @@ struct VulStaticChildServiceUse {
     ReqServName alias_name;
     InstanceName instance_name;
     ReqServName service_name;
+    bool alias_indexed = false;
+    ConfigRealValue alias_index = 0;
+};
+
+struct VulStaticChildQueryUse {
+    ReqServName alias_name;
+    InstanceName instance_name;
+    ReqServName query_name;
+    VulStaticTypeSignature ret_type;
     bool alias_indexed = false;
     ConfigRealValue alias_index = 0;
 };
@@ -382,6 +406,11 @@ struct VulStaticReqServ {
 };
 
 VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulStaticConfigLib &config_lib);
+
+struct VulStaticQuery {
+    ReqServName name;
+    VulStaticTypeSignature ret_type;
+};
 
 struct VulStaticRegister {
     BMemberName name;
@@ -505,6 +534,7 @@ struct VulStaticModuleInstance {
 
     unordered_map<ReqServName, VulStaticReqServ>      requests;
     unordered_map<ReqServName, VulStaticReqServ>      services;
+    unordered_map<ReqServName, VulStaticQuery>        queries;
 
     vector<VulStaticRegister> registers;
     vector<VulStaticWire> wires;
@@ -513,6 +543,7 @@ struct VulStaticModuleInstance {
     vector<VulStaticQueue> queues;
 
     unordered_map<ReqServName, VulLogicBlock> serv_logic_blocks;
+    unordered_map<ReqServName, VulLogicBlock> query_logic_blocks;
     vector<VulTickBlock> tick_blocks;
     vector<string> helper_codes;
 
@@ -520,6 +551,7 @@ struct VulStaticModuleInstance {
 
     vector<VulReqServConnection>  req_connections;
     vector<VulStaticChildServiceUse> child_service_uses;
+    vector<VulStaticChildQueryUse> child_query_uses;
 
     unordered_set<ReqServName> exported_services; // services that are connected to parent instance, and should not be connected or called within the module itself
     vector<VulInstanceID> update_seq; // topological order of instance update in simulation

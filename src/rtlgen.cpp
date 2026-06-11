@@ -278,6 +278,10 @@ static string childServiceSignalBase(const string &instance_name, const string &
     return instance_name + "_" + service_name;
 }
 
+static string childQuerySignalBase(const string &instance_name, const string &query_name) {
+    return instance_name + "_" + query_name;
+}
+
 static const VulStaticModuleInstance &findChildTemplateByName(
     const VulStaticModuleInstance &mod,
     const string &name
@@ -635,6 +639,10 @@ inline string reqservRdyPort(const string &reqserv_name) {
 
 inline string reqservArgPort(const string &reqserv_name, const string &arg_name) {
     return reqserv_name + "_" + arg_name + "__";
+}
+
+inline string queryPort(const string &query_name) {
+    return query_name + "__query__";
 }
 
 
@@ -1016,6 +1024,42 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
     }
 }
 
+void _procQueries(RTLGenContext &ctx) {
+    for (const auto &entry : ctx.module.queries) {
+        const string &query_name = entry.first;
+        const auto &query = entry.second;
+
+        auto iter = ctx.module.query_logic_blocks.find(query_name);
+        if (iter == ctx.module.query_logic_blocks.end()) {
+            throw VulException("Missing logic block for query " + query_name);
+        }
+
+        uint32_t width = 0;
+        vector<FlatField> flat_fields;
+        flatten_type_signature(query.ret_type, ctx.local_bundlelib, "value", width, flat_fields);
+
+        const string port_name = queryPort(query_name);
+        const string ret_type_str = query.ret_type.toString();
+
+        ctx.hls_arguments.push_back("Int<" + std::to_string(width) + "> &" + port_name);
+        ctx.rtl_ports.push_back("output [" + std::to_string(width - 1) + ":0] " + port_name);
+        ctx.rtl_logicports.push_back("." + port_name + "(" + port_name + ")");
+
+        ctx.hls_blocks.push_back("auto " + query_name + " = [&]() -> " + ret_type_str + " {\n");
+        ctx.hls_blocks.insert(ctx.hls_blocks.end(), iter->second.codelines.begin(), iter->second.codelines.end());
+        ctx.hls_blocks.push_back("};\n");
+
+        ctx.hls_body.push_back("{\n");
+        ctx.hls_body.push_back("  " + ret_type_str + " value = " + query_name + "();\n");
+        ctx.hls_body.push_back("  Int<" + std::to_string(width) + "> packed;\n");
+        for (const auto &field : flat_fields) {
+            ctx.hls_body.push_back("  " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+        }
+        ctx.hls_body.push_back("  " + port_name + " = packed;\n");
+        ctx.hls_body.push_back("}\n");
+    }
+}
+
 void _procChildrenAndConnection(RTLGenContext &ctx) {
 
     auto conn_to_str = [](const ResolvedReqServConnection &conn) -> string {
@@ -1179,6 +1223,31 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                     }
                 }
             }
+            for (const auto &query_entry : child.queries) {
+                const string &query_name = query_entry.first;
+                const auto &query = query_entry.second;
+                const string signal_base = childQuerySignalBase(child_instance_name, query_name);
+                const string port_name = queryPort(signal_base);
+                const string child_port_name = queryPort(query_name);
+
+                uint32_t width = 0;
+                vector<FlatField> flat_fields;
+                flatten_type_signature(query.ret_type, ctx.local_bundlelib, "value", width, flat_fields);
+                ctx.rtl_decl.push_back("wire [" + std::to_string(width - 1) + ":0] " + port_name + ";\n");
+                child_port_lines.push_back(string(".") + child_port_name + "(" + port_name + ")");
+
+                bool logic_ref = false;
+                for (const auto &use : ctx.module.child_query_uses) {
+                    if (use.instance_name == child_instance_name && use.query_name == query_name) {
+                        logic_ref = true;
+                        break;
+                    }
+                }
+                if (logic_ref) {
+                    ctx.hls_arguments.push_back("const Int<" + std::to_string(width) + "> " + port_name);
+                    ctx.rtl_logicports.push_back("." + port_name + "(" + port_name + ")");
+                }
+            }
             ctx.rtl_inst.push_back(child_class_name + " " + child_instance_name + " (\n");
             for (size_t i = 0; i < child_port_lines.size(); i++) {
                 ctx.rtl_inst.push_back("  " + child_port_lines[i] + (i == child_port_lines.size() - 1 ? "" : ",") + "\n");
@@ -1279,6 +1348,72 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             for (const auto &ret : ret_ports) {
                 ctx.hls_helpers.push_back("  " + reqservArgPort(signal_base, ret.name) + ",\n");
             }
+        }
+        ctx.hls_helpers.push_back("};\n");
+        ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
+        ctx.hls_final.push_back("#undef " + alias_name + "\n");
+    }
+
+    std::map<string, vector<VulStaticChildQueryUse>> child_query_groups;
+    for (const auto &use : ctx.module.child_query_uses) {
+        child_query_groups[use.alias_name].push_back(use);
+    }
+    for (const auto &group_entry : child_query_groups) {
+        const string &alias_name = group_entry.first;
+        const auto &group = group_entry.second;
+        const auto &target_child = findChildTemplateByName(ctx.module, group.front().instance_name);
+        auto query_iter = target_child.queries.find(group.front().query_name);
+        if (query_iter == target_child.queries.end()) {
+            throw VulException("Query " + group.front().query_name + " not found in child " + target_child.module_name);
+        }
+        if (!(group.front().ret_type == query_iter->second.ret_type)) {
+            throw VulException("USE_CHILD_QUERY return type mismatch for alias " + alias_name);
+        }
+
+        uint32_t width = 0;
+        vector<FlatField> flat_fields;
+        flatten_type_signature(query_iter->second.ret_type, ctx.local_bundlelib, "value", width, flat_fields);
+
+        const string helper_struct_name = "__ChildQueryHelper__" + alias_name;
+        const string helper_var_name = "__child_query_helper__" + alias_name;
+        const bool is_alias_arrayed = group.front().alias_indexed;
+        const string ret_type_str = query_iter->second.ret_type.toString();
+
+        ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
+        for (size_t i = 0; i < group.size(); ++i) {
+            ctx.hls_header.push_back("  const Int<" + std::to_string(width) + "> & value_" + std::to_string(i) + ";\n");
+        }
+        ctx.hls_header.push_back("\n");
+        if (is_alias_arrayed) {
+            ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
+            ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
+            ctx.hls_header.push_back("    static_assert(IDX < " + std::to_string(group.size()) + ", \"Child query index out of range\");\n");
+            for (size_t i = 0; i < group.size(); ++i) {
+                string branch = (i == 0 ? "if constexpr" : "else if constexpr");
+                ctx.hls_header.push_back("    " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
+                ctx.hls_header.push_back("      " + ret_type_str + " value;\n");
+                for (const auto &field : flat_fields) {
+                    ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr("value_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
+                }
+                ctx.hls_header.push_back("      return value;\n");
+                ctx.hls_header.push_back("    }\n");
+            }
+            ctx.hls_header.push_back("  }\n");
+        } else {
+            ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
+            ctx.hls_header.push_back("    " + ret_type_str + " value;\n");
+            for (const auto &field : flat_fields) {
+                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("value_0", field.offset + field.width - 1, field.offset) + ";\n");
+            }
+            ctx.hls_header.push_back("    return value;\n");
+            ctx.hls_header.push_back("  }\n");
+        }
+        ctx.hls_header.push_back("};\n");
+
+        ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
+        for (size_t i = 0; i < group.size(); ++i) {
+            const string signal_base = childQuerySignalBase(group[i].instance_name, group[i].query_name);
+            ctx.hls_helpers.push_back("  " + queryPort(signal_base) + ",\n");
         }
         ctx.hls_helpers.push_back("};\n");
         ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
@@ -2019,6 +2154,7 @@ RTLGenResult genModuleRTL(
     _procWires(ctx);
     _procRegisters(ctx);
     _procRequests(ctx);
+    _procQueries(ctx);
     _procServicesAndTicks(ctx);
     _procChildrenAndConnection(ctx);
     _procQueues(ctx);

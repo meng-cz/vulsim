@@ -76,6 +76,8 @@
 
 #define SERVICE_PRIO_READY(name, priority, cond, ...) template<uint32_t IDX = 0> bool __##name(__VA_ARGS__)
 
+#define QUERY(name, rettype) rettype name()
+
 
 #define TICK_IMPL() void tick()
 
@@ -84,6 +86,8 @@
 #define CHILD_INSTANCE_ARRAY2(module, name, N0, N1, ...) void * name[N0][N1];
 
 #define USE_CHILD_SERVICE_PORT(instance, serv, alias, ...) template<uint32_t IDX = 0> bool alias (__VA_ARGS__);
+
+#define USE_CHILD_QUERY(instance, name, alias, rettype) template<uint32_t IDX = 0> rettype alias();
 
 #define CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv) ;
 

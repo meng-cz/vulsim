@@ -235,6 +235,43 @@ bool service_name(const type1& arg1, ..., type2& resp1, ...) {
 
 SERVICE_READY 和 SERVICE_PRIO 的组合，定义了一个带有优先级的服务事务接口，并且包含 valid-ready 握手行为。
 
+## QUERY(name, rettype) { ... }
+
+定义一个只读查询接口：
+- `name`：查询接口名称
+- `rettype`：返回值类型，可以是普通整数类型、`bool`、别名类型，或者 `STRUCT` 定义出的结构体类型
+- `{ ... }`：查询实现代码，必须通过 `return` 返回一个 `rettype` 类型的值
+
+`QUERY` 的语义与 `SERVICE` 不同：
+- `QUERY` 不参与 `CONNECT_*` 连接
+- `QUERY` 没有 `ARG(...)` / `RESP(...)` 参数
+- `QUERY` 代表对当前周期稳定状态的一次无副作用观测
+
+典型用法：
+```cpp
+STRUCT(Status) {
+    uint32_t sum;
+    bool ready;
+};
+
+REGISTER(sum, uint32_t) {
+    sum = 0;
+}
+QUEUE(q, uint32_t, 4);
+
+QUERY(status, Status) {
+    Status value;
+    value.sum = sum;
+    value.ready = q.enqready();
+    return value;
+}
+```
+
+当前版本中，`QUERY` 的访问权限由用户自行保证。约定上，`QUERY` 中只应访问：
+- 本模块寄存器的当前值
+- 子实例声明并引入的 `QUERY`
+- 内置组件提供的 query 接口，例如 `q.enqready()`、`q.deqvalid()`
+
 
 ## TICK_IMPL()
 
@@ -290,6 +327,48 @@ TICK_IMPL() {
 }
 ```
 
+## USE_CHILD_QUERY(instance, query, alias, rettype)
+
+声明使用子实例中的 `QUERY`，以便在父模块的行为代码或父模块自身的 `QUERY` 中直接调用：
+- `instance`：子实例名称
+- `query`：子实例中 `QUERY` 的名称
+- `alias`：父模块中使用的别名
+- `rettype`：返回值类型，必须与子实例中该 `QUERY` 的返回类型一致
+
+展开后提供以下等价声明供行为代码调用：
+```cpp
+rettype alias() const;
+```
+
+示例：
+```cpp
+STRUCT(ChildStatus) {
+    uint32_t sum;
+    bool can_pop;
+};
+
+CHILD_INSTANCE(Node, node);
+USE_CHILD_QUERY(node, status, node_status, ChildStatus);
+
+QUERY(snapshot, ChildStatus) {
+    return node_status();
+}
+```
+
+如果子实例是阵列，也可以显式写出索引，或者使用 `*` 引出模板风格别名：
+```cpp
+USE_CHILD_QUERY(lane[0], status, lane0_status, ChildStatus);
+USE_CHILD_QUERY(mesh[*][0], status, edge_status, ChildStatus);
+
+QUERY(read_lane0, ChildStatus) {
+    return lane0_status();
+}
+
+QUERY(read_edge1, ChildStatus) {
+    return edge_status<1>();
+}
+```
+
 ## CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv)
 
 连接一个子实例请求事务端口到一个子实例服务事务端口：
@@ -332,6 +411,5 @@ TICK_IMPL() {
 
 如果一个请求包含返回值或包含握手信号（`has_handshake` 为 `true`），则其仅能被连接到一个服务或代码实现，不允许一对多连接。
 反之，如果一个请求不包含返回值且不包含握手信号，则允许一对多连接（广播连接）。
-
 
 
