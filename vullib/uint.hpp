@@ -75,7 +75,7 @@ public:
         }
     }
 
-    constexpr std::array<uint64_t, NUM_WORDS> get_data() const {
+    constexpr const std::array<uint64_t, NUM_WORDS> & get_data() const {
         return data;
     }
 

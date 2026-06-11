@@ -132,6 +132,51 @@ void test_range_at_and_bit_at() {
     assert(!static_cast<bool>(wide(0)));
 }
 
+void test_cross_word_slice_and_dynamic_access() {
+    Int<130> wide = 0;
+    wide(71, 56) = 0x3210;
+    wide(103, 72) = 0x76543210;
+    wide(129, 114) = 0xBEEF;
+
+    expect_eq(Int<16>(wide(71, 56)), Int<16>(0x3210));
+    expect_eq(Int<32>(wide(103, 72)), Int<32>(0x76543210));
+    expect_eq(Int<16>(wide(129, 114)), Int<16>(0xBEEF));
+
+    Int<Int<130>::IDX_WIDTH> idx = 60;
+    wide.range_at<12>(idx) = 0xABC;
+    expect_eq(Int<12>(wide(71, 60)), Int<12>(0xABC));
+
+    Int<Int<130>::IDX_WIDTH> bit_idx = 64;
+    wide.bit_at(bit_idx) = true;
+    assert(static_cast<bool>(wide(64)));
+    bit_idx = 129;
+    assert(static_cast<bool>(wide.bit_at(bit_idx)));
+
+    const Int<130> frozen = wide;
+    idx = 68;
+    expect_eq(Int<20>(frozen.range_at<20>(idx)), Int<20>(wide(87, 68)));
+}
+
+void test_range_proxy_cross_width_assignment() {
+    Int<96> a = 0;
+    Int<130> b = 0;
+    b(100, 5) = Cat(Int<32>(0x89ABCDEF), Int<32>(0x01234567), Int<32>(0x76543210));
+
+    a(95, 0) = b(100, 5);
+    expect_eq(Int<32>(a(95, 64)), Int<32>(0x89ABCDEF));
+    expect_eq(Int<32>(a(63, 32)), Int<32>(0x01234567));
+    expect_eq(Int<32>(a(31, 0)), Int<32>(0x76543210));
+
+    Int<130> c = 0;
+    c(120, 25) = a(95, 0);
+    expect_eq(Int<96>(c(120, 25)), a);
+
+    const Int<130> bconst = b;
+    Int<96> d = 0;
+    d(95, 0) = bconst(100, 5);
+    expect_eq(d, a);
+}
+
 void test_reduce_repeat_cat() {
     Int<4> a = 0b1010;
     assert(a.reduce_or());
@@ -161,6 +206,36 @@ void test_reduce_repeat_cat() {
     auto y = Cat(Int<8>(0x12), Int<8>(0x34), Int<8>(0x56));
     static_assert(std::is_same_v<decltype(y), Int<24>>);
     expect_eq(y, Int<24>(0x123456));
+}
+
+void test_repeat_cat_cross_word() {
+    Int<65> pattern = 0;
+    pattern(64) = true;
+    pattern(3, 0) = 0b1011;
+
+    auto repeated = pattern.repeat<2>();
+    static_assert(std::is_same_v<decltype(repeated), Int<130>>);
+    expect_eq(Int<65>(repeated(64, 0)), pattern);
+    expect_eq(Int<65>(repeated(129, 65)), pattern);
+
+    Int<70> hi = 0;
+    hi(69, 64) = 0x2A;
+    hi(63, 0) = uint64_t(0x0123456789ABCDEFULL);
+    Int<67> lo = 0;
+    lo(66) = true;
+    lo(2, 0) = 0b101;
+
+    auto combined = hi.cat(lo);
+    static_assert(std::is_same_v<decltype(combined), Int<137>>);
+    expect_eq(Int<67>(combined(66, 0)), lo);
+    expect_eq(Int<70>(combined(136, 67)), hi);
+
+    auto multi = Cat(Int<5>(0x1B), Int<70>(hi), Int<3>(0x5), Int<67>(lo));
+    static_assert(std::is_same_v<decltype(multi), Int<145>>);
+    expect_eq(Int<67>(multi(66, 0)), lo);
+    expect_eq(Int<3>(multi(69, 67)), Int<3>(0x5));
+    expect_eq(Int<70>(multi(139, 70)), hi);
+    expect_eq(Int<5>(multi(144, 140)), Int<5>(0x1B));
 }
 
 void test_arithmetic_ops() {
@@ -209,6 +284,35 @@ void test_arithmetic_ops() {
     assert(p1.to<uint16_t>() == 0xFFE0U);
 }
 
+void test_arithmetic_cross_word_and_signed_mix() {
+    Int<65> one = 1;
+    auto sum = Int<65>(~uint64_t(0)).cat(Int<1>(1)) + one;
+    static_assert(std::is_same_v<decltype(sum), Int<67>>);
+    assert(!Int<65>(sum(64, 0)).reduce_or());
+    assert(static_cast<bool>(sum(65)));
+    assert(!static_cast<bool>(sum(66)));
+
+    Int<130> lhs = 0;
+    lhs(129) = true;
+    lhs(64) = true;
+    Int<130> rhs = 0;
+    rhs(64) = true;
+    rhs(0) = true;
+    auto diff = lhs - rhs;
+    static_assert(std::is_same_v<decltype(diff), Int<130>>);
+    assert(!static_cast<bool>(diff(129)));
+    assert(static_cast<bool>(diff(128)));
+    assert(static_cast<bool>(diff(64)));
+    assert(static_cast<bool>(diff(0)));
+
+    auto mul_ss = Int<8>(0xFE).sint() * Int<8>(0xFD).sint();
+    static_assert(std::is_same_v<decltype(mul_ss), Int<16>>);
+    assert(mul_ss.to<int16_t>() == 6);
+
+    auto mul_su = Int<8>(0xFE).sint() * Int<8>(3);
+    assert(mul_su.to<int16_t>() == -6);
+}
+
 void test_bitwise_ops() {
     Int<8> a = 0xA5;
     Int<8> b = 0x3C;
@@ -216,6 +320,24 @@ void test_bitwise_ops() {
     expect_eq(a | b, Int<8>(0xBD));
     expect_eq(a ^ b, Int<8>(0x99));
     expect_eq(~a, Int<8>(0x5A));
+}
+
+void test_bitwise_cross_word() {
+    Int<130> a = 0;
+    Int<130> b = 0;
+    a(63, 0) = uint64_t(0xFFFF0000FFFF0000ULL);
+    a(129, 64) = Cat(Int<2>(0x3), Int<64>(0x0F0F0F0F0F0F0F0FULL));
+    b(63, 0) = uint64_t(0x00FFFF0000FFFF00ULL);
+    b(129, 64) = Cat(Int<2>(0x1), Int<64>(0x3333333333333333ULL));
+
+    auto andv = a & b;
+    auto orv = a | b;
+    auto xorv = a ^ b;
+    expect_eq(Int<64>(andv(63, 0)), Int<64>(0x00FF000000FF0000ULL));
+    expect_eq(Int<64>(orv(63, 0)), Int<64>(0xFFFFFF00FFFFFF00ULL));
+    expect_eq(Int<64>(xorv(63, 0)), Int<64>(0xFF00FF00FF00FF00ULL));
+    assert(static_cast<bool>(andv(128)));
+    assert(static_cast<bool>(orv(129)));
 }
 
 void test_bitwise_with_range_proxy_ops() {
@@ -263,6 +385,34 @@ void test_shift_ops() {
     assert(!static_cast<bool>(sr(0)));
 }
 
+void test_shift_cross_word_and_dynamic_amount() {
+    Int<130> wide = 0;
+    wide(0) = true;
+    wide(63) = true;
+    wide(64) = true;
+    wide(129) = true;
+
+    Int<8> sh1 = 64;
+    Int<130> left64 = wide << sh1;
+    assert(static_cast<bool>(left64(64)));
+    assert(static_cast<bool>(left64(127)));
+    assert(static_cast<bool>(left64(128)));
+    assert(!static_cast<bool>(left64(0)));
+
+    Int<130> right64 = wide >> sh1;
+    assert(static_cast<bool>(right64(0)));
+    assert(static_cast<bool>(right64(65)));
+    assert(!static_cast<bool>(right64(66)));
+
+    Int<130> neg = 0;
+    neg(129) = true;
+    neg(80) = true;
+    auto asr = neg.sint() >> Int<8>(65);
+    assert(static_cast<bool>(asr(129)));
+    assert(static_cast<bool>(asr(64)));
+    assert(static_cast<bool>(asr(15)));
+}
+
 void test_comparison_ops() {
     Int<8> u = 0xFF;
     assert(u == 255);
@@ -288,6 +438,45 @@ void test_comparison_ops() {
     assert(2 >= Int<8>(1));
 }
 
+void test_comparison_cross_width_and_signed_mix() {
+    Int<130> neg = 0;
+    neg(129) = true;
+    Int<130> pos = 0;
+    pos(128) = true;
+    pos(5) = true;
+
+    assert(neg.sint() < pos.sint());
+    assert(!(pos.sint() < neg.sint()));
+    assert(neg > pos);
+    assert(neg >= pos);
+    assert(neg.sint() <= -1);
+
+    Int<4> minus_one4 = 0xF;
+    Int<130> minus_one130 = Int<130>(minus_one4.sint());
+    assert(minus_one130.sint() == minus_one4.sint());
+    assert(Int<65>(0).sint() < Int<66>(1).sint());
+}
+
+void test_compound_operation_chains() {
+    Int<17> a = 0x12345;
+    Int<9> b = 0x155;
+    auto packed = Cat(Int<8>(a(15, 8)) ^ Int<8>(b(8, 1)),
+                      Int<8>(a(7, 0)) + Int<8>(3),
+                      Int<1>(a(16)));
+    static_assert(std::is_same_v<decltype(packed), Int<18>>);
+
+    Int<8> top = a(15, 8);
+    Int<8> mix = top ^ Int<8>(b(8, 1));
+    Int<9> low = Int<8>(a(7, 0)) + Int<8>(3);
+    expect_eq(Int<8>(packed(17, 10)), mix);
+    expect_eq(Int<9>(packed(9, 1)), low);
+    expect_eq(Int<1>(packed(0)), Int<1>(a(16)));
+
+    Int<72> wide = 0;
+    wide.range_at<9>(Int<72>::IDX_WIDTH == 7 ? Int<7>(5) : Int<7>(5)) = low;
+    expect_eq(Int<9>(wide(13, 5)), low);
+}
+
 } // namespace
 
 int main() {
@@ -297,12 +486,20 @@ int main() {
     test_slice_and_bit_proxy();
     test_range_to_range_overlap_assignment();
     test_range_at_and_bit_at();
+    test_cross_word_slice_and_dynamic_access();
+    test_range_proxy_cross_width_assignment();
     test_reduce_repeat_cat();
+    test_repeat_cat_cross_word();
     test_arithmetic_ops();
+    test_arithmetic_cross_word_and_signed_mix();
     test_bitwise_ops();
+    test_bitwise_cross_word();
     test_bitwise_with_range_proxy_ops();
     test_shift_ops();
+    test_shift_cross_word_and_dynamic_amount();
     test_comparison_ops();
+    test_comparison_cross_width_and_signed_mix();
+    test_compound_operation_chains();
 
     std::cout << "All tests passed!" << std::endl;
     return 0;
