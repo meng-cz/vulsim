@@ -4,6 +4,7 @@
 #include "simgen.h"
 #include "rtlgen.h"
 #include "argparse.hpp"
+#include "vullib.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -134,17 +135,11 @@ int main(int argc, char * argv[]) {
     {
         VulErrorContextGuard _err("copying vul library files");
 
-        vector<std::string> runtime_files = {
-            "common.h",
-            "uint.hpp",
-            "ram_generic.sv",
-            "queue.sv",
-        };
         std::filesystem::path lib_path(lib_dir);
         if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
             throw VulException("Library directory does not exist: " + lib_dir);
         }
-        for (const auto &filename : runtime_files) {
+        for (const auto &filename : VulRTLLibFiles) {
             std::filesystem::path src_file = lib_path / filename;
             if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
                 throw VulException("Runtime library file does not exist: " + src_file.string());

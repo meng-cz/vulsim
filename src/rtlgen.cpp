@@ -62,6 +62,10 @@ struct RTLGenContext {
     vector<string> resource_files;
 };
 
+inline string uintExtractExpr(const string &var, uint32_t high, uint32_t low) {
+    return var + ".at<" + std::to_string(high) + ", " + std::to_string(low) + ">()";
+}
+
 inline string reqservArraySuffix(uint32_t idx) {
     return "__IDX" + std::to_string(idx);
 }
@@ -458,7 +462,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("operator " + element_type_str + "() const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = rdata(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("  " + field.name + " = " + uintExtractExpr("rdata", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("  return value;\n");
             ctx.hls_header.push_back("}\n");
@@ -467,7 +471,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back(element_type_str + " get() const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = rdata(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("  " + field.name + " = " + uintExtractExpr("rdata", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("  return value;\n");
             ctx.hls_header.push_back("}\n");
@@ -478,7 +482,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  wdata_val(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
             }
             if (is_ported) {
                 ctx.hls_header.push_back("  wdata[P] = wdata_val;\n");
@@ -494,7 +498,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> rdata_val = rdata[idx];\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = rdata_val(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("  " + field.name + " = " + uintExtractExpr("rdata_val", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("  return value;\n");
             ctx.hls_header.push_back("}\n");
@@ -505,7 +509,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  wdata_val(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = value." + field.name + ";\n");
+                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = value." + field.name + ";\n");
             }
             if (is_ported) {
                 ctx.hls_header.push_back("  wdata[idx][P] = wdata_val;\n");
@@ -711,12 +715,12 @@ void _procRequests(RTLGenContext &ctx) {
         ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
         for (const auto &arg : arg_ports) {
             for (const auto &field : arg.flat_fields) {
-                ctx.hls_header.push_back("    (arg_" + arg.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr("arg_" + arg.name + sel_str, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
             }
         }
         for (const auto &ret : ret_ports) {
             for (const auto &field : ret.flat_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = (ret_" + ret.name + sel_str + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("ret_" + ret.name + sel_str, field.offset + field.width - 1, field.offset) + ";\n");
             }
         }
         if (has_rdy) {
@@ -932,7 +936,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                             string typestr = arg.type.toString();
                             ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
                             for (const auto &field : arg.flat_fields) {
-                                ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                                ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
                             }
                             if (i > 0) {
                                 arg_names += ", ";
@@ -953,7 +957,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                         string typestr = arg.type.toString();
                         ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
                         for (const auto &field : arg.flat_fields) {
-                            ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                            ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
                         }
                         if (i > 0) {
                             arg_names += ", ";
@@ -976,7 +980,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                             string typestr = arg.type.toString();
                             ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
                             for (const auto &field : arg.flat_fields) {
-                                ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                                ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
                             }
                             if (i > 0) {
                                 arg_names += ", ";
@@ -995,7 +999,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                         string typestr = arg.type.toString();
                         ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
                         for (const auto &field : arg.flat_fields) {
-                            ctx.hls_body.push_back("  " + field.name + " = (" + portname + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                            ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
                         }
                         if (i > 0) {
                             arg_names += ", ";
@@ -1244,12 +1248,12 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             ctx.hls_header.push_back("      vld_ports_" + std::to_string(i) + " = true;\n");
             for (const auto &arg : arg_ports) {
                 for (const auto &field : arg.flat_fields) {
-                    ctx.hls_header.push_back("      (arg_" + arg.name + "_" + std::to_string(i) + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                    ctx.hls_header.push_back("      " + uintExtractExpr("arg_" + arg.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
                 }
             }
             for (const auto &ret : ret_ports) {
                 for (const auto &field : ret.flat_fields) {
-                    ctx.hls_header.push_back("      " + field.name + " = (ret_" + ret.name + "_" + std::to_string(i) + ")(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                    ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr("ret_" + ret.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
                 }
             }
             if (serv.has_handshake) {
@@ -1381,7 +1385,7 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("      return false;\n");
             ctx.hls_header.push_back("    }\n");
             for (const auto &field : data_fields) {
-                ctx.hls_header.push_back("    " + port_enqdata + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr(port_enqdata, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
             }
             ctx.hls_header.push_back("    " + port_enqvalid + " = true;\n");
             ctx.hls_header.push_back("    return true;\n");
@@ -1391,7 +1395,7 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  " + data_type_str + " front() const {\n");
             ctx.hls_header.push_back("    " + data_type_str + " value;\n");
             for (const auto &field : data_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + port_deqdata + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr(port_deqdata, field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("    return value;\n");
             ctx.hls_header.push_back("  }\n");
@@ -1506,7 +1510,7 @@ void _procQueues(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("    if (accepted > " + std::to_string(i) + ") {\n");
                 ctx.hls_header.push_back("      const " + data_type_str + " &value = values[" + std::to_string(i) + "];\n");
                 for (const auto &field : data_fields) {
-                    ctx.hls_header.push_back("      " + port_enqdata + "[" + std::to_string(i) + "](" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                    ctx.hls_header.push_back("      " + uintExtractExpr(port_enqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
                 }
                 ctx.hls_header.push_back("    }\n");
             }
@@ -1522,7 +1526,7 @@ void _procQueues(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("    if (deqvalid() > " + std::to_string(i) + ") {\n");
                 ctx.hls_header.push_back("      auto &value = deq_buf[" + std::to_string(i) + "];\n");
                 for (const auto &field : data_fields) {
-                    ctx.hls_header.push_back("      " + field.name + " = " + port_deqdata + "[" + std::to_string(i) + "](" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                    ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr(port_deqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + ";\n");
                 }
                 ctx.hls_header.push_back("    }\n");
             }
@@ -1678,7 +1682,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("    " + port_s1_addr + " = addr;\n");
             ctx.hls_header.push_back("    Int<" + data_width_str + "> packed;\n");
             for (const auto &field : write_fields) {
-                ctx.hls_header.push_back("    packed(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
             }
             ctx.hls_header.push_back("    " + port_s1_wdata + " = packed;\n");
             ctx.hls_header.push_back("  }\n");
@@ -1687,7 +1691,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  const DataType& readdata() const {\n");
             ctx.hls_header.push_back("    DataType value;\n");
             for (const auto &field : read_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + port_s2_rdata + "(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr(port_s2_rdata, field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("    readdata_buf = value;\n");
             ctx.hls_header.push_back("    return readdata_buf;\n");
@@ -1802,7 +1806,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("    static_assert(PortIndex < " + read_ports_str + ", \"Read port index out of range\");\n");
             ctx.hls_header.push_back("    DataType value;\n");
             for (const auto &field : read_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + port_s2_readdata + "[PortIndex](" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ");\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr(port_s2_readdata + "[PortIndex]", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("    readdata_buf[PortIndex] = value;\n");
             ctx.hls_header.push_back("    return readdata_buf[PortIndex];\n");
@@ -1816,7 +1820,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("    " + port_s1_writeaddr + "[PortIndex] = addr;\n");
             ctx.hls_header.push_back("    Int<" + data_width_str + "> packed;\n");
             for (const auto &field : write_fields) {
-                ctx.hls_header.push_back("    packed(" + std::to_string(field.offset + field.width - 1) + ", " + std::to_string(field.offset) + ") = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
             }
             ctx.hls_header.push_back("    " + port_s1_writedata + "[PortIndex] = packed;\n");
             ctx.hls_header.push_back("  }\n");
@@ -2032,10 +2036,9 @@ RTLGenResult genModuleRTL(
     auto &hls = result.logic_hls_codes;
     hls.push_back("#include <array>\n");
     hls.push_back("#include <cstdint>\n");
-    hls.push_back("#include <fixint.hpp>\n");
     hls.push_back("\n");
-    hls.push_back("using int128_t = __int128_t;\n");
-    hls.push_back("using uint128_t = __uint128_t;\n");
+    hls.push_back("using std::array;\n");
+    hls.push_back("\n");
     hls.push_back("using int8 = int8_t;\n");
     hls.push_back("using uint8 = uint8_t;\n");
     hls.push_back("using int16 = int16_t;\n");
@@ -2044,8 +2047,8 @@ RTLGenResult genModuleRTL(
     hls.push_back("using uint32 = uint32_t;\n");
     hls.push_back("using int64 = int64_t;\n");
     hls.push_back("using uint64 = uint64_t;\n");
-    hls.push_back("using int128 = int128_t;\n");
-    hls.push_back("using uint128 = uint128_t;\n");
+    hls.push_back("\n");
+    hls.push_back("#define assert(...) ((void)0)\n");
     hls.push_back("\n");
 
     append_lines(hls, ctx.hls_header);

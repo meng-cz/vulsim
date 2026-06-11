@@ -29,6 +29,7 @@
 
 #include <string>
 #include <vector>
+#include <cassert>
 
 #ifndef VULSIM_TRACE_BREAK_CONDITION_SPEC_DEFINED
 #define VULSIM_TRACE_BREAK_CONDITION_SPEC_DEFINED
