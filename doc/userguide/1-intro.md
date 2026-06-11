@@ -120,6 +120,9 @@ CONNECT_CR_R(cons, output, output); // 连接 cons 模块的 output 事务接口
 #include <defhelper.hpp>
 #include <run.hpp> // 专用于 Main 模块的帮助头文件
 
+TOP("TopModule.hpp") // 声明 Main 模块绑定的顶层模块文件是 ./TopModule.hpp
+PROJECT(".") // 声明项目根目录
+
 // 定义一个全局变量 tick_count 来跟踪仿真的时钟周期数
 GLOBAL() {
     // 这里的内容会对所有Service和Simulation函数可见，可以用来存储全局状态
@@ -153,11 +156,14 @@ SIMULATION() {
 
 在代码仓库中提供了上述的示例代码，位于 `example/prodcon` 目录下。假定现在已经在 `build` 目录下完成了工具的编译，我们可以使用以下命令来构建和运行仿真：
 
+如果 `Main.cpp` 中已经通过 `TOP(...)` / `PROJECT(...)` 声明了绑定的顶层模块和项目目录，那么只需要传入 `-m`；如果没有声明，或者想临时切换目标，也可以继续使用 `-t` / `-p` 进行覆盖。
+
 ```bash
 # 生成仿真代码
-./vulsimgen -t example/prodcon/TopModule.hpp -m example/prodcon/Main.cpp
-# -t: 指定顶层硬件设计模块的头文件路径
+./vulsimgen -m example/prodcon/Main.cpp
 # -m: 指定 Main 模块的头文件路径
+# -t: 可选，用于覆盖 Main 中通过 TOP(...) 声明的顶层模块路径
+# -p: 可选，用于覆盖 Main 中通过 PROJECT(...) 声明的项目根目录路径
 # -l: 指定 VulCPP 库文件的路径（默认./vullib/）
 # -o: 指定生成的仿真代码输出目录（默认./sim_out/）
 
@@ -165,7 +171,7 @@ SIMULATION() {
 cd sim_out
 source build.sh
 # 运行仿真
-./prodcon
+./Main
 ```
 
 ## 1.4. 后续

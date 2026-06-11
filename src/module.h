@@ -576,6 +576,8 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top);
 struct VulStaticTestHarnessModule {
 
     VulStaticConfigLib top_config_overrides;
+    string top_module_path;
+    string project_dir_path;
 
     unordered_map<ReqServName, VulTempReq>      requests;
     unordered_map<ReqServName, VulTempServ>      services;

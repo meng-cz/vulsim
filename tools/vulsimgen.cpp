@@ -63,24 +63,43 @@ int simgenStatic(const SimGenArgs &args) {
     const string &break_file = args.break_file;
     const string &break_line = args.break_line;
 
-    std::filesystem::path top_path(top_file);
-    if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
-        throw VulException("Top module file does not exist: " + top_file);
-    }
     std::filesystem::path main_path(main_file);
     if (!std::filesystem::exists(main_path) || !std::filesystem::is_regular_file(main_path)) {
         throw VulException("Main file does not exist: " + main_file);
     }
-    std::filesystem::path proj_path = top_path.parent_path();
-    if (!proj_dir.empty()) {
-        proj_path = std::filesystem::path(proj_dir);
-        if (!std::filesystem::exists(proj_path) || !std::filesystem::is_directory(proj_path)) {
-            throw VulException("Project directory does not exist or is not a directory: " + proj_dir);
+
+    auto resolve_from_main = [&](const string &raw_path) -> std::filesystem::path {
+        std::filesystem::path p(raw_path);
+        if (p.is_absolute()) {
+            return p.lexically_normal();
         }
+        return (main_path.parent_path() / p).lexically_normal();
+    };
+
+    VulErrorContextGuard _err{"generating project from " + main_path.parent_path().string()};
+    VulStaticProject project = parseVcppStaticProject(proj_dir, top_file, main_path.string());
+
+    std::filesystem::path effective_top_path;
+    if (!top_file.empty()) {
+        effective_top_path = std::filesystem::path(top_file);
+    } else if (!project.test_harness.top_module_path.empty()) {
+        effective_top_path = resolve_from_main(project.test_harness.top_module_path);
+    }
+    if (effective_top_path.empty()) {
+        throw VulException("Top module path is not specified. Use -t/--top or TOP(...) in TestMain.");
     }
 
-    VulErrorContextGuard _err{"generating project from " + proj_path.string()};
-    VulStaticProject project = parseVcppStaticProject(proj_path.string(), top_path.string(), main_path.string());
+    std::filesystem::path proj_path;
+    if (!proj_dir.empty()) {
+        proj_path = std::filesystem::path(proj_dir);
+    } else if (!project.test_harness.project_dir_path.empty()) {
+        proj_path = resolve_from_main(project.test_harness.project_dir_path);
+    } else {
+        proj_path = effective_top_path.parent_path();
+    }
+    if (!std::filesystem::exists(proj_path) || !std::filesystem::is_directory(proj_path)) {
+        throw VulException("Project directory does not exist or is not a directory: " + proj_path.string());
+    }
 
     std::filesystem::path out_path(out_dir);
     if (!std::filesystem::exists(out_path)) {
@@ -243,7 +262,7 @@ int simgenStatic(const SimGenArgs &args) {
     }
 
     // generate build script
-    string projname = project.top_module_instance->module_name;
+    string projname = main_path.stem().string();
     string build_cmd = "g++ -std=c++20 -g -O2 main.cpp -I. -o " + projname;
     std::ofstream build_script((out_path / "build.sh").string());
     if (!build_script.is_open()) {
@@ -295,14 +314,14 @@ int main(int argc, char * argv[]) {
 
     argparse::ArgumentParser parser("vulsimgen", "VulSim Simulation Generator V1.0");
     parser.add_argument("-t", "--top")
-        .help("sets the top module file")
-        .required();
+        .help("overrides the top module file path declared by TOP(...) in the main test file")
+        .default_value(std::string(""));
     parser.add_argument("-m", "--main")
         .help("sets the main test file for test case generation")
         .default_value(std::string(""))
         .required();
     parser.add_argument("-p", "--project")
-        .help("sets the project directory (default: parent directory of the top module file)")
+        .help("overrides the project directory declared by PROJECT(...) in the main test file")
         .default_value(std::string(""));
     parser.add_argument("-o", "--out")
         .help("sets the output directory for generated code (default: ./simout)")

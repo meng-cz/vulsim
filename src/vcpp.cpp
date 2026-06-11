@@ -336,6 +336,18 @@ static inline void parseReqArgsAndRets(
     }
 }
 
+static inline string parsePathMacroArg(const string &raw_arg) {
+    string arg = trim(raw_arg);
+    if (arg.size() >= 2) {
+        char first = arg.front();
+        char last = arg.back();
+        if ((first == '"' && last == '"') || (first == '<' && last == '>')) {
+            return arg.substr(1, arg.size() - 2);
+        }
+    }
+    return arg;
+}
+
 class VCPPModuleREQUEST : public VCPPModuleHandler {
 public:
     virtual string name() const { return "REQUEST"; }
@@ -956,6 +968,36 @@ public:
 };
 static VCPPTestAutoRegisterHandler<VCPPTestGLOBAL> _auto_register_TEST_GLOBAL_handler;
 
+class VCPPTestTOP : public VCPPTestHandler {
+public:
+    virtual string name() const { return "TOP"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 1) {
+            throw VulException("TOP requires exactly 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        if (!context.test.top_module_path.empty()) {
+            throw VulException("Multiple TOP declarations are not allowed at " + context.getOriginalPosition(entry.pos));
+        }
+        context.test.top_module_path = parsePathMacroArg(entry.args[0]);
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestTOP> _auto_register_TEST_TOP_handler;
+
+class VCPPTestPROJECT : public VCPPTestHandler {
+public:
+    virtual string name() const { return "PROJECT"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 1) {
+            throw VulException("PROJECT requires exactly 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        if (!context.test.project_dir_path.empty()) {
+            throw VulException("Multiple PROJECT declarations are not allowed at " + context.getOriginalPosition(entry.pos));
+        }
+        context.test.project_dir_path = parsePathMacroArg(entry.args[0]);
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestPROJECT> _auto_register_TEST_PROJECT_handler;
+
 class VCPPTestSIMULATION : public VCPPTestHandler {
 public:
     virtual string name() const { return "SIMULATION"; }
@@ -1031,6 +1073,35 @@ VulStaticTestHarnessModule _parseTestModule(
     return std::move(context.test);
 }
 
+static std::pair<string, string> _scanTestModuleBindingPaths(const string &test_filepath) {
+    vector<string> code_lines = readFileLines(test_filepath);
+    code_lines = stripComments(code_lines).lines;
+    vector<MacroEntry> macro_entries = findAllMacroEntries(code_lines);
+
+    string top_module_path;
+    string project_dir_path;
+    for (const auto &entry : macro_entries) {
+        if (entry.name == "TOP") {
+            if (entry.args.size() != 1) {
+                throw VulException("TOP requires exactly 1 argument");
+            }
+            if (!top_module_path.empty()) {
+                throw VulException("Multiple TOP declarations are not allowed");
+            }
+            top_module_path = parsePathMacroArg(entry.args[0]);
+        } else if (entry.name == "PROJECT") {
+            if (entry.args.size() != 1) {
+                throw VulException("PROJECT requires exactly 1 argument");
+            }
+            if (!project_dir_path.empty()) {
+                throw VulException("Multiple PROJECT declarations are not allowed");
+            }
+            project_dir_path = parsePathMacroArg(entry.args[0]);
+        }
+    }
+    return {top_module_path, project_dir_path};
+}
+
 
 VulStaticProject parseVcppStaticProject(
     const string &project_dir,
@@ -1043,9 +1114,55 @@ VulStaticProject parseVcppStaticProject(
 
     bool is_sim = !main_file_path.empty();
 
-    path proj_dir(project_dir);
+    path main_path;
+    string scanned_top_module_path;
+    string scanned_project_dir_path;
+    if (!main_file_path.empty()) {
+        main_path = path(main_file_path);
+        if (!exists(main_path) || !is_regular_file(main_path)) {
+            std::cerr << "Error: Main file does not exist or is not a regular file: " << main_file_path << std::endl;
+            assert(0);
+        }
+        std::tie(scanned_top_module_path, scanned_project_dir_path) = _scanTestModuleBindingPaths(main_path.string());
+    }
+
+    auto resolve_from_main = [&](const string &raw_path, const string &field_name) -> path {
+        if (raw_path.empty()) {
+            return {};
+        }
+        path p(raw_path);
+        if (p.is_absolute()) {
+            return p.lexically_normal();
+        }
+        if (main_path.empty()) {
+            throw VulException(field_name + " in TestMain requires a main file");
+        }
+        return (main_path.parent_path() / p).lexically_normal();
+    };
+
+    path top_path;
+    if (!top_file_path.empty()) {
+        top_path = path(top_file_path);
+    } else if (!scanned_top_module_path.empty()) {
+        top_path = resolve_from_main(scanned_top_module_path, "TOP");
+    }
+    if (top_path.empty()) {
+        throw VulException("Top module path is not specified. Use -t/--top or TOP(...) in TestMain.");
+    }
+    if (!exists(top_path) || !is_regular_file(top_path)) {
+        throw VulException("Top file does not exist or is not a regular file: " + top_path.string());
+    }
+
+    path proj_dir;
+    if (!project_dir.empty()) {
+        proj_dir = path(project_dir);
+    } else if (!scanned_project_dir_path.empty()) {
+        proj_dir = resolve_from_main(scanned_project_dir_path, "PROJECT");
+    } else {
+        proj_dir = top_path.parent_path();
+    }
     if (!exists(proj_dir) || !is_directory(proj_dir)) {
-        throw VulException("Project directory does not exist or is not a directory: " + project_dir);
+        throw VulException("Project directory does not exist or is not a directory: " + proj_dir.string());
     }
 
     path header_path = proj_dir / "header.hpp";
@@ -1073,11 +1190,6 @@ VulStaticProject parseVcppStaticProject(
     }
 
     if (!main_file_path.empty()) {
-        path main_path(main_file_path);
-        if (!exists(main_path) || !is_regular_file(main_path)) {
-            std::cerr << "Error: Main file does not exist or is not a regular file: " << main_file_path << std::endl;
-            assert(0);
-        }
         {
             VulErrorContextGuard _err{"reading test harness module from " + main_path.string()};
             project.test_harness = _parseTestModule(main_path.string(), project.global_configlib, project.global_bundlelib);
@@ -1125,10 +1237,6 @@ VulStaticProject parseVcppStaticProject(
     std::deque<InstanceToProcess> todo_queue;
 
     shared_ptr<VulStaticModuleInstance> top_instance = std::make_shared<VulStaticModuleInstance>();
-    path top_path(top_file_path);
-    if (!exists(top_path) || !is_regular_file(top_path)) {
-        throw VulException("Top file does not exist or is not a regular file: " + top_file_path);
-    }
     top_instance->module_name = top_path.stem().string();
     if (is_sim) {
         top_instance->instance_path = {"sim", "top"};

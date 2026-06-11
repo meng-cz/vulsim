@@ -18,3 +18,7 @@ void sim_exit();
 #define SIMULATION() void sim_main()
 
 #define GLOBAL() inline namespace global
+
+#define TOP(relapath)
+
+#define PROJECT(relapath)

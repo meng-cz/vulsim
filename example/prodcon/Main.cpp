@@ -4,6 +4,9 @@
 
 #include "header.hpp"
 
+TOP("./TopModule.hpp");
+PROJECT(".");
+
 // Variables
 
 GLOBAL() {
