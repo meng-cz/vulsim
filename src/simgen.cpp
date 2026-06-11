@@ -740,6 +740,7 @@ vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib) {
     vector<string> out_lines = genHeaderPrelude();
 
     out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("#include \"fixint.hpp\"\n");
     out_lines.push_back("\n");
     out_lines.push_back("// Configuration Items\n");
     out_lines.push_back("\n");
@@ -807,6 +808,7 @@ vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib) {
 
     out_lines.push_back("#include \"common.h\"\n");
     out_lines.push_back("#include \"config.h\"\n");
+    out_lines.push_back("#include \"fixint.hpp\"\n");
     out_lines.push_back("\n");
     out_lines.push_back("// Bundle Definitions\n");
     out_lines.push_back("\n");
