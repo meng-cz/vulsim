@@ -581,6 +581,7 @@ struct VulStaticTestHarnessModule {
 
     unordered_map<ReqServName, VulTempReq>      requests;
     unordered_map<ReqServName, VulTempServ>      services;
+    unordered_map<ReqServName, VulStaticQuery>  queries;
 
     vector<CCodeLine> test_codelines;
 

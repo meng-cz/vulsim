@@ -959,6 +959,28 @@ public:
 static VCPPTestAutoRegisterHandler<VCPPTestSERVICE> _auto_register_TEST_SERVICE_handler;
 static VCPPTestAutoRegisterHandler<VCPPTestSERVICE_READY> _auto_register_TEST_SERVICE_READY_handler;
 
+class VCPPTestQUERY : public VCPPTestHandler {
+public:
+    virtual string name() const { return "QUERY"; }
+    virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 2) {
+            throw VulException("QUERY requires exactly 2 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        if (!entry.body.empty()) {
+            throw VulException("QUERY in TestMain must be a declaration without code block at " + context.getOriginalPosition(entry.pos));
+        }
+        VulTempQuery query;
+        query.name = entry.args[0];
+        query.ret_type = entry.args[1];
+        VulErrorContextGuard _err{"Processing QUERY '" + query.name + "' at " + context.getOriginalPosition(entry.pos)};
+        VulStaticQuery static_query;
+        static_query.name = query.name;
+        static_query.ret_type = parseTypeSignature(query.ret_type, context.config_lib);
+        context.test.queries[query.name] = std::move(static_query);
+    }
+};
+static VCPPTestAutoRegisterHandler<VCPPTestQUERY> _auto_register_TEST_QUERY_handler;
+
 class VCPPTestGLOBAL : public VCPPTestHandler {
 public:
     virtual string name() const { return "GLOBAL"; }
@@ -1033,15 +1055,10 @@ VulStaticTestHarnessModule _parseTestModule(
             continue;
         }
         size_t first_quote = line.find('<');
-        char closing_char = '>';
-        if (first_quote == string::npos) {
-            first_quote = line.find('"');
-            closing_char = '"';
-        }
         if (first_quote == string::npos) {
             continue;
         }
-        size_t second_quote = line.find(closing_char, first_quote + 1);
+        size_t second_quote = line.find('>', first_quote + 1);
         if (second_quote == string::npos || second_quote <= first_quote + 1) {
             continue;
         }

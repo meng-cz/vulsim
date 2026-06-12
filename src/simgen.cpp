@@ -1566,6 +1566,23 @@ vector<string> genStaticTestHarnessHpp(
         member_field.push_back("\n");
     }
 
+    for (const auto &query_entry : test_module.queries) {
+        const string &query_name = query_entry.first;
+        const auto &decl_query = query_entry.second;
+        auto top_query_it = top_module.queries.find(query_name);
+        if (top_query_it == top_module.queries.end()) {
+            throw VulException("TestMain QUERY '" + query_name + "' not found in top module '" + top_module.module_name + "'");
+        }
+        const auto &top_query = top_query_it->second;
+        if (!(decl_query.ret_type == top_query.ret_type)) {
+            throw VulException("TestMain QUERY '" + query_name + "' return type mismatch with top module query");
+        }
+        member_field.push_back(top_query.ret_type.toString() + " " + query_name + "() const {\n");
+        member_field.push_back(CodeTab + "return " + child_instptr_name + "->" + query_name + "();\n");
+        member_field.push_back("}\n");
+        member_field.push_back("\n");
+    }
+
     for (const auto &serve : test_module.services) {
         const auto &serv_name = serve.first;
         const auto &serv = serve.second;
