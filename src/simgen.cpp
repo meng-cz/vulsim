@@ -896,10 +896,24 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     // generate service declarations
     for (const auto &serv_entry : mod.services) {
         const auto &serv = serv_entry.second;
+        const string call_guard_name = "__service_called_" + serv_entry.first;
+        const string service_assert_msg =
+            "SERVICE '" + mod.module_name + "::" + serv_entry.first +
+            "' may only be called once per cycle";
         string rettype = serv.returnType();
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
         const bool is_arrayed = serv.is_arrayed;
+
+        if (is_arrayed) {
+            decl_private_field.push_back("std::array<bool, " + std::to_string(serv.array_size) + "> " + call_guard_name + ";\n");
+            impl_sys_reset_field.push_back("for (auto &__flag : " + call_guard_name + ") __flag = false;\n");
+            impl_commit_field.push_back("for (auto &__flag : " + call_guard_name + ") __flag = false;\n");
+        } else {
+            decl_private_field.push_back("bool " + call_guard_name + ";\n");
+            impl_sys_reset_field.push_back(call_guard_name + " = false;\n");
+            impl_commit_field.push_back(call_guard_name + " = false;\n");
+        }
 
         if (is_arrayed) {
             decl_public_field.push_back("template <uint32_t IDX = 0>\n");
@@ -916,6 +930,13 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                     impl_field.push_back("template <uint32_t IDX>\n");
                 }
                 impl_field.push_back("void " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
+                if (is_arrayed) {
+                    impl_field.push_back(CodeTab + "assert(!" + call_guard_name + "[IDX] && \"" + service_assert_msg + " (for each array index)\");\n");
+                    impl_field.push_back(CodeTab + call_guard_name + "[IDX] = true;\n");
+                } else {
+                    impl_field.push_back(CodeTab + "assert(!" + call_guard_name + " && \"" + service_assert_msg + "\");\n");
+                    impl_field.push_back(CodeTab + call_guard_name + " = true;\n");
+                }
                 impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
                 impl_field.push_back("}\n");
             } else {
@@ -933,6 +954,13 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                     impl_field.push_back("template <uint32_t IDX>\n");
                 }
                 impl_field.push_back("bool " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
+                if (is_arrayed) {
+                    impl_field.push_back(CodeTab + "assert(!" + call_guard_name + "[IDX] && \"" + service_assert_msg + " (for each array index)\");\n");
+                    impl_field.push_back(CodeTab + call_guard_name + "[IDX] = true;\n");
+                } else {
+                    impl_field.push_back(CodeTab + "assert(!" + call_guard_name + " && \"" + service_assert_msg + "\");\n");
+                    impl_field.push_back(CodeTab + call_guard_name + " = true;\n");
+                }
                 if (is_arrayed) {
                     impl_field.push_back(CodeTab + "bool cond = __cond_" + serv_entry.first + "<IDX>(" + argnames + ");\n");
                     impl_field.push_back(CodeTab + "if (cond) __impl_" + serv_entry.first + "<IDX>(" + argnames + ");\n");
