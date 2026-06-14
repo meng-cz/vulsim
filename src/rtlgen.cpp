@@ -1515,15 +1515,12 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  bool enqnext(const " + data_type_str + " &value) {\n");
-            ctx.hls_header.push_back("    if (!enqready()) {\n");
-            ctx.hls_header.push_back("      return false;\n");
-            ctx.hls_header.push_back("    }\n");
+            ctx.hls_header.push_back("  void enqnext(const " + data_type_str + " &value) {\n");
+            ctx.hls_header.push_back("    assert(enqready());\n");
             for (const auto &field : data_fields) {
                 ctx.hls_header.push_back("    " + uintExtractExpr(port_enqdata, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
             }
             ctx.hls_header.push_back("    " + port_enqvalid + " = true;\n");
-            ctx.hls_header.push_back("    return true;\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
@@ -1537,6 +1534,7 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("\n");
 
             ctx.hls_header.push_back("  void deqnext() {\n");
+            ctx.hls_header.push_back("    assert(deqvalid());\n");
             ctx.hls_header.push_back("    " + port_deqready + " = true;\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
@@ -1591,8 +1589,8 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.rtl_inst.push_back("  .clrnext(" + port_clrnext + ")\n");
             ctx.rtl_inst.push_back(");\n");
         } else {
-            string enqready_type_str = "Int<" + enq_cnt_width_str + ">";
-            string deqvalid_type_str = "Int<" + deq_cnt_width_str + ">";
+            string enqready_type_str = "uint32_t";
+            string deqvalid_type_str = "uint32_t";
             string enqvalid_type_str = "Int<" + enq_cnt_width_str + ">";
             string deqready_type_str = "Int<" + deq_cnt_width_str + ">";
             string enqdata_type_str = "std::array<Int<" + data_width_str + ">, " + enq_width_str + ">";
@@ -1628,29 +1626,28 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("\n");
 
             ctx.hls_header.push_back("  " + enqready_type_str + " enqreqdy() const {\n");
-            ctx.hls_header.push_back("    return " + port_enqready + ";\n");
+            ctx.hls_header.push_back("    return " + port_enqready + ".template to<uint32_t>();\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
             ctx.hls_header.push_back("  " + deqvalid_type_str + " deqvalid() const {\n");
-            ctx.hls_header.push_back("    return " + port_deqvalid + ";\n");
+            ctx.hls_header.push_back("    return " + port_deqvalid + ".template to<uint32_t>();\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  " + enqready_type_str + " enqnext(const " + enqdata_type_str + " &values, const " + enqready_type_str + " num = " + enq_width_str + ") {\n");
+            ctx.hls_header.push_back("  void enqnext(const " + enqdata_type_str + " &values, const " + enqready_type_str + " num = " + enq_width_str + ") {\n");
             ctx.hls_header.push_back("    const " + enqready_type_str + " req = (num < " + enq_width_str + ") ? num : " + enq_width_str + ";\n");
             ctx.hls_header.push_back("    const " + enqready_type_str + " rdy = enqreqdy();\n");
-            ctx.hls_header.push_back("    const " + enqready_type_str + " accepted = (req < rdy) ? req : rdy;\n");
+            ctx.hls_header.push_back("    assert(req <= rdy);\n");
             for (uint32_t i = 0; i < (uint32_t)que.enq_width; ++i) {
-                ctx.hls_header.push_back("    if (accepted > " + std::to_string(i) + ") {\n");
+                ctx.hls_header.push_back("    if (req > " + std::to_string(i) + ") {\n");
                 ctx.hls_header.push_back("      const " + data_type_str + " &value = values[" + std::to_string(i) + "];\n");
                 for (const auto &field : data_fields) {
                     ctx.hls_header.push_back("      " + uintExtractExpr(port_enqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
                 }
                 ctx.hls_header.push_back("    }\n");
             }
-            ctx.hls_header.push_back("    " + port_enqvalid + " = accepted;\n");
-            ctx.hls_header.push_back("    return accepted;\n");
+            ctx.hls_header.push_back("    " + port_enqvalid + " = static_cast<uint32_t>(req);\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 
@@ -1672,8 +1669,8 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  void deqnext(const " + deqvalid_type_str + " num = " + deq_width_str + ") {\n");
             ctx.hls_header.push_back("    const " + deqvalid_type_str + " req = (num < " + deq_width_str + ") ? num : " + deq_width_str + ";\n");
             ctx.hls_header.push_back("    const " + deqvalid_type_str + " valid = deqvalid();\n");
-            ctx.hls_header.push_back("    const " + deqvalid_type_str + " accepted = (req < valid) ? req : valid;\n");
-            ctx.hls_header.push_back("    " + port_deqready + " = accepted;\n");
+            ctx.hls_header.push_back("    assert(req <= valid);\n");
+            ctx.hls_header.push_back("    " + port_deqready + " = static_cast<uint32_t>(req);\n");
             ctx.hls_header.push_back("  }\n");
             ctx.hls_header.push_back("\n");
 

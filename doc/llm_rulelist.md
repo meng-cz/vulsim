@@ -590,14 +590,15 @@ if (q.enqready()) {
 }
 
 if (q.deqvalid()) {
-    uint32_t x = q.deqnext();
+    uint32_t x = q.front();
+    q.deqnext();
 }
 ```
 
 128. `enqnext()` / `deqnext()` 是 next 语义。
 129. 每周期最多一次 `enqnext()`。
 130. 每周期最多一次 `deqnext()`。
-131. `deqnext()` 返回当前队头，同时登记出队请求。
+131. `front()` 返回当前队头，`deqnext()` 只登记出队请求。
 132. `clrnext()` 提交时优先于出队和入队。
 133. 提交顺序：清空、出队、入队。
 134. 调用 `enqnext()` 后不要继续依赖本周期 `enqready()`。
@@ -611,18 +612,19 @@ QUEUE_MP(q, uint32_t, 16, 2, 2);
 137. 多宽接口：
 
 ```cpp
-q.enqreqdy(); (const Int<clog2(2+1)>)
+q.enqreqdy(); (const uint32_t)
 q.enqnext(values, num);
-q.deqvalid(); (const Int<clog2(2+1)>)
+q.deqvalid(); (const uint32_t)
+q.front(num);
 q.deqnext(num);
 q.clrnext();
 ```
 
 138. `enqreqdy()` 返回当前最多可接受数量。
-139. `enqnext(values, num)` 返回实际接受数量。
+139. `enqnext(values, num)` 返回 `void`，调用前必须保证 `num <= enqreqdy()`。
 140. `deqvalid()` 返回当前最多可出队数量。
-141. `deqnext(num)` 返回队头窗口并登记出队请求。
-142. 多宽队列必须以返回值和 valid/ready 数量为准，不能假设全部成功。
+141. `front(num)` 返回队头窗口，`deqnext(num)` 只登记出队请求，调用前必须保证 `num <= deqvalid()`。
+142. 多宽队列必须以 valid/ready 数量为准，不能假设全部成功。
 
 ---
 
@@ -883,7 +885,8 @@ CONFIG(QUEUE_SIZE, 8);
 QUEUE(q, uint32_t, QUEUE_SIZE);
 
 SERVICE_READY(deq, q.deqvalid(), RESP(uint32_t) data) {
-    data = q.deqnext();
+    data = q.front();
+    q.deqnext();
 }
 
 REGISTER(cycle, uint32_t) {

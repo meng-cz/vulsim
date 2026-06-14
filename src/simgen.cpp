@@ -62,6 +62,7 @@ const string BlockRAMClassName = "VulBRAM";
 const string BlockRAM1RWClassName = "VulBRAM1RW";
 const string ROMClassName = "VulROM";
 const string QueueClassName = "VulQueue";
+const string QueueMPClassName = "VulQueueMP";
 
 string genCurrentTimeString() {
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
@@ -1118,11 +1119,12 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         if (queue.deq_width == 0 || queue.enq_width == 0) {
             throw VulException("Queue must have positive enq_width and deq_width");
         }
+        bool is_multi_queue = queue.deq_width > 1 || queue.enq_width > 1;
         string queue_param = queue.type.toString() + ", " + std::to_string(queue.depth);
-        if (queue.deq_width > 1 || queue.enq_width > 1) {
+        if (is_multi_queue) {
             queue_param += ", " + std::to_string(queue.enq_width) + ", " + std::to_string(queue.deq_width);
         }
-        string queue_class = QueueClassName + "<" + queue_param + ">";
+        string queue_class = (is_multi_queue ? QueueMPClassName : QueueClassName) + "<" + queue_param + ">";
         decl_private_field.push_back(queue_class + " " + queue.name + ";\n");
         impl_commit_field.push_back(CodeTab + queue.name + "." + ApplyTickFunctionName + "();\n");
     }

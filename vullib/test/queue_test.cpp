@@ -11,7 +11,7 @@ void test_empty_and_basic_enq_deq() {
     assert(!q.deqvalid());
     assert(q.enqready());
 
-    assert(q.enqnext(10));
+    q.enqnext(10);
     assert(!q.deqvalid());
     q.apply_next_tick();
 
@@ -28,23 +28,22 @@ void test_empty_and_basic_enq_deq() {
 void test_full_condition() {
     VulQueue<int, 2> q;
 
-    assert(q.enqnext(1));
+    q.enqnext(1);
     q.apply_next_tick();
-    assert(q.enqnext(2));
+    q.enqnext(2);
     q.apply_next_tick();
 
     assert(!q.enqready());
-    assert(!q.enqnext(3));
 }
 
 void test_fifo_order() {
     VulQueue<int, 3> q;
 
-    assert(q.enqnext(11));
+    q.enqnext(11);
     q.apply_next_tick();
-    assert(q.enqnext(22));
+    q.enqnext(22);
     q.apply_next_tick();
-    assert(q.enqnext(33));
+    q.enqnext(33);
     q.apply_next_tick();
 
     assert(q.deqvalid());
@@ -68,9 +67,9 @@ void test_fifo_order() {
 void test_enq_and_deq_same_tick_apply_together() {
     VulQueue<int, 2> q;
 
-    assert(q.enqnext(7));
+    q.enqnext(7);
     q.apply_next_tick();
-    assert(q.enqnext(8));
+    q.enqnext(8);
     q.apply_next_tick();
 
     assert(q.deqvalid());
@@ -79,11 +78,10 @@ void test_enq_and_deq_same_tick_apply_together() {
     assert(!q.enqready());
 
     // This enqueue is blocked because queue is still full in this cycle.
-    assert(!q.enqnext(9));
     q.apply_next_tick();
 
     assert(q.enqready());
-    assert(q.enqnext(9));
+    q.enqnext(9);
     q.apply_next_tick();
 
     assert(q.deqvalid());
@@ -99,9 +97,9 @@ void test_enq_and_deq_same_tick_apply_together() {
 void test_clrnext() {
     VulQueue<int, 4> q;
 
-    assert(q.enqnext(100));
+    q.enqnext(100);
     q.apply_next_tick();
-    assert(q.enqnext(200));
+    q.enqnext(200);
     q.apply_next_tick();
     assert(q.deqvalid());
 
@@ -112,7 +110,7 @@ void test_clrnext() {
 
     assert(!q.deqvalid());
     assert(q.enqready());
-    assert(q.enqnext(300));
+    q.enqnext(300);
     q.apply_next_tick();
     assert(q.deqvalid());
     assert(q.front() == 300);
@@ -122,12 +120,12 @@ void test_clrnext() {
 void test_clrnext_drops_same_cycle_enq() {
     VulQueue<int, 4> q;
 
-    assert(q.enqnext(100));
+    q.enqnext(100);
     q.apply_next_tick();
     assert(q.deqvalid());
 
     q.clrnext();
-    assert(q.enqnext(200));
+    q.enqnext(200);
     q.apply_next_tick();
 
     assert(!q.deqvalid());
@@ -139,7 +137,7 @@ void test_front_does_not_schedule_deq() {
 
     assert(q.enqready());
     assert(q.enqready());
-    assert(q.enqnext(10));
+    q.enqnext(10);
     q.apply_next_tick();
 
     assert(q.deqvalid());
@@ -164,7 +162,7 @@ void test_mp_basic_pack_enq_deq() {
     assert(q.deqvalid() == 0);
 
     std::array<int, 3> in = {1, 2, 3};
-    assert(q.enqnext(in, 3) == 3);
+    q.enqnext(in, 3);
     assert(q.enqreqdy() == 3);
     q.apply_next_tick();
 
@@ -193,13 +191,13 @@ void test_mp_partial_accept_and_fifo() {
     VulQueueMP<int, 4, 3, 3> q;
 
     std::array<int, 3> in0 = {10, 11, 12};
-    assert(q.enqnext(in0, 3) == 3);
+    q.enqnext(in0, 3);
     q.apply_next_tick();
 
     // Queue has only one free slot now.
     std::array<int, 3> in1 = {13, 14, 15};
     assert(q.enqreqdy() == 1);
-    assert(q.enqnext(in1, 3) == 1);
+    q.enqnext(in1, 1);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 3);
@@ -224,9 +222,9 @@ void test_mp_same_tick_deq_not_free_for_enq_and_clr() {
 
     std::array<int, 2> in0 = {1, 2};
     std::array<int, 2> in1 = {3, 4};
-    assert(q.enqnext(in0, 2) == 2);
+    q.enqnext(in0, 2);
     q.apply_next_tick();
-    assert(q.enqnext(in1, 2) == 2);
+    q.enqnext(in1, 2);
     q.apply_next_tick();
 
     // Full queue, dequeue in this tick does not free enqueue space immediately.
@@ -236,7 +234,6 @@ void test_mp_same_tick_deq_not_free_for_enq_and_clr() {
     assert(out0[1] == 2);
     q.deqnext(2);
     std::array<int, 2> in2 = {5, 6};
-    assert(q.enqnext(in2, 2) == 0);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 2);
@@ -259,12 +256,12 @@ void test_mp_clrnext_drops_same_cycle_enq() {
     std::array<int, 2> in0 = {1, 2};
     std::array<int, 2> in1 = {3, 4};
 
-    assert(q.enqnext(in0, 2) == 2);
+    q.enqnext(in0, 2);
     q.apply_next_tick();
     assert(q.deqvalid() == 2);
 
     q.clrnext();
-    assert(q.enqnext(in1, 2) == 2);
+    q.enqnext(in1, 2);
     q.apply_next_tick();
 
     assert(q.deqvalid() == 0);

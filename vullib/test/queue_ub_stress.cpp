@@ -30,17 +30,15 @@ struct RefQueue {
         return q.front();
     }
 
-    bool enqnext(const T& value) {
-        if (!enqready()) {
-            return false;
-        }
+    void enqnext(const T& value) {
+        assert(enqready());
         enq_pending = true;
         enq_value = value;
-        return true;
     }
 
     void deqnext() {
-        deq_pending = deqvalid();
+        assert(deqvalid());
+        deq_pending = true;
     }
 
     void clrnext() {
@@ -90,19 +88,19 @@ struct RefQueueMP {
         return out;
     }
 
-    uint32_t enqnext(const std::array<T, EnqWidth>& values, uint32_t num) {
+    void enqnext(const std::array<T, EnqWidth>& values, uint32_t num) {
         const uint32_t req = std::min<uint32_t>(num, EnqWidth);
-        const uint32_t accepted = std::min<uint32_t>(req, enqreqdy());
-        for (uint32_t i = 0; i < accepted; ++i) {
+        assert(req <= enqreqdy());
+        for (uint32_t i = 0; i < req; ++i) {
             enq_values[i] = values[i];
         }
-        enq_pending_num = accepted;
-        return accepted;
+        enq_pending_num = req;
     }
 
     void deqnext(uint32_t num) {
         const uint32_t req = std::min<uint32_t>(num, DeqWidth);
-        deq_pending_num = std::min<uint32_t>(req, deqvalid());
+        assert(req <= deqvalid());
+        deq_pending_num = req;
     }
 
     void clrnext() {
@@ -158,7 +156,8 @@ void stress_single_port() {
 
         if ((rng() & 1u) == 0u && dut.enqready()) {
             const int value = static_cast<int>(rng());
-            assert(dut.enqnext(value) == ref.enqnext(value));
+            dut.enqnext(value);
+            ref.enqnext(value);
         }
 
         if ((rng() & 1u) == 0u && dut.deqvalid()) {
@@ -187,10 +186,10 @@ void stress_multi_port() {
     RefQueueMP<int, 8, 3, 2> ref;
 
     for (int tick = 0; tick < 20000; ++tick) {
-        assert(dut.enqreqdy().template to<uint32_t>() == ref.enqreqdy());
-        assert(dut.enqreqdy().template to<uint32_t>() == ref.enqreqdy());
-        assert(dut.deqvalid().template to<uint32_t>() == ref.deqvalid());
-        assert(dut.deqvalid().template to<uint32_t>() == ref.deqvalid());
+        assert(dut.enqreqdy() == ref.enqreqdy());
+        assert(dut.enqreqdy() == ref.enqreqdy());
+        assert(dut.deqvalid() == ref.deqvalid());
+        assert(dut.deqvalid() == ref.deqvalid());
 
         {
             const uint32_t valid = ref.deqvalid();
@@ -212,8 +211,10 @@ void stress_multi_port() {
                 static_cast<int>(rng()),
                 static_cast<int>(rng())
             };
-            const uint32_t req = static_cast<uint32_t>(rng() % 4);
-            assert(dut.enqnext(values, req).template to<uint32_t>() == ref.enqnext(values, req));
+            const uint32_t rdy = ref.enqreqdy();
+            const uint32_t req = rdy == 0 ? 0 : static_cast<uint32_t>(rng() % (rdy + 1));
+            dut.enqnext(values, req);
+            ref.enqnext(values, req);
         }
 
         if ((rng() & 1u) == 0u) {
@@ -224,19 +225,19 @@ void stress_multi_port() {
                 for (uint32_t i = 0; i < valid; ++i) {
                     assert(out_dut[i] == out_ref[i]);
                 }
-                const uint32_t req = static_cast<uint32_t>(rng() % 3);
+                const uint32_t req = static_cast<uint32_t>(rng() % (valid + 1));
                 dut.deqnext(req);
                 ref.deqnext(req);
             }
         }
 
-        assert(dut.enqreqdy().template to<uint32_t>() == ref.enqreqdy());
-        assert(dut.deqvalid().template to<uint32_t>() == ref.deqvalid());
+        assert(dut.enqreqdy() == ref.enqreqdy());
+        assert(dut.deqvalid() == ref.deqvalid());
         dut.apply_next_tick();
         ref.apply_next_tick();
 
         const uint32_t valid = ref.deqvalid();
-        assert(dut.deqvalid().template to<uint32_t>() == valid);
+        assert(dut.deqvalid() == valid);
         const auto out_dut = dut.front();
         const auto out_ref = ref.front();
         for (uint32_t i = 0; i < valid; ++i) {

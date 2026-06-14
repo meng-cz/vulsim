@@ -32,7 +32,7 @@ public:
 
     bool enqready() const;
     bool deqvalid() const;
-    bool enqnext(const T &value);
+    void enqnext(const T &value);
     const T& front() const;
     void deqnext();
     void clrnext();
@@ -66,8 +66,8 @@ public:
 - 单个 tick 内只允许调用一次。
 - 若同一个 tick 内再次调用，debug 构建下会触发 `assert`。
 - release 构建下重复调用的行为未定义。
-- 如果当前 `enqready()` 为假，则返回 `false`。
-- 否则把参数写入 `enq_buf_`，并把 `enq_pending_` 设为 `true`，返回 `true`。
+- 调用前要求 `enqready()` 为真；否则 debug 构建下触发 `assert`。
+- 满足条件时把参数写入 `enq_buf_`，并把 `enq_pending_` 设为 `true`。
 
 ### 2.6 `front()`
 
@@ -80,6 +80,7 @@ public:
 - 单个 tick 内只允许调用一次。
 - 若同一个 tick 内再次调用，debug 构建下会触发 `assert`。
 - release 构建下重复调用的行为未定义。
+- 调用前要求 `deqvalid()` 为真；否则 debug 构建下触发 `assert`。
 - 该接口仅把 `deq_pending_` 设为 `true`。
 - 它不返回数据。
 
@@ -133,22 +134,14 @@ public:
 template<typename T, uint32_t Depth, uint32_t EnqWidth, uint32_t DeqWidth>
 class VulQueueMP {
 public:
-    static constexpr uint32_t EnqCntWidth = log2ceil(EnqWidth + 1);
-    static constexpr uint32_t DeqCntWidth = log2ceil(DeqWidth + 1);
-    static constexpr uint32_t DepthWidth  = log2ceil(Depth + 1);
-
-    using EnqCntInt   = Int<EnqCntWidth>;
-    using DeqCntInt   = Int<DeqCntWidth>;
-    using DepthCntInt = Int<DepthWidth>;
-
     VulQueueMP() = default;
 
-    EnqCntInt enqreqdy() const;
-    DeqCntInt deqvalid() const;
-    EnqCntInt enqnext(const std::array<T, EnqWidth> &values,
-                      const EnqCntInt num = EnqWidth);
-    const std::array<T, DeqWidth>& front(const DeqCntInt num = DeqWidth) const;
-    void deqnext(const DeqCntInt num = DeqWidth);
+    uint32_t enqreqdy() const;
+    uint32_t deqvalid() const;
+    void enqnext(const std::array<T, EnqWidth> &values,
+                 const uint32_t num = EnqWidth);
+    const std::array<T, DeqWidth>& front(const uint32_t num = DeqWidth) const;
+    void deqnext(const uint32_t num = DeqWidth);
     void clrnext();
     void apply_next_tick();
 };
@@ -157,12 +150,12 @@ public:
 ### 3.2 `enqreqdy()`
 
 - 返回“当前已提交状态下最多还能接受多少个 enqueue 请求”。
-- 值域是 `0..EnqWidth`。
+- 值域是 `0..EnqWidth`，返回类型是 `uint32_t`。
 - 与单端口版本一样，它不考虑本 tick 尚未提交的 `deqnext()`。
 
 ### 3.3 `deqvalid()`
 
-- 返回当前 `deq_buf_` 中有效元素个数。
+- 返回当前 `deq_buf_` 中有效元素个数，返回类型是 `uint32_t`。
 - 该值只在 `apply_next_tick()` 后更新。
 
 ### 3.4 `enqnext(...)`
@@ -172,9 +165,8 @@ public:
 - release 构建下重复调用的行为未定义。
 - 参数 `num` 表示本次请求入队的元素个数。
 - 实现会先把 `num` 截断到不超过 `EnqWidth`。
-- 再与 `enqreqdy()` 取最小值，得到 `accepted`。
-- 仅 `values[0 .. accepted-1]` 会被拷入 `enq_buf_`。
-- 返回值就是 `accepted`。
+- 调用前要求截断后的请求值不超过 `enqreqdy()`；否则 debug 构建下触发 `assert`。
+- 仅 `values[0 .. num-1]` 会被拷入 `enq_buf_`。
 - `enq_pending_num_` 会被整个覆盖，因此一个 tick 内多次调用时，后一次请求会覆盖前一次请求。
 
 ### 3.5 `front(...)`
@@ -190,7 +182,8 @@ public:
 - release 构建下重复调用的行为未定义。
 - 参数 `num` 表示本次想在下一次 `apply_next_tick()` 中弹出的元素数。
 - 实现会把 `num` 截断到不超过 `DeqWidth`。
-- 再与当前 `deqvalid()` 取最小值，写入 `deq_pending_num_`。
+- 调用前要求截断后的请求值不超过 `deqvalid()`；否则 debug 构建下触发 `assert`。
+- `deq_pending_num_` 直接写入该请求值。
 
 ### 3.7 `clrnext()`
 
