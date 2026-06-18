@@ -800,6 +800,37 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
 
     map<int32_t, vector<ServiceCache>> service_cache; // priority -> service cache
 
+    auto append_call_name = [](string &call_names, const string &name) {
+        if (!call_names.empty()) {
+            call_names += ", ";
+        }
+        call_names += name;
+    };
+
+    auto emit_unpack_arg = [&](const ArgPort &arg, const string &portname, string &call_names) {
+        string typestr = arg.type.toString();
+        ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
+        for (const auto &field : arg.flat_fields) {
+            ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
+        }
+        append_call_name(call_names, arg.name);
+    };
+
+    auto emit_construct_ret = [&](const ArgPort &ret, string &call_names) {
+        string typestr = ret.type.toString();
+        ctx.hls_body.push_back("  " + typestr + " " + ret.name + ";\n");
+        append_call_name(call_names, ret.name);
+    };
+
+    auto emit_pack_ret = [&](const ArgPort &ret, const string &portname) {
+        string temp_var_name = ret.name + "_packed";
+        ctx.hls_body.push_back("    Int<" + std::to_string(ret.width) + "> " + ret.name + "_packed;\n");
+        for (const auto &field : ret.flat_fields) {
+            ctx.hls_body.push_back("    " + uintExtractExpr(temp_var_name, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+        }
+        ctx.hls_body.push_back("    " + portname + " = " + temp_var_name + ";\n");
+    };
+
     for (const auto &entry : ctx.module.services) {
         const string &serv_name = entry.first;
         const VulStaticReqServ &serv = entry.second;
@@ -937,43 +968,45 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                 if (cache.is_arrayed) {
                     for (uint32_t idx = 0; idx < cache.array_size; ++idx) {
                         ctx.hls_body.push_back("{\n");
-                        string arg_names = "";
+                        string call_names = "";
                         for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                             const auto &arg = cache.arg_ports[i];
                             string portname = (reqservArgPort(cache.name, arg.name) + "[" + std::to_string(idx) + "]");
-                            string typestr = arg.type.toString();
-                            ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
-                            for (const auto &field : arg.flat_fields) {
-                                ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
-                            }
-                            if (i > 0) {
-                                arg_names += ", ";
-                            }
-                            arg_names += arg.name;
+                            emit_unpack_arg(arg, portname, call_names);
                         }
-                        ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + arg_names + ");\n");
-                        ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        for (const auto &ret : cache.ret_ports) {
+                            emit_construct_ret(ret, call_names);
+                        }
+                        ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + call_names + ");\n");
+                        ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) {\n");
+                        ctx.hls_body.push_back("    " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + call_names + ");\n");
+                        for (const auto &ret : cache.ret_ports) {
+                            string portname = reqservArgPort(cache.name, ret.name) + "[" + std::to_string(idx) + "]";
+                            emit_pack_ret(ret, portname);
+                        }
+                        ctx.hls_body.push_back("  }\n");
                         ctx.hls_body.push_back("  " + reqservRdyPort(cache.name) + "[" + std::to_string(idx) + "] = rdy;\n");
                         ctx.hls_body.push_back("}\n");
                     }
                 } else {
                     ctx.hls_body.push_back("{\n");
-                    string arg_names = "";
+                    string call_names = "";
                     for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                         const auto &arg = cache.arg_ports[i];
                         string portname = (reqservArgPort(cache.name, arg.name));
-                        string typestr = arg.type.toString();
-                        ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
-                        for (const auto &field : arg.flat_fields) {
-                            ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
-                        }
-                        if (i > 0) {
-                            arg_names += ", ";
-                        }
-                        arg_names += arg.name;
+                        emit_unpack_arg(arg, portname, call_names);
                     }
-                    ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "(" + arg_names + ");\n");
-                    ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + arg_names + ");\n");
+                    for (const auto &ret : cache.ret_ports) {
+                        emit_construct_ret(ret, call_names);
+                    }
+                    ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "(" + call_names + ");\n");
+                    ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + ") {\n");
+                    ctx.hls_body.push_back("    " + implFuncName(cache.name) + "(" + call_names + ");\n");
+                    for (const auto &ret : cache.ret_ports) {
+                        string portname = reqservArgPort(cache.name, ret.name);
+                        emit_pack_ret(ret, portname);
+                    }
+                    ctx.hls_body.push_back("  }\n");
                     ctx.hls_body.push_back("  " + reqservRdyPort(cache.name) + " = rdy;\n");
                     ctx.hls_body.push_back("}\n");
                 }
@@ -981,40 +1014,42 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                 if (cache.is_arrayed) {
                     for (uint32_t idx = 0; idx < cache.array_size; ++idx) {
                         ctx.hls_body.push_back("{\n");
-                        string arg_names = "";
+                        string call_names = "";
                         for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                             const auto &arg = cache.arg_ports[i];
                             string portname = reqservArgPort(cache.name, arg.name) + "[" + std::to_string(idx) + "]";
-                            string typestr = arg.type.toString();
-                            ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
-                            for (const auto &field : arg.flat_fields) {
-                                ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
-                            }
-                            if (i > 0) {
-                                arg_names += ", ";
-                            }
-                            arg_names += arg.name;
+                            emit_unpack_arg(arg, portname, call_names);
                         }
-                        ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + arg_names + ");\n");
+                        for (const auto &ret : cache.ret_ports) {
+                            emit_construct_ret(ret, call_names);
+                        }
+                        ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) {\n");
+                        ctx.hls_body.push_back("    " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + call_names + ");\n");
+                        for (const auto &ret : cache.ret_ports) {
+                            string portname = reqservArgPort(cache.name, ret.name) + "[" + std::to_string(idx) + "]";
+                            emit_pack_ret(ret, portname);
+                        }
+                        ctx.hls_body.push_back("  }\n");
                         ctx.hls_body.push_back("}\n");
                     }
                 } else {
                     ctx.hls_body.push_back("{\n");
-                    string arg_names = "";
+                    string call_names = "";
                     for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                         const auto &arg = cache.arg_ports[i];
                         string portname = reqservArgPort(cache.name, arg.name);
-                        string typestr = arg.type.toString();
-                        ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
-                        for (const auto &field : arg.flat_fields) {
-                            ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
-                        }
-                        if (i > 0) {
-                            arg_names += ", ";
-                        }
-                        arg_names += arg.name;
+                        emit_unpack_arg(arg, portname, call_names);
                     }
-                    ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + ") " + implFuncName(cache.name) + "(" + arg_names + ");\n");
+                    for (const auto &ret : cache.ret_ports) {
+                        emit_construct_ret(ret, call_names);
+                    }
+                    ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + ") {\n");
+                    ctx.hls_body.push_back("    " + implFuncName(cache.name) + "(" + call_names + ");\n");
+                    for (const auto &ret : cache.ret_ports) {
+                        string portname = reqservArgPort(cache.name, ret.name);
+                        emit_pack_ret(ret, portname);
+                    }
+                    ctx.hls_body.push_back("  }\n");
                     ctx.hls_body.push_back("}\n");
                 }
             } else {
