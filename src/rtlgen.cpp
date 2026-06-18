@@ -648,6 +648,15 @@ inline string queryPort(const string &query_name) {
 
 void _procRequests(RTLGenContext &ctx) {
 
+    auto request_driven_by_child_connection = [&](const string &req_name) {
+        for (const auto &conn : ctx.module.req_connections) {
+            if (!conn.req_instance.empty() && conn.serv_instance.empty() && conn.serv_name == req_name) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     for (const auto &req_entry : ctx.module.requests) {
         const string &req_name = req_entry.first;
         const VulStaticReqServ &req = req_entry.second;
@@ -669,6 +678,7 @@ void _procRequests(RTLGenContext &ctx) {
         bool has_rdy = req.has_handshake;
         const bool is_arrayed = req.is_arrayed;
         const uint32_t array_size = static_cast<uint32_t>(req.array_size);
+        const bool connected_from_child_request = request_driven_by_child_connection(req_name);
 
         auto arrayed_port_decl = [&](const string &base_name) -> string {
             if (is_arrayed) {
@@ -681,96 +691,106 @@ void _procRequests(RTLGenContext &ctx) {
         // hls function ports
         string vld_port_name = reqservVldPort(req_name);
         string rdy_port_name = reqservRdyPort(req_name);
-        ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " &" + vld_port_name);
-        if (has_rdy) {
-            ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " " + rdy_port_name);
-        }
-        for (const auto &arg : arg_ports) {
-            ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " &" + reqservArgPort(req_name, arg.name));
-        }
-        for (const auto &ret : ret_ports) {
-            ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " " + reqservArgPort(req_name, ret.name));
-        }
-
-        if (is_arrayed) {
-            for (uint32_t idx = 0; idx < array_size; ++idx) {
-                ctx.hls_init.push_back(vld_port_name + "[" + std::to_string(idx) + "] = false;\n");
+        if (!connected_from_child_request) {
+            ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " &" + vld_port_name);
+            if (has_rdy) {
+                ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " " + rdy_port_name);
             }
-        }
-
-        // generate request helper function declaration (supports req<IDX>(...))
-        const string helper_struct_name = "__ReqHelper__" + req_name;
-        const string helper_var_name = "__req_helper__" + req_name;
-        const string array_size_str = std::to_string(array_size);
-
-        ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
-        ctx.hls_header.push_back("  " + arrayed_port_decl("bool") + " & vld_ports;\n");
-        if (has_rdy) {
-            ctx.hls_header.push_back("  const " + arrayed_port_decl("bool") + " & rdy_ports;\n");
-        }
-        for (const auto &arg : arg_ports) {
-            ctx.hls_header.push_back("  " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & arg_" + arg.name + ";\n");
-        }
-        for (const auto &ret : ret_ports) {
-            ctx.hls_header.push_back("  const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & ret_" + ret.name + ";\n");
-        }
-
-        ctx.hls_header.push_back("\n");
-        ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
-        ctx.hls_header.push_back("  " + rettype + " call(" + arglists + ") {\n");
-        ctx.hls_header.push_back("    static_assert(IDX < " + array_size_str + ", \"Request port index out of range\");\n");
-        string sel_str = is_arrayed ? ("[IDX]") : "";
-        ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
-        for (const auto &arg : arg_ports) {
-            for (const auto &field : arg.flat_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr("arg_" + arg.name + sel_str, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+            for (const auto &arg : arg_ports) {
+                ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " &" + reqservArgPort(req_name, arg.name));
             }
-        }
-        for (const auto &ret : ret_ports) {
-            for (const auto &field : ret.flat_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("ret_" + ret.name + sel_str, field.offset + field.width - 1, field.offset) + ";\n");
+            for (const auto &ret : ret_ports) {
+                ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " " + reqservArgPort(req_name, ret.name));
             }
-        }
-        if (has_rdy) {
-            ctx.hls_header.push_back("    return rdy_ports" + sel_str + ";\n");
-        }
-        ctx.hls_header.push_back("  }\n");
-        ctx.hls_header.push_back("};\n");
 
-        ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
-        ctx.hls_helpers.push_back("  " + vld_port_name + ",\n");
-        if (has_rdy) {
-            ctx.hls_helpers.push_back("  " + rdy_port_name + ",\n");
+            if (is_arrayed) {
+                for (uint32_t idx = 0; idx < array_size; ++idx) {
+                    ctx.hls_init.push_back(vld_port_name + "[" + std::to_string(idx) + "] = false;\n");
+                }
+            }
+
+            // generate request helper function declaration (supports req<IDX>(...))
+            const string helper_struct_name = "__ReqHelper__" + req_name;
+            const string helper_var_name = "__req_helper__" + req_name;
+            const string array_size_str = std::to_string(array_size);
+
+            ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
+            ctx.hls_header.push_back("  " + arrayed_port_decl("bool") + " & vld_ports;\n");
+            if (has_rdy) {
+                ctx.hls_header.push_back("  const " + arrayed_port_decl("bool") + " & rdy_ports;\n");
+            }
+            for (const auto &arg : arg_ports) {
+                ctx.hls_header.push_back("  " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & arg_" + arg.name + ";\n");
+            }
+            for (const auto &ret : ret_ports) {
+                ctx.hls_header.push_back("  const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & ret_" + ret.name + ";\n");
+            }
+
+            ctx.hls_header.push_back("\n");
+            ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
+            ctx.hls_header.push_back("  " + rettype + " call(" + arglists + ") {\n");
+            ctx.hls_header.push_back("    static_assert(IDX < " + array_size_str + ", \"Request port index out of range\");\n");
+            string sel_str = is_arrayed ? ("[IDX]") : "";
+            ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
+            for (const auto &arg : arg_ports) {
+                for (const auto &field : arg.flat_fields) {
+                    ctx.hls_header.push_back("    " + uintExtractExpr("arg_" + arg.name + sel_str, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                }
+            }
+            for (const auto &ret : ret_ports) {
+                for (const auto &field : ret.flat_fields) {
+                    ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("ret_" + ret.name + sel_str, field.offset + field.width - 1, field.offset) + ";\n");
+                }
+            }
+            if (has_rdy) {
+                ctx.hls_header.push_back("    return rdy_ports" + sel_str + ";\n");
+            }
+            ctx.hls_header.push_back("  }\n");
+            ctx.hls_header.push_back("};\n");
+
+            ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
+            ctx.hls_helpers.push_back("  " + vld_port_name + ",\n");
+            if (has_rdy) {
+                ctx.hls_helpers.push_back("  " + rdy_port_name + ",\n");
+            }
+            for (size_t i = 0; i < arg_ports.size(); ++i) {
+                const auto &arg = arg_ports[i];
+                ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, arg.name) + ",\n");
+            }
+            for (size_t i = 0; i < ret_ports.size(); ++i) {
+                const auto &ret = ret_ports[i];
+                ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, ret.name) + ",\n");
+            }
+            ctx.hls_helpers.push_back("};\n");
+            ctx.hls_helpers.push_back("#define " + req_name + " " + helper_var_name + ".call\n");
+            ctx.hls_final.push_back("#undef " + req_name + "\n");
         }
-        for (size_t i = 0; i < arg_ports.size(); ++i) {
-            const auto &arg = arg_ports[i];
-            ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, arg.name) + ",\n");
-        }
-        for (size_t i = 0; i < ret_ports.size(); ++i) {
-            const auto &ret = ret_ports[i];
-            ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, ret.name) + ",\n");
-        }
-        ctx.hls_helpers.push_back("};\n");
-        ctx.hls_helpers.push_back("#define " + req_name + " " + helper_var_name + ".call\n");
-        ctx.hls_final.push_back("#undef " + req_name + "\n");
 
         // generate RTL ports
         string sv_array_str = is_arrayed ? ("[" + std::to_string(array_size) + "]") : "";
         ctx.rtl_ports.push_back("output " + vld_port_name + sv_array_str);
-        ctx.rtl_logicports.push_back("." + vld_port_name + "(" + vld_port_name + ")");
+        if (!connected_from_child_request) {
+            ctx.rtl_logicports.push_back("." + vld_port_name + "(" + vld_port_name + ")");
+        }
         if (has_rdy) {
             ctx.rtl_ports.push_back("input " + rdy_port_name + sv_array_str);
-            ctx.rtl_logicports.push_back("." + rdy_port_name + "(" + rdy_port_name + ")");
+            if (!connected_from_child_request) {
+                ctx.rtl_logicports.push_back("." + rdy_port_name + "(" + rdy_port_name + ")");
+            }
         }
         for (const auto &arg : arg_ports) {
             string arg_port_name = reqservArgPort(req_name, arg.name);
             ctx.rtl_ports.push_back("output [" + std::to_string(arg.width - 1) + ":0] " + arg_port_name + sv_array_str);
-            ctx.rtl_logicports.push_back("." + arg_port_name + "(" + arg_port_name + ")");
+            if (!connected_from_child_request) {
+                ctx.rtl_logicports.push_back("." + arg_port_name + "(" + arg_port_name + ")");
+            }
         }
         for (const auto &ret : ret_ports) {
             string ret_port_name = reqservArgPort(req_name, ret.name);
             ctx.rtl_ports.push_back("input [" + std::to_string(ret.width - 1) + ":0] " + ret_port_name + sv_array_str);
-            ctx.rtl_logicports.push_back("." + ret_port_name + "(" + ret_port_name + ")");
+            if (!connected_from_child_request) {
+                ctx.rtl_logicports.push_back("." + ret_port_name + "(" + ret_port_name + ")");
+            }
         }
     }
 }
