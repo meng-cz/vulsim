@@ -83,7 +83,21 @@ unique_ptr<vector<Token>> tokenizeConfigValueExpression(const string &expr, uint
             size_t start = i;
             ++i;
             while (i < n && (std::isalnum(static_cast<unsigned char>(expr[i])) || expr[i] == '_')) ++i;
-            Token t; t.type = TokenType::Identifier; t.text = expr.substr(start, i - start); t.pos = start;
+            string ident = expr.substr(start, i - start);
+            if (ident == "clog2") {
+                size_t lookahead = i;
+                while (lookahead < n && std::isspace(static_cast<unsigned char>(expr[lookahead]))) ++lookahead;
+                if (lookahead < n && expr[lookahead] == '(') {
+                    Token t;
+                    t.type = TokenType::Log2;
+                    t.text = ident;
+                    t.pos = start;
+                    out->push_back(std::move(t));
+                    skipSpaces();
+                    continue;
+                }
+            }
+            Token t; t.type = TokenType::Identifier; t.text = std::move(ident); t.pos = start;
             out->push_back(std::move(t));
             skipSpaces();
             continue;
@@ -434,10 +448,14 @@ ConfigRealValue evaluateConfigValueExpression(const ASTNode &node, uint32_t &err
                         errpos = node.pos;
                         return 0;
                     }
-                    if (operand & (operand - 1)) {
-                        return (sizeof(ConfigRealValue) * 8) - std::__countl_zero(operand);
-                    } else {
-                        return (sizeof(ConfigRealValue) * 8) - std::__countl_zero(operand) - 1;
+                    {
+                        ConfigRealValue value = operand - 1;
+                        ConfigRealValue result = 0;
+                        while (value > 0) {
+                            value >>= 1;
+                            ++result;
+                        }
+                        return result;
                     }
                 case TokenType::BNot:
                     return ~operand;

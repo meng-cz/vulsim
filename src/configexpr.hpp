@@ -32,7 +32,7 @@ namespace config_parser {
 /**
  * Config Value Statement Semantics: (higher priority first)
  * 1. () : Parentheses for grouping
- * 2. @ : log2 (e.g. @8 = 3, @16 = 4)
+ * 2. @ / clog2(...) : log2ceil (e.g. @8 = 3, clog2(15) = 4)
  * 3. ~ ! - : bitwise NOT, logical NOT, unary minus
  * 4. * / % : multiplication, division, modulo
  * 5. + - : addition, subtraction

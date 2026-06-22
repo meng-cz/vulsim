@@ -36,6 +36,17 @@
 
 #include <array>
 
+inline constexpr int64_t clog2(int64_t value) {
+    if (value <= 1) return 0;
+    int64_t result = 0;
+    int64_t threshold = 1;
+    while (threshold < value) {
+        threshold <<= 1;
+        ++result;
+    }
+    return result;
+}
+
 #define HELPER()  inline namespace helper
 
 #define CONFIG(name, value) constexpr int64_t name = value;
