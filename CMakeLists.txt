@@ -53,3 +53,25 @@ add_custom_target(copy_project_dirs ALL
     ${VULLIB_COPY_COMMANDS}
     COMMENT "Copying vullib, example, and userguide into build directory"
 )
+
+add_custom_target(copy_install_dir ALL
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/install"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/install"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:vulsimgen>"
+            "${CMAKE_CURRENT_BINARY_DIR}/install/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:vulrtlgen>"
+            "${CMAKE_CURRENT_BINARY_DIR}/install/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/vullib"
+            "${CMAKE_CURRENT_BINARY_DIR}/install/vullib"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/example"
+            "${CMAKE_CURRENT_BINARY_DIR}/install/example"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/userguide"
+            "${CMAKE_CURRENT_BINARY_DIR}/install/userguide"
+    DEPENDS vulsimgen vulrtlgen copy_project_dirs
+    COMMENT "Copying build artifacts into install directory"
+)
