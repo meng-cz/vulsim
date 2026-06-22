@@ -50,6 +50,8 @@
 
 #define STRUCT(name) struct name
 
+#define ENUM(name) enum class name
+
 #define REGISTER(name, type) VulRegister<type> name; void __##name##_reset(type& name)
 
 #define REGISTER_MUL(name, type, portnum) VulRegister<type, portnum> name; void __##name##_reset(type& name)

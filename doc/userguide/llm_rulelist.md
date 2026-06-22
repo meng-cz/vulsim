@@ -66,6 +66,7 @@ PROJECT(".");
 ```cpp
 CONFIG(NAME, value_expr);
 STRUCT(Name) { ... };
+ENUM(Name) { ... };
 ALIAS(Name, Type);
 ALIAS_ARRAY1(Name, Type, N);
 ALIAS_ARRAY2(Name, Type, N1, N2);
@@ -83,6 +84,12 @@ CONFIG(QUEUE_DEPTH, 8);
 STRUCT(Packet) {
     uint32_t data;
     bool last;
+};
+
+ENUM(State) {
+    IDLE = 1,
+    RUNNING,
+    HALTED = 7
 };
 
 ALIAS(Word, uint32_t);
@@ -114,6 +121,7 @@ CONFIG(B, A + 1); // illegal
 PARAMETER(name, default_value);
 CONFIG(name, value);
 STRUCT(name) { ... };
+ENUM(name) { ... };
 ALIAS(name, type);
 ALIAS_ARRAY1(name, type, N);
 ALIAS_ARRAY2(name, type, N1, N2);

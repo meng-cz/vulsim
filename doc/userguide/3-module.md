@@ -9,6 +9,7 @@
 包括：
 - `CONFIG(name, value)`
 - `STRUCT(name) { ... }`
+- `ENUM(name) { ... }`
 - `ALIAS(name, type)`
 - `ALIAS_ARRAY1(name, type, N)`
 - `ALIAS_ARRAY2(name, type, N1, N2)`
@@ -411,5 +412,4 @@ QUERY(read_edge1, ChildStatus) {
 
 如果一个请求包含返回值或包含握手信号（`has_handshake` 为 `true`），则其仅能被连接到一个服务或代码实现，不允许一对多连接。
 反之，如果一个请求不包含返回值且不包含握手信号，则允许一对多连接（广播连接）。
-
 

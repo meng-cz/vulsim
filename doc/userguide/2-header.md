@@ -82,6 +82,28 @@ STRUCT(MyStruct) {
 - 其他已定义的结构体类型或别名类型
 - bool 类型
 
+## ENUM(name)
+
+定义一个全局枚举类型：
+- `name`：枚举类型名称
+
+定义方式与 C++ 的 `enum class` 风格一致，例如：
+
+```cpp
+ENUM(MyState) {
+    Idle = 1,
+    Running,
+    Waiting = 7,
+    Halted
+};
+```
+
+说明：
+- 支持 `成员名 = 常量表达式` 形式显式指定枚举值
+- 未显式指定值的成员按 C++ 风格从前一个成员值继续递增
+- 常量表达式支持与 `CONFIG` 相同的常量表达式语法
+- 枚举类型可以作为 `STRUCT` 成员类型、事务参数类型、寄存器类型、`QUERY` 返回类型等使用
+
 ## ALIAS(name, type)
 
 定义一个类型别名：
@@ -117,7 +139,3 @@ using name = std::array<type, N>;
 ```cpp
 using name = std::array<std::array<type, N2>, N1>;
 ```
-
-## 未来加入：ENUM(name)
-
-

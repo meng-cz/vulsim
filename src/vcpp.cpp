@@ -219,6 +219,45 @@ public:
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleSTRUCT> _auto_register_STRUCT_handler;
 
+class VCPPModuleENUM : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "ENUM"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() != 1) {
+            throw VulException("ENUM requires exactly 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        VulErrorContextGuard _err{"Processing ENUM '" + entry.args[0] + "' at " + context.getOriginalPosition(entry.pos)};
+        VulTempBundle bundle;
+        bundle.name = entry.args[0];
+        bundle.is_alias = false;
+
+        string body;
+        for (const auto &line : entry.body) {
+            body += trim(line);
+        }
+        vector<string> member_strs = split(body, ',');
+        for (const auto &member_str_raw : member_strs) {
+            string member_str = trim(member_str_raw);
+            if (member_str.empty()) continue;
+            VulTempEnumMember member;
+            size_t eq_pos = member_str.find('=');
+            if (eq_pos == string::npos) {
+                member.name = trim(member_str);
+                member.value = "";
+            } else {
+                member.name = trim(member_str.substr(0, eq_pos));
+                member.value = trim(member_str.substr(eq_pos + 1));
+            }
+            if (member.name.empty()) {
+                throw VulException("ENUM member name cannot be empty");
+            }
+            bundle.enum_members.push_back(std::move(member));
+        }
+        context.temp.bundles.push_back(std::move(bundle));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleENUM> _auto_register_ENUM_handler;
+
 class VCPPModuleREGISTER : public VCPPModuleHandler {
 public:
     virtual string name() const { return "REGISTER"; }
