@@ -1243,6 +1243,7 @@ VulStaticProject parseVcppStaticProject(
             static_bundle = staticalizeBundle(item, project.global_configlib);
             project.global_bundlelib.push_back(std::move(static_bundle));
         }
+        project.global_helper_codes = std::move(fake_module.helper_codes);
     }
 
     if (!main_file_path.empty()) {

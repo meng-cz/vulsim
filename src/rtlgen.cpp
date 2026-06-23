@@ -41,9 +41,18 @@ struct RTLGenContext {
     const VulStaticModuleInstance &module;
     const VulStaticConfigLib &local_configlib;
     const VulStaticBundleLib &local_bundlelib;
+    const vector<string> &global_helper_codes;
 
-    RTLGenContext(const VulStaticModuleInstance &module, const VulStaticConfigLib &local_configlib, const VulStaticBundleLib &local_bundlelib)
-        : module(module), local_configlib(local_configlib), local_bundlelib(local_bundlelib) {}
+    RTLGenContext(
+        const VulStaticModuleInstance &module,
+        const VulStaticConfigLib &local_configlib,
+        const VulStaticBundleLib &local_bundlelib,
+        const vector<string> &global_helper_codes
+    )
+        : module(module),
+          local_configlib(local_configlib),
+          local_bundlelib(local_bundlelib),
+          global_helper_codes(global_helper_codes) {}
 
     vector<string> hls_header; // 文件开头的常量和结构体声明
     vector<string> hls_arguments; // HLS主函数的参数列表，仅包含类型和参数名字符串，没有逗号或换行
@@ -394,7 +403,21 @@ void _procConstAndBundle(RTLGenContext &ctx){
         ctx.hls_header.push_back("\n");
     }
 
+    for (const auto &line : ctx.global_helper_codes) {
+        if (line.ends_with("\n")) {
+            ctx.hls_header.push_back(line);
+        } else {
+            ctx.hls_header.push_back(line + "\n");
+        }
+    }
+    if (!ctx.global_helper_codes.empty()) {
+        ctx.hls_header.push_back("\n");
+    }
+
     ctx.hls_header.insert(ctx.hls_header.end(), ctx.module.helper_codes.begin(), ctx.module.helper_codes.end());
+    if (!ctx.module.helper_codes.empty()) {
+        ctx.hls_header.push_back("\n");
+    }
 };
 
 void _procWires(RTLGenContext &ctx) {
@@ -2175,7 +2198,8 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
 RTLGenResult genModuleRTL(
     const VulStaticModuleInstance &module,
     const VulStaticConfigLib &configlib,
-    const VulStaticBundleLib &bundlelib
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &global_helper_codes
 ) {
     VulStaticConfigLib local_configlib = configlib;
     for (const auto &entry : module.local_parameters) {
@@ -2200,7 +2224,7 @@ RTLGenResult genModuleRTL(
         }
     }
 
-    RTLGenContext ctx(module, local_configlib, local_bundlelib);
+    RTLGenContext ctx(module, local_configlib, local_bundlelib, global_helper_codes);
 
     _procConstAndBundle(ctx);
     _procWires(ctx);

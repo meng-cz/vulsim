@@ -753,6 +753,23 @@ vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib) {
     return out_lines;
 }
 
+vector<string> genStaticGlobalHelperHeaderCode(const vector<string> &helper_codes) {
+    vector<string> out_lines = genHeaderPrelude();
+    out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("#include \"fixint.hpp\"\n");
+    out_lines.push_back("\n");
+    out_lines.push_back("// Global Helper Definitions\n");
+    out_lines.push_back("\n");
+    for (const auto &line : helper_codes) {
+        if (line.ends_with("\n")) {
+            out_lines.push_back(line);
+        } else {
+            out_lines.push_back(line + "\n");
+        }
+    }
+    return out_lines;
+}
+
 string _genStaticMemberTypeStr(const VulStaticBundleMember &member) {
     string type_str;
     string base_type = member.type.toString();
@@ -819,6 +836,45 @@ vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib) {
         auto bundle_lines = _genStaticBundle(bundle);
         out_lines.insert(out_lines.end(), bundle_lines.begin(), bundle_lines.end());
         out_lines.push_back("\n");
+    }
+
+    return out_lines;
+}
+
+vector<string> genStaticProjectHeaderCode(
+    const VulStaticConfigLib &configlib,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &helper_codes
+) {
+    vector<string> out_lines = genHeaderPrelude();
+
+    out_lines.push_back("#include \"common.h\"\n");
+    out_lines.push_back("#include \"fixint.hpp\"\n");
+    out_lines.push_back("\n");
+
+    out_lines.push_back("// Configuration Items\n");
+    out_lines.push_back("\n");
+    for (const auto &cfg : configlib) {
+        out_lines.push_back("constexpr int64_t " + cfg.first + " = " + std::to_string(cfg.second) + ";\n");
+    }
+    out_lines.push_back("\n");
+
+    out_lines.push_back("// Bundle Definitions\n");
+    out_lines.push_back("\n");
+    for (const auto &bundle : bundlelib) {
+        auto bundle_lines = _genStaticBundle(bundle);
+        out_lines.insert(out_lines.end(), bundle_lines.begin(), bundle_lines.end());
+        out_lines.push_back("\n");
+    }
+
+    out_lines.push_back("// Global Helper Definitions\n");
+    out_lines.push_back("\n");
+    for (const auto &line : helper_codes) {
+        if (line.ends_with("\n")) {
+            out_lines.push_back(line);
+        } else {
+            out_lines.push_back(line + "\n");
+        }
     }
 
     return out_lines;
@@ -1419,8 +1475,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
     vector<string> decl = genHeaderPrelude();
     decl.push_back("#include \"common.h\"\n");
-    decl.push_back("#include \"config.h\"\n");
-    decl.push_back("#include \"bundle.h\"\n");
+    decl.push_back("#include \"header.hpp\"\n");
     decl.push_back("#include \"vullib.h\"\n");
     decl.push_back("#include <stdexcept>\n");
     decl.push_back("\n");
@@ -1663,8 +1718,7 @@ vector<string> genStaticTestHarnessHpp(
 
     vector<string> out_lines = genHeaderPrelude();
     out_lines.push_back("#include \"common.h\"\n");
-    out_lines.push_back("#include \"config.h\"\n");
-    out_lines.push_back("#include \"bundle.h\"\n");
+    out_lines.push_back("#include \"header.hpp\"\n");
     out_lines.push_back("#include \"vullib.h\"\n");
     out_lines.push_back("\n");
 

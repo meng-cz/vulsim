@@ -44,6 +44,14 @@ vector<string> genStaticConfigHeaderCode(const VulStaticConfigLib &configlib);
 
 vector<string> genStaticBundleHeaderCode(const VulStaticBundleLib &bundlelib);
 
+vector<string> genStaticGlobalHelperHeaderCode(const vector<string> &helper_codes);
+
+vector<string> genStaticProjectHeaderCode(
+    const VulStaticConfigLib &configlib,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &helper_codes
+);
+
 struct StaticModuleCodeHpp {
     vector<string> decl;
     vector<string> impl;

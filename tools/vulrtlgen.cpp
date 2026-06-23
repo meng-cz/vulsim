@@ -117,7 +117,12 @@ int main(int argc, char * argv[]) {
 
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
-        auto codes = rtlgen::genModuleRTL(*mod_instance, project.global_configlib, project.global_bundlelib);
+        auto codes = rtlgen::genModuleRTL(
+            *mod_instance,
+            project.global_configlib,
+            project.global_bundlelib,
+            project.global_helper_codes
+        );
         writeLinesToFile(codes.logic_hls_codes, (out_path / hls_path).string());
         writeLinesToFile(codes.rtl_skeleten_codes, (out_path / (mod_instance->rtlSvPath())).string());
         for (const auto &res_file : codes.resource_files) {

@@ -122,12 +122,15 @@ int simgenStatic(const SimGenArgs &args) {
     }
 
     {
-        VulErrorContextGuard _err("generating config and bundle header code");
-        writeLinesToFile(simgen::genStaticConfigHeaderCode(project.global_configlib), (out_path / "config.h").string());
-    }
-    {
-        VulErrorContextGuard _err("generating bundle header code");
-        writeLinesToFile(simgen::genStaticBundleHeaderCode(project.global_bundlelib), (out_path / "bundle.h").string());
+        VulErrorContextGuard _err("generating project header code");
+        writeLinesToFile(
+            simgen::genStaticProjectHeaderCode(
+                project.global_configlib,
+                project.global_bundlelib,
+                project.global_helper_codes
+            ),
+            (out_path / "header.hpp").string()
+        );
     }
 
     vector<VulTraceMatcher> trace_matchers;

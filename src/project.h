@@ -32,6 +32,7 @@
 struct VulStaticProject {
     VulStaticConfigLib          global_configlib;
     VulStaticBundleLib          global_bundlelib;
+    vector<string>              global_helper_codes;
 
     VulStaticTestHarnessModule  test_harness;
     shared_ptr<VulStaticModuleInstance> top_module_instance;

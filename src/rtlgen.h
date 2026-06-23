@@ -45,7 +45,8 @@ struct RTLGenResult {
 RTLGenResult genModuleRTL(
     const VulStaticModuleInstance &module,
     const VulStaticConfigLib &configlib,
-    const VulStaticBundleLib &bundlelib
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &global_helper_codes
 );
 
 

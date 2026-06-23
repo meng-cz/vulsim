@@ -12,7 +12,7 @@ REGISTER(code, uint32_t) {
 
 SERVICE(set_state, ARG(CoreState) next_state, ARG(uint32_t) next_code) {
     state.setnext(next_state);
-    code.setnext(next_code);
+    code.setnext(passthrough_code(next_code));
 }
 
 QUERY(current_state, CoreState) {
@@ -22,6 +22,6 @@ QUERY(current_state, CoreState) {
 QUERY(snapshot, StatusSnapshot) {
     StatusSnapshot s;
     s.state = state;
-    s.code = code;
+    s.code = passthrough_code(code);
     return s;
 }

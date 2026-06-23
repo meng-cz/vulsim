@@ -14,3 +14,9 @@ STRUCT(StatusSnapshot) {
     CoreState state;
     uint32_t code;
 };
+
+HELPER() {
+inline uint32_t passthrough_code(uint32_t value) {
+    return value;
+}
+}
