@@ -26,6 +26,7 @@
 #include "configexpr.hpp"
 #include "cppparse.hpp"
 #include "stringop.hpp"
+#include "toposort.hpp"
 #include "vullib.hpp"
 
 using namespace cppparse;
@@ -39,6 +40,8 @@ using namespace stringop;
 #include <optional>
 #include <algorithm>
 #include <deque>
+#include <unordered_map>
+#include <unordered_set>
 
 struct VCPPModuleContext {
     VulTempModule temp;
@@ -1158,6 +1161,209 @@ static std::pair<string, string> _scanTestModuleBindingPaths(const string &test_
     return {top_module_path, project_dir_path};
 }
 
+static bool isHeaderSourceFile(const std::filesystem::path &p) {
+    const string ext = p.extension().string();
+    return ext == ".h" || ext == ".hpp";
+}
+
+static string pathInHeaderDirKey(
+    const std::filesystem::path &p,
+    const std::filesystem::path &header_dir_canon
+) {
+    using namespace std::filesystem;
+    path canon = canonical(p);
+    path rel = relative(canon, header_dir_canon);
+    if (rel.empty()) {
+        return "";
+    }
+    for (const auto &part : rel) {
+        if (part == "..") {
+            return "";
+        }
+    }
+    return rel.generic_string();
+}
+
+static vector<string> scanHeaderIncludes(const std::filesystem::path &header_file) {
+    vector<string> out;
+    vector<string> code_lines = stripComments(readFileLines(header_file.string())).lines;
+    const string prefix = "#include";
+
+    for (const auto &line_raw : code_lines) {
+        string line = trim(line_raw);
+        if (line.rfind(prefix, 0) != 0) {
+            continue;
+        }
+
+        size_t open_pos = line.find_first_of("\"<", prefix.size());
+        if (open_pos == string::npos) {
+            continue;
+        }
+        char open = line[open_pos];
+        char close = (open == '"') ? '"' : '>';
+        size_t close_pos = line.find(close, open_pos + 1);
+        if (close_pos == string::npos || close_pos <= open_pos + 1) {
+            continue;
+        }
+
+        string included = trim(line.substr(open_pos + 1, close_pos - open_pos - 1));
+        if (!included.empty()) {
+            out.push_back(std::move(included));
+        }
+    }
+    return out;
+}
+
+static vector<std::filesystem::path> collectHeaderParseOrder(const std::filesystem::path &header_dir) {
+    using namespace std::filesystem;
+
+    path header_dir_canon = canonical(header_dir);
+    unordered_set<string> all_items;
+    unordered_map<string, path> item_to_path;
+
+    for (const auto &entry : recursive_directory_iterator(header_dir_canon)) {
+        if (!entry.is_regular_file() || !isHeaderSourceFile(entry.path())) {
+            continue;
+        }
+        string key = pathInHeaderDirKey(entry.path(), header_dir_canon);
+        if (key.empty()) {
+            continue;
+        }
+        all_items.insert(key);
+        item_to_path[key] = entry.path();
+    }
+
+    if (all_items.empty()) {
+        throw VulException("Header directory contains no .h or .hpp files: " + header_dir.string());
+    }
+
+    unordered_map<string, unordered_set<string>> edges_former_to_latter;
+    for (const auto &[key, file_path] : item_to_path) {
+        for (const auto &included_raw : scanHeaderIncludes(file_path)) {
+            vector<path> candidates;
+            path included_path(included_raw);
+            if (included_path.is_absolute()) {
+                candidates.push_back(included_path);
+            } else {
+                candidates.push_back(file_path.parent_path() / included_path);
+                candidates.push_back(header_dir_canon / included_path);
+            }
+
+            string included_key;
+            for (const auto &candidate : candidates) {
+                std::error_code ec;
+                if (!exists(candidate, ec) || !is_regular_file(candidate, ec) || !isHeaderSourceFile(candidate)) {
+                    continue;
+                }
+                string maybe_key = pathInHeaderDirKey(candidate, header_dir_canon);
+                if (!maybe_key.empty() && all_items.find(maybe_key) != all_items.end()) {
+                    included_key = maybe_key;
+                    break;
+                }
+            }
+            if (!included_key.empty()) {
+                edges_former_to_latter[included_key].insert(key);
+            }
+        }
+    }
+
+    vector<string> loop_nodes;
+    auto sorted_keys = topologicalSort(all_items, edges_former_to_latter, loop_nodes);
+    if (!sorted_keys) {
+        string err = "Cycle detected in header include graph:";
+        std::sort(loop_nodes.begin(), loop_nodes.end());
+        for (const auto &node : loop_nodes) {
+            err += "\n  " + node;
+        }
+        throw VulException(err);
+    }
+
+    vector<path> out;
+    out.reserve(sorted_keys->size());
+    for (const auto &key : *sorted_keys) {
+        out.push_back(item_to_path.at(key));
+    }
+    return out;
+}
+
+static void importGlobalHeaderModule(
+    VulStaticProject &project,
+    const VulTempModule &header_module,
+    unordered_map<string, string> &global_names
+) {
+    for (const auto& item : header_module.configs) {
+        VulErrorContextGuard _err{"evaluating global header constant " + item.name};
+        auto name_iter = global_names.find(item.name);
+        if (name_iter != global_names.end()) {
+            throw VulException(
+                "Global header name redefinition: '" + item.name +
+                "' was already defined as " + name_iter->second +
+                ", cannot redefine as CONFIG"
+            );
+        }
+        ConfigRealValue value = calculateConstexprValue(item.value, project.global_configlib);
+        project.global_configlib[item.name] = value;
+        global_names[item.name] = "CONFIG";
+    }
+    for (const auto& item : header_module.bundles) {
+        VulErrorContextGuard _err{"staticalizing global header bundle " + item.name};
+        auto name_iter = global_names.find(item.name);
+        if (name_iter != global_names.end()) {
+            throw VulException(
+                "Global header name redefinition: '" + item.name +
+                "' was already defined as " + name_iter->second +
+                ", cannot redefine as bundle"
+            );
+        }
+        VulStaticBundle static_bundle = staticalizeBundle(item, project.global_configlib);
+        project.global_bundlelib.push_back(std::move(static_bundle));
+        global_names[item.name] = item.is_alias ? "ALIAS" : (item.enum_members.empty() ? "STRUCT" : "ENUM");
+    }
+    project.global_helper_codes.insert(
+        project.global_helper_codes.end(),
+        header_module.helper_codes.begin(),
+        header_module.helper_codes.end()
+    );
+}
+
+static void parseProjectHeaders(
+    VulStaticProject &project,
+    const std::filesystem::path &proj_dir
+) {
+    using namespace std::filesystem;
+
+    const path header_dir = proj_dir / "header";
+    const path header_hpp = proj_dir / "header.hpp";
+    const path header_h = proj_dir / "header.h";
+    const bool has_header_dir = exists(header_dir) && is_directory(header_dir);
+    const bool has_header_hpp = exists(header_hpp) && is_regular_file(header_hpp);
+    const bool has_header_h = exists(header_h) && is_regular_file(header_h);
+
+    if (has_header_hpp && has_header_h) {
+        throw VulException("Both header.hpp and header.h exist in project root; keep only one single-header file");
+    }
+    if (has_header_dir && (has_header_hpp || has_header_h)) {
+        throw VulException("Both header directory and single-header file exist in project root; keep only one header system");
+    }
+    if (!has_header_dir && !has_header_hpp && !has_header_h) {
+        throw VulException("Project root must contain either a header directory or a header.hpp/header.h file: " + proj_dir.string());
+    }
+
+    vector<path> header_files;
+    if (has_header_dir) {
+        header_files = collectHeaderParseOrder(header_dir);
+    } else {
+        header_files.push_back(has_header_hpp ? header_hpp : header_h);
+    }
+
+    unordered_map<string, string> global_names;
+    for (const auto &header_path : header_files) {
+        VulErrorContextGuard _err{"parsing global header file " + header_path.string()};
+        VulTempModule fake_module = _parseTempModule(header_path.stem().string(), header_path.string());
+        importGlobalHeaderModule(project, fake_module, global_names);
+    }
+}
+
 
 VulStaticProject parseVcppStaticProject(
     const string &project_dir,
@@ -1221,30 +1427,7 @@ VulStaticProject parseVcppStaticProject(
         throw VulException("Project directory does not exist or is not a directory: " + proj_dir.string());
     }
 
-    path header_path = proj_dir / "header.hpp";
-    bool header_found = false;
-    if (exists(header_path) && is_regular_file(header_path)) {
-        header_found = true;
-    } else if (exists(proj_dir / "header.h") && is_regular_file(proj_dir / "header.h")) {
-        header_path = proj_dir / "header.h";
-        header_found = true;
-    }
-    if (header_found) {
-        VulErrorContextGuard _err{"parsing header file " + header_path.string()};
-        VulTempModule fake_module = _parseTempModule("header", header_path.string());
-        for (const auto& item : fake_module.configs) {
-            VulErrorContextGuard _err{"evaluating constant " + item.name};
-            ConfigRealValue value = calculateConstexprValue(item.value, project.global_configlib);
-            project.global_configlib[item.name] = value;
-        }
-        for (const auto& item : fake_module.bundles) {
-            VulErrorContextGuard _err{"staticalizing bundle " + item.name};
-            VulStaticBundle static_bundle;
-            static_bundle = staticalizeBundle(item, project.global_configlib);
-            project.global_bundlelib.push_back(std::move(static_bundle));
-        }
-        project.global_helper_codes = std::move(fake_module.helper_codes);
-    }
+    parseProjectHeaders(project, proj_dir);
 
     if (!main_file_path.empty()) {
         {

@@ -1,9 +1,18 @@
 # 2. VulCPP header 常量与数据结构定义
 
-在 VulCPP 项目中，全局常量和数据结构被定义在一个特殊的头文件 `header.hpp` 中。这里面的定义可以在所有模块的代码中直接使用。
+在 VulCPP 项目中，全局常量和数据结构被定义在项目级 header 中。项目根目录必须包含下面二者之一：
 
-`header.hpp` 中的内容主要由一系列宏定义构成，这些宏定义用于声明全局常量、结构体、类型别名等。
-下面列举了所有能用在  `header.hpp` 中的宏定义
+- `header/` 目录：推荐的新形式，目录内所有 `.h` / `.hpp` 文件共同组成项目级 header。
+- `header.hpp` 或 `header.h`：兼容旧项目或小型项目的单文件形式。
+
+两种形式不能同时存在。项目级 header 中定义的全局常量、结构体、枚举和类型别名会在所有模块中通用，即使某个模块没有显式 `#include` 对应 header 文件。
+
+当使用 `header/` 目录时，目录内 `.h` / `.hpp` 文件会通过 C++ 风格的 `#include` 关系建立解析顺序：被 include 的文件先解析，include 它的文件后解析；循环 include 会报错。每个文件都按旧的 `header.hpp` 规则解析。
+
+全局 `CONFIG` 和全局 bundle（`STRUCT`、`ENUM`、`ALIAS`、`ALIAS_ARRAY1/2`）共享同一个项目级命名域，不允许重名或覆盖；例如 `CONFIG(Word, 32)` 与 `STRUCT(Word)` 会报错。
+
+项目级 header 的内容主要由一系列宏定义构成，用于声明全局常量、结构体、类型别名等。
+下面列举了所有能用在项目级 header 中的宏定义
 
 ## 补充：VulCPP 常量值表达式
 

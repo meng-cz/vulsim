@@ -5,7 +5,7 @@
 ## 1. 项目与文件
 
 - VulCPP 用 C++ 宏描述周期同步硬件行为；普通模块必须近似可综合：无 I/O、无动态分配、无运行期全局状态、无指针算术。Main 是仿真入口，可用标准库、I/O、全局变量和测试逻辑。
-- 常见文件：`header.hpp` 放全局类型/常量；每个硬件模块一个同名 `.hpp`；一个或多个 `Main.cpp` 做仿真/单测。
+- 常见文件：项目根 `header/` 目录放全局类型/常量；兼容旧式根目录 `header.hpp`/`header.h` 单文件；每个硬件模块一个同名 `.hpp`；一个或多个 `Main.cpp` 做仿真/单测。
 - 普通模块通常写：
 
 ```cpp
@@ -28,7 +28,9 @@ PROJECT(".");
 
 ## 2. header 与局部定义
 
-- `header.hpp` 只放全局共享定义：`CONFIG`、`STRUCT`、`ENUM`、`ALIAS`、`ALIAS_ARRAY1/2`、`HELPER`。
+- 项目根必须存在 `header/` 或 `header.hpp`/`header.h` 之一，不能同时存在目录和单文件。`header/` 中所有 `.h/.hpp` 按 `#include` 拓扑排序解析，被 include 者先解析；循环报错。
+- 项目级 header 只放全局共享定义：`CONFIG`、`STRUCT`、`ENUM`、`ALIAS`、`ALIAS_ARRAY1/2`、`HELPER`。这些定义对所有模块可见，即使模块没有 include 它。
+- 全局 `CONFIG` 和 bundle（`STRUCT/ENUM/ALIAS*`）共用同一命名域，不允许重名或覆盖。
 - 硬件模块/Main 内也可写这些宏，但只作为模块局部定义。
 - `CONFIG(name, expr)` 是 `int64_t` 编译期表达式；支持整数、已定义配置、括号、算术/位运算/比较/逻辑/三元。`@X` 与 `clog2(X)` 表示 `log2ceil(X)`。禁止循环依赖。
 - `STRUCT(Name) { fields... };` 字段可用标准整数、`bool`、`Int<W>`、其他 struct/enum/alias。
