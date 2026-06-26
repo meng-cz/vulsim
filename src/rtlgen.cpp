@@ -75,6 +75,17 @@ inline string uintExtractExpr(const string &var, uint32_t high, uint32_t low) {
     return var + ".at<" + std::to_string(high) + ", " + std::to_string(low) + ">()";
 }
 
+inline string flatFieldValueExpr(const string &root, const string &flat_name) {
+    if (flat_name == root) {
+        return root;
+    }
+    const string prefix = root + ".";
+    if (flat_name.rfind(prefix, 0) == 0) {
+        return root + "." + flat_name.substr(prefix.size());
+    }
+    return flat_name;
+}
+
 inline string reqservArraySuffix(uint32_t idx) {
     return "__IDX" + std::to_string(idx);
 }
@@ -509,7 +520,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + flatFieldValueExpr("value", field.name) + ";\n");
             }
             if (is_ported) {
                 ctx.hls_header.push_back("  wdata[P] = wdata_val;\n");
@@ -536,7 +547,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = value." + field.name + ";\n");
+                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + flatFieldValueExpr("value", field.name) + ";\n");
             }
             if (is_ported) {
                 ctx.hls_header.push_back("  wdata[idx][P] = wdata_val;\n");
