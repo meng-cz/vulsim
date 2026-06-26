@@ -47,26 +47,24 @@ make -j8
 
 ```bash
 # 生成仿真代码
-./vulsimgen -t example/prodcon/TopModule.hpp -m example/prodcon/Main.cpp -l vullib -o sim_out
-# -t: 指定顶层硬件设计模块的头文件路径
+./vulsimgen -m example/prodcon/Main.cpp
 # -m: 指定 Main 模块的头文件路径
-# -l: 指定 VulCPP 库文件的路径
-# -o: 指定生成的仿真代码输出目录
+# -t: 可选，用于覆盖 Main 中通过 TOP(...) 声明的顶层模块路径
+# -p: 可选，用于覆盖 Main 中通过 PROJECT(...) 声明的项目根目录路径
+# -l: 指定 VulCPP 库文件的路径（默认./vullib/）
+# -o: 指定生成的仿真代码输出目录（默认./sim_out/）
 
 # 编译生成的仿真代码 (build.sh 默认使用 g++)
 cd sim_out
 source build.sh
 # 运行仿真
-./prodcon
+./Main
 ```
+
 
 ## 开发文档：
 
-v1.0版本的Vul模型Module文档：[module.md](./doc/module.md) 
-
-前端GUI项目：[VulSimGUI (https://github.com/meng-cz/VulSimGUI)](https://github.com/meng-cz/VulSimGUI)
-
-通讯API文档：[VulSimAPI (./doc/api)](./doc/api/api.md)
+[vullib模块文档](./doc/vullib) 
 
 前期工作链接：
 1. [nullrvsim](https://github.com/meng-cz/nullrvsim): 验证VUL模型生成的模拟器框架的正确性和并行效率
