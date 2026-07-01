@@ -3,6 +3,7 @@ project(VulConsole)
 cmake_minimum_required(VERSION 3.6)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (NOT DEFINED CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE "Debug")
