@@ -10,6 +10,17 @@ endif()
 
 include_directories( ./src )
 
+find_path(LIBCLANG_INCLUDE_DIR clang-c/Index.h
+    PATHS /usr/lib/llvm-14/include
+)
+find_library(LIBCLANG_LIBRARY
+    NAMES clang-14 libclang-14 clang
+    PATHS /usr/lib/llvm-14/lib /lib/x86_64-linux-gnu
+)
+if (LIBCLANG_INCLUDE_DIR)
+    include_directories(${LIBCLANG_INCLUDE_DIR})
+endif()
+
 file (GLOB_RECURSE LIB_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 add_library(vulcore OBJECT ${LIB_CXX_SRC})
@@ -22,6 +33,9 @@ foreach(tool ${TOOL_SOURCES})
     get_filename_component(tool_name ${tool} NAME_WE)
 
     add_executable(${tool_name} ${tool}  $<TARGET_OBJECTS:vulcore>)
+    if (LIBCLANG_LIBRARY)
+        target_link_libraries(${tool_name} ${LIBCLANG_LIBRARY})
+    endif()
 endforeach()
 
 # Copy project runtime directories to the build directory on each build:

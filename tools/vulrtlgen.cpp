@@ -52,6 +52,10 @@ int main(int argc, char * argv[]) {
     parser.add_argument("-p", "--project")
         .help("sets the project directory (default: parent directory of the top module file)")
         .default_value(std::string(""));
+    parser.add_argument("--v2")
+        .help("use experimental RTL generator v2 path")
+        .default_value(false)
+        .implicit_value(true);
 
     try {
         parser.parse_args(argc, argv);
@@ -65,6 +69,7 @@ int main(int argc, char * argv[]) {
     string out_dir = parser.get<std::string>("--out");
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
+    bool use_v2 = parser.get<bool>("--v2");
 
     std::filesystem::path top_path(top_file);
     if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
@@ -117,12 +122,19 @@ int main(int argc, char * argv[]) {
 
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
-        auto codes = rtlgen::genModuleRTL(
-            *mod_instance,
-            project.global_configlib,
-            project.global_bundlelib,
-            project.global_helper_codes
-        );
+        auto codes = use_v2
+            ? rtlgen::genModuleRTLV2(
+                *mod_instance,
+                project.global_configlib,
+                project.global_bundlelib,
+                project.global_helper_codes
+            )
+            : rtlgen::genModuleRTL(
+                *mod_instance,
+                project.global_configlib,
+                project.global_bundlelib,
+                project.global_helper_codes
+            );
         writeLinesToFile(codes.logic_hls_codes, (out_path / hls_path).string());
         writeLinesToFile(codes.rtl_skeleten_codes, (out_path / (mod_instance->rtlSvPath())).string());
         for (const auto &res_file : codes.resource_files) {

@@ -49,5 +49,12 @@ RTLGenResult genModuleRTL(
     const vector<string> &global_helper_codes
 );
 
+RTLGenResult genModuleRTLV2(
+    const VulStaticModuleInstance &module,
+    const VulStaticConfigLib &configlib,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &global_helper_codes
+);
+
 
 } // namespace rtlgen
