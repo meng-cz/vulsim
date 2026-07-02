@@ -1,0 +1,3 @@
+[submodule "rtlzz"]
+	path = rtlzz
+	url = https://github.com/meng-cz/RTLzz.git
