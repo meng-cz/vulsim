@@ -52,6 +52,10 @@ string flatFieldValueExpr(const string &root, const string &flat_name) {
     if (flat_name == root) {
         return root;
     }
+    const string value_prefix = "value.";
+    if (flat_name.rfind(value_prefix, 0) == 0) {
+        return root + flat_name.substr(std::string("value").size());
+    }
     const string prefix = root + ".";
     if (flat_name.rfind(prefix, 0) == 0) {
         return root + "." + flat_name.substr(prefix.size());
