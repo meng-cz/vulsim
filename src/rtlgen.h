@@ -38,7 +38,11 @@ inline string LogicSubModuleName(const ModuleName &module_name) {
 
 struct RTLGenResult {
     vector<string> logic_hls_codes;
+    VulDebugLocs logic_hls_debug;
+    VulDebugLines logic_hls_debug_lines;
     vector<string> rtl_skeleten_codes;
+    VulDebugLocs rtl_skeleten_debug;
+    VulDebugLines rtl_skeleten_debug_lines;
     vector<string> resource_files; // additional resource files needed by ROM
 };
 

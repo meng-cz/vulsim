@@ -749,6 +749,57 @@ std::vector<std::string> splitBodyLines(std::string_view sv) {
     return lines;
 }
 
+struct SplitBodyLinesWithPosResult {
+    std::vector<std::string> lines;
+    std::vector<LinePosition> positions;
+};
+
+SplitBodyLinesWithPosResult splitBodyLinesWithPos(
+    const std::string &flat_text,
+    const std::vector<LinePosition> &flat_pos,
+    size_t begin,
+    size_t end
+) {
+    if (begin > end) begin = end;
+    if (end > flat_text.size()) end = flat_text.size();
+
+    if (begin < end && flat_text[begin] == '\n') {
+        ++begin;
+    }
+    if (begin < end && flat_text[end - 1] == '\n') {
+        --end;
+    }
+
+    SplitBodyLinesWithPosResult out;
+    if (begin == end) {
+        return out;
+    }
+
+    size_t line_begin = begin;
+    while (line_begin <= end) {
+        size_t line_end = flat_text.find('\n', line_begin);
+        if (line_end == std::string::npos || line_end > end) {
+            line_end = end;
+        }
+        out.lines.push_back(flat_text.substr(line_begin, line_end - line_begin));
+        if (line_begin < flat_pos.size()) {
+            out.positions.push_back(flat_pos[line_begin]);
+        } else {
+            out.positions.push_back(LinePosition{-1, -1});
+        }
+        if (line_end == end) {
+            break;
+        }
+        line_begin = line_end + 1;
+    }
+
+    if (out.lines.size() == 1 && out.lines[0].empty()) {
+        out.lines.clear();
+        out.positions.clear();
+    }
+    return out;
+}
+
 } // namespace
 
 std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code) {
@@ -814,15 +865,13 @@ std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code
             size_t bodyOpen = p;
             size_t bodyClose = findMatchingByCounter(s, pos, bodyOpen, '{', '}');
 
-            std::string_view bodyText(
-                s.data() + bodyOpen + 1,
-                bodyClose - bodyOpen - 1
-            );
-
-            entry.body = splitBodyLines(bodyText);
+            auto split_body = splitBodyLinesWithPos(s, pos, bodyOpen + 1, bodyClose);
+            entry.body = std::move(split_body.lines);
+            entry.body_pos = std::move(split_body.positions);
             p = bodyClose + 1;
         } else if (p < s.size() && s[p] == ';') {
             entry.body.clear();
+            entry.body_pos.clear();
             ++p;
         } else {
             throw VulException(

@@ -54,13 +54,31 @@ vector<string> genStaticProjectHeaderCode(
 
 struct StaticModuleCodeHpp {
     vector<string> decl;
+    VulDebugLocs decl_debug;
+    VulDebugLines decl_debug_lines;
     vector<string> impl;
+    VulDebugLocs impl_debug;
+    VulDebugLines impl_debug_lines;
     vector<string> resource_files;
 };
 
 StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &module_instance, const vector<VulTracedSignal> &traced_signals);
 
 vector<string> genStaticTestHarnessHpp(
+    const VulStaticTestHarnessModule &test_module,
+    const VulStaticModuleInstance &top_module,
+    bool enable_tracing,
+    const vector<VulBreakPointSpec> &break_specs,
+    uint64_t break_cycles
+);
+
+struct StaticTestHarnessCodeHpp {
+    vector<string> codes;
+    VulDebugLocs debug;
+    VulDebugLines debug_lines;
+};
+
+StaticTestHarnessCodeHpp genStaticTestHarnessCodeHpp(
     const VulStaticTestHarnessModule &test_module,
     const VulStaticModuleInstance &top_module,
     bool enable_tracing,

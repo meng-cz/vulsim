@@ -52,6 +52,29 @@ struct VCPPModuleContext {
         }
         return "Line " + std::to_string(line_mapping[pos.line]) + ":" + std::to_string(pos.column + 1);
     }
+    inline VulDebugLoc toDebugLoc(const LinePosition &pos) const {
+        VulDebugLoc loc;
+        loc.file = temp.filepath;
+        if (pos.line < 0 || pos.line >= static_cast<int32_t>(line_mapping.size())) {
+            loc.line = static_cast<uint32_t>(pos.line + 1);
+        } else {
+            loc.line = line_mapping[pos.line] + 1;
+        }
+        loc.column = static_cast<uint32_t>(pos.column + 1);
+        return loc;
+    }
+    inline VulDebugLocs bodyDebugLocs(const MacroEntry &entry) const {
+        VulDebugLocs locs;
+        locs.reserve(entry.body.size());
+        for (size_t i = 0; i < entry.body.size(); ++i) {
+            if (i < entry.body_pos.size()) {
+                locs.push_back(toDebugLoc(entry.body_pos[i]));
+            } else {
+                locs.push_back(toDebugLoc(entry.pos));
+            }
+        }
+        return locs;
+    }
 };
 
 class VCPPModuleHandler {
@@ -278,6 +301,7 @@ public:
             reg.dims.push_back(entry.args[i]);
         }
         reg.reset_codelines = entry.body;
+        reg.reset_codelines_debug = context.bodyDebugLocs(entry);
         context.temp.registers.push_back(std::move(reg));
     }
 };
@@ -298,6 +322,7 @@ public:
             reg.dims.push_back(entry.args[i]);
         }
         reg.reset_codelines = entry.body;
+        reg.reset_codelines_debug = context.bodyDebugLocs(entry);
         context.temp.registers.push_back(std::move(reg));
     }
 };
@@ -314,6 +339,7 @@ public:
         reg.portnum = entry.args[3];
         reg.dims.push_back(entry.args[2]);
         reg.reset_codelines = entry.body;
+        reg.reset_codelines_debug = context.bodyDebugLocs(entry);
         context.temp.registers.push_back(std::move(reg));
     }
 };
@@ -332,6 +358,7 @@ public:
         wire.name = entry.args[0];
         wire.type = entry.args[1];
         wire.reset_codelines = entry.body;
+        wire.reset_codelines_debug = context.bodyDebugLocs(entry);
         context.temp.wires.push_back(std::move(wire));
     }
 };
@@ -437,6 +464,8 @@ public:
         serv.cond = "";
         serv.priority = "";
         serv.codelines = entry.body;
+        serv.codelines_debug = context.bodyDebugLocs(entry);
+        serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 1, serv);
         context.temp.services.push_back(std::move(serv));
@@ -454,8 +483,10 @@ public:
         serv.name = entry.args[0];
         serv.has_handshake = true;
         serv.cond = entry.args[1];
+        serv.cond_debug = context.toDebugLoc(entry.pos);
         serv.priority = "";
         serv.codelines = entry.body;
+        serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 2, serv);
         context.temp.services.push_back(std::move(serv));
@@ -475,6 +506,7 @@ public:
         serv.cond = "";
         serv.priority = entry.args[1];
         serv.codelines = entry.body;
+        serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_PRIO '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 2, serv);
         context.temp.services.push_back(std::move(serv));
@@ -493,7 +525,9 @@ public:
         serv.has_handshake = true;
         serv.priority = entry.args[1];
         serv.cond = entry.args[2];
+        serv.cond_debug = context.toDebugLoc(entry.pos);
         serv.codelines = entry.body;
+        serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_PRIO_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 3, serv);
         context.temp.services.push_back(std::move(serv));
@@ -515,6 +549,7 @@ public:
         query.name = entry.args[0];
         query.ret_type = entry.args[1];
         query.codelines = entry.body;
+        query.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing QUERY '" + query.name + "' at " + context.getOriginalPosition(entry.pos)};
         context.temp.queries.push_back(std::move(query));
     }
@@ -529,6 +564,7 @@ public:
             throw VulException("TICK_IMPL does not take any arguments at " + context.getOriginalPosition(entry.pos));
         }
         context.temp.tick_blocks.push_back(entry.body);
+        context.temp.tick_blocks_debug.push_back(context.bodyDebugLocs(entry));
     }
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleTICK_IMPL> _auto_register_TICK_IMPL_handler;
@@ -821,6 +857,7 @@ public:
             throw VulException("HELPER does not take any arguments at " + context.getOriginalPosition(entry.pos));
         }
         context.temp.helper_codes = entry.body;
+        context.temp.helper_codes_debug = context.bodyDebugLocs(entry);
     }
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleHELPER> _auto_register_HELPER_handler;
@@ -859,12 +896,36 @@ struct VCPPTestContext {
     VulStaticTestHarnessModule test;
     VulStaticConfigLib config_lib;
     VulStaticBundleLib bundle_lib;
+    string filepath;
     std::vector<uint32_t> line_mapping; // new line number -> original line number (1-based)
     inline string getOriginalPosition(const LinePosition &pos) const {
         if (pos.line < 0 || pos.line >= line_mapping.size()) {
             return "Line " + std::to_string(pos.line + 1) + ":" + std::to_string(pos.column + 1);
         }
         return "Line " + std::to_string(line_mapping[pos.line]) + ":" + std::to_string(pos.column + 1);
+    }
+    inline VulDebugLoc toDebugLoc(const LinePosition &pos) const {
+        VulDebugLoc loc;
+        loc.file = filepath;
+        if (pos.line < 0 || pos.line >= static_cast<int32_t>(line_mapping.size())) {
+            loc.line = static_cast<uint32_t>(pos.line + 1);
+        } else {
+            loc.line = line_mapping[pos.line] + 1;
+        }
+        loc.column = static_cast<uint32_t>(pos.column + 1);
+        return loc;
+    }
+    inline VulDebugLocs bodyDebugLocs(const MacroEntry &entry) const {
+        VulDebugLocs locs;
+        locs.reserve(entry.body.size());
+        for (size_t i = 0; i < entry.body.size(); ++i) {
+            if (i < entry.body_pos.size()) {
+                locs.push_back(toDebugLoc(entry.body_pos[i]));
+            } else {
+                locs.push_back(toDebugLoc(entry.pos));
+            }
+        }
+        return locs;
     }
 };
 
@@ -991,8 +1052,10 @@ public:
         serv.name = entry.args[0];
         serv.has_handshake = true;
         serv.cond = entry.args[1];
+        serv.cond_debug = context.toDebugLoc(entry.pos);
         serv.priority = "";
         serv.codelines = entry.body;
+        serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 2, serv);
         context.test.services[serv.name] = std::move(serv);
@@ -1028,6 +1091,8 @@ public:
     virtual string name() const { return "GLOBAL"; }
     virtual void run(VCPPTestContext &context, const MacroEntry &entry) {
         context.test.globalCodes.insert(context.test.globalCodes.end(), entry.body.begin(), entry.body.end());
+        auto locs = context.bodyDebugLocs(entry);
+        context.test.globalCodes_debug.insert(context.test.globalCodes_debug.end(), locs.begin(), locs.end());
     }
 };
 static VCPPTestAutoRegisterHandler<VCPPTestGLOBAL> _auto_register_TEST_GLOBAL_handler;
@@ -1070,6 +1135,8 @@ public:
             throw VulException("Multiple SIMULATION blocks are not allowed at " + context.getOriginalPosition(entry.pos));
         }
         context.test.test_codelines.insert(context.test.test_codelines.end(), entry.body.begin(), entry.body.end());
+        auto locs = context.bodyDebugLocs(entry);
+        context.test.test_codelines_debug.insert(context.test.test_codelines_debug.end(), locs.begin(), locs.end());
     }
 };
 static VCPPTestAutoRegisterHandler<VCPPTestSIMULATION> _auto_register_TEST_SIMULATION_handler;
@@ -1082,6 +1149,7 @@ VulStaticTestHarnessModule _parseTestModule(
     VCPPTestContext context;
     context.config_lib = config_lib;
     context.bundle_lib = bundle_lib;
+    context.filepath = test_filepath;
 
     VulErrorContextGuard _err{"Parsing test module from file '" + test_filepath + "'"};
 

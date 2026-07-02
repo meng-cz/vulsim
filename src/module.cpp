@@ -401,8 +401,10 @@ void instantiateModule(
             lb.priority = 0;
         }
         lb.codelines = serv.codelines;
+        lb.codelines_debug = serv.codelines_debug;
         if (serv.has_handshake) {
             lb.cond_codelines.push_back("return (" + serv.cond + ");\n");
+            lb.cond_codelines_debug.push_back(serv.cond_debug);
         }
         instance.serv_logic_blocks[serv_name] = lb;
     }
@@ -416,6 +418,7 @@ void instantiateModule(
         lb.with_priority = false;
         lb.priority = 0;
         lb.codelines = query.codelines;
+        lb.codelines_debug = query.codelines_debug;
         instance.query_logic_blocks[query.name] = lb;
     }
 
@@ -431,6 +434,7 @@ void instantiateModule(
             static_reg.ports = (portnum_value > 1) ? portnum_value : 1;
         }
         static_reg.reset_codelines = reg.reset_codelines;
+        static_reg.reset_codelines_debug = reg.reset_codelines_debug;
         for (const auto &dim : reg.dims) {
             ConfigRealValue dim_value = calculateConstexprValue(dim, local_config_lib);
             static_reg.dims.push_back(dim_value);
@@ -445,6 +449,7 @@ void instantiateModule(
         static_wire.name = wire.name;
         static_wire.signature = parseTypeSignature(wire.type, local_config_lib);
         static_wire.reset_codelines = wire.reset_codelines;
+        static_wire.reset_codelines_debug = wire.reset_codelines_debug;
         instance.wires.push_back(std::move(static_wire));
     }
 
@@ -531,10 +536,14 @@ void instantiateModule(
     }
 
     // tick blocks
-    for (const auto &tb : temp.tick_blocks) {
+    for (size_t tb_idx = 0; tb_idx < temp.tick_blocks.size(); ++tb_idx) {
+        const auto &tb = temp.tick_blocks[tb_idx];
         VulErrorContextGuard _err{"Processing tick block"};
         VulTickBlock tick_block;
         tick_block.codelines = tb;
+        if (tb_idx < temp.tick_blocks_debug.size()) {
+            tick_block.codelines_debug = temp.tick_blocks_debug[tb_idx];
+        }
         instance.tick_blocks.push_back(std::move(tick_block));
     }
 
@@ -809,6 +818,7 @@ void instantiateModule(
 
     // helper codes
     instance.helper_codes = temp.helper_codes;
+    instance.helper_codes_debug = temp.helper_codes_debug;
 }
 
 void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance) {

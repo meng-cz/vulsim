@@ -43,6 +43,24 @@ typedef string ArgName;
 using InstanceName = string;
 using CCodeLine = string;
 
+struct VulDebugLoc {
+    string file;
+    uint32_t line = 0;   // 1-based original source line, 0 means generated/unknown
+    uint32_t column = 0; // 1-based original source column, 0 means unknown
+
+    inline bool valid() const {
+        return !file.empty() && line != 0;
+    }
+};
+
+struct VulDebugLine {
+    uint32_t generated_line = 0; // 1-based line in emitted file
+    VulDebugLoc source;
+};
+
+using VulDebugLocs = vector<VulDebugLoc>;
+using VulDebugLines = vector<VulDebugLine>;
+
 enum class VulConnIndexKind {
     ConstantExpr,
     LoopVar,
@@ -120,12 +138,14 @@ struct VulTempRegister {
     string portnum;
     vector<string> dims;
     vector<string> reset_codelines;
+    VulDebugLocs reset_codelines_debug;
 };
 
 struct VulTempWire {
     string name;
     string type;
     vector<string> reset_codelines;
+    VulDebugLocs reset_codelines_debug;
 };
 
 struct VulTempReqServBase {
@@ -194,15 +214,19 @@ struct VulTempServ : public VulTempReqServBase {
     string priority;
     string cond;
     vector<string> codelines;
+    VulDebugLocs codelines_debug;
+    VulDebugLoc cond_debug;
 };
 
 struct VulTempQuery {
     string name;
     string ret_type;
     vector<string> codelines;
+    VulDebugLocs codelines_debug;
 };
 
 using VulTempTickBlock = vector<string>;
+using VulTempTickBlockDebug = VulDebugLocs;
 
 struct VulTempInstance {
     string name;
@@ -264,10 +288,12 @@ struct VulTempModule {
     vector<VulTempQueue> queues;
     vector<VulTempInstance> instances;
     vector<VulTempTickBlock> tick_blocks;
+    vector<VulTempTickBlockDebug> tick_blocks_debug;
     vector<VulReqServConnection>  req_connections;
     vector<VulTempChildServiceUse> child_service_uses;
     vector<VulTempChildQueryUse> child_query_uses;
     vector<string> helper_codes;
+    VulDebugLocs helper_codes_debug;
 };
 
 using VulTempModuleCache = std::unordered_map<string, VulTempModule>; // map from module name to its parsed temp module
@@ -286,6 +312,8 @@ struct LogicBlockCall {
 struct VulLogicBlock {
     vector<string> codelines;
     vector<string> cond_codelines;
+    VulDebugLocs codelines_debug;
+    VulDebugLocs cond_codelines_debug;
     vector<LogicBlockCall> call_requests; // all transaction ports called within this block
     VulLogicBlockID block_id; // instance-unique block id, assigned during module tree construction
     int32_t priority; // only for service logic block, smaller value means higher priority, default 0
@@ -294,6 +322,7 @@ struct VulLogicBlock {
 
 struct VulTickBlock {
     vector<string> codelines;
+    VulDebugLocs codelines_debug;
     vector<LogicBlockCall> call_requests; // all transaction ports called within this block
 };
 
@@ -418,12 +447,14 @@ struct VulStaticRegister {
     vector<ConfigRealValue> dims; // only for array types
     ConfigRealValue ports;
     vector<string> reset_codelines;
+    VulDebugLocs reset_codelines_debug;
 };
 
 struct VulStaticWire {
     BMemberName name;
     VulStaticTypeSignature signature;
     vector<string> reset_codelines;
+    VulDebugLocs reset_codelines_debug;
 };
 
 struct VulStaticBRAM {
@@ -546,6 +577,7 @@ struct VulStaticModuleInstance {
     unordered_map<ReqServName, VulLogicBlock> query_logic_blocks;
     vector<VulTickBlock> tick_blocks;
     vector<string> helper_codes;
+    VulDebugLocs helper_codes_debug;
 
     unordered_map<InstanceName, VulStaticInstanceDecl> instances;
 
@@ -584,7 +616,9 @@ struct VulStaticTestHarnessModule {
     unordered_map<ReqServName, VulStaticQuery>  queries;
 
     vector<CCodeLine> test_codelines;
+    VulDebugLocs test_codelines_debug;
 
     vector<string> includedHeaders;
     vector<string> globalCodes;
+    VulDebugLocs globalCodes_debug;
 };

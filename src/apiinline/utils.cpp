@@ -210,4 +210,96 @@ string applyReplacements(string code, vector<Replacement> repls) {
     return code;
 }
 
+InlineCode applyReplacementsWithDebug(
+    const vector<string> &lines,
+    const VulDebugLocs &debug,
+    vector<Replacement> repls
+) {
+    const string code = joinLines(lines);
+    vector<uint32_t> line_start_offsets;
+    line_start_offsets.reserve(lines.size());
+    uint32_t offset = 0;
+    for (const auto &line : lines) {
+        line_start_offsets.push_back(offset);
+        offset += static_cast<uint32_t>(line.size());
+    }
+
+    auto loc_for_offset = [&](uint32_t pos) -> VulDebugLoc {
+        if (line_start_offsets.empty()) {
+            return {};
+        }
+        auto it = std::upper_bound(line_start_offsets.begin(), line_start_offsets.end(), pos);
+        size_t idx = (it == line_start_offsets.begin()) ? 0 : static_cast<size_t>((it - line_start_offsets.begin()) - 1);
+        if (idx < debug.size()) {
+            return debug[idx];
+        }
+        return {};
+    };
+
+    std::sort(repls.begin(), repls.end(), [](const Replacement &a, const Replacement &b) {
+        return a.start < b.start;
+    });
+
+    string out_text;
+    vector<VulDebugLoc> char_debug;
+    out_text.reserve(code.size());
+    char_debug.reserve(code.size());
+
+    auto append_text = [&](const string &text, const VulDebugLoc &loc) {
+        out_text += text;
+        char_debug.insert(char_debug.end(), text.size(), loc);
+    };
+
+    uint32_t cursor = 0;
+    for (const auto &repl : repls) {
+        if (repl.start > cursor) {
+            uint32_t p = cursor;
+            while (p < repl.start) {
+                VulDebugLoc loc = loc_for_offset(p);
+                uint32_t line_end = p;
+                while (line_end < repl.start && line_end < code.size() && code[line_end] != '\n') {
+                    ++line_end;
+                }
+                if (line_end < repl.start && line_end < code.size() && code[line_end] == '\n') {
+                    ++line_end;
+                }
+                append_text(code.substr(p, line_end - p), loc);
+                p = line_end;
+            }
+        }
+        append_text(repl.text, loc_for_offset(repl.start));
+        cursor = repl.end;
+    }
+    if (cursor < code.size()) {
+        uint32_t p = cursor;
+        while (p < code.size()) {
+            VulDebugLoc loc = loc_for_offset(p);
+            uint32_t line_end = p;
+            while (line_end < code.size() && code[line_end] != '\n') {
+                ++line_end;
+            }
+            if (line_end < code.size() && code[line_end] == '\n') {
+                ++line_end;
+            }
+            append_text(code.substr(p, line_end - p), loc);
+            p = line_end;
+        }
+    }
+
+    InlineCode out;
+    size_t begin = 0;
+    while (begin < out_text.size()) {
+        size_t end = out_text.find('\n', begin);
+        if (end == string::npos) {
+            out.lines.push_back(out_text.substr(begin));
+            out.debug.push_back(begin < char_debug.size() ? char_debug[begin] : VulDebugLoc{});
+            break;
+        }
+        out.lines.push_back(out_text.substr(begin, end - begin + 1));
+        out.debug.push_back(begin < char_debug.size() ? char_debug[begin] : VulDebugLoc{});
+        begin = end + 1;
+    }
+    return out;
+}
+
 } // namespace apiinline

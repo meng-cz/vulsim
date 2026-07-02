@@ -118,10 +118,11 @@ string requestCallExpr(const RequestInfo &info, const string &idx_expr, const ve
 
 } // namespace
 
-vector<string> inlineRequestAPIs(
+InlineCode inlineRequestAPIs(
     const VulStaticModuleInstance &module,
     const VulStaticBundleLib &bundlelib,
-    const vector<string> &logic_hls_codes
+    const vector<string> &logic_hls_codes,
+    const VulDebugLocs &logic_hls_debug
 ) {
     unordered_map<string, RequestInfo> requests;
     for (const auto &[name, req] : module.requests) {
@@ -144,7 +145,7 @@ vector<string> inlineRequestAPIs(
         requests[name] = std::move(info);
     }
     if (requests.empty()) {
-        return logic_hls_codes;
+        return {logic_hls_codes, logic_hls_debug};
     }
 
     string code = joinLines(logic_hls_codes);
@@ -175,7 +176,15 @@ vector<string> inlineRequestAPIs(
         }
     }
 
-    return splitLinesKeepEnds(applyReplacements(std::move(code), std::move(repls)));
+    return applyReplacementsWithDebug(logic_hls_codes, logic_hls_debug, std::move(repls));
+}
+
+vector<string> inlineRequestAPIs(
+    const VulStaticModuleInstance &module,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &logic_hls_codes
+) {
+    return inlineRequestAPIs(module, bundlelib, logic_hls_codes, {}).lines;
 }
 
 } // namespace apiinline

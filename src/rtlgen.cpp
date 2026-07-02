@@ -22,6 +22,7 @@
 
 #include "rtlgen.h"
 #include "apiinline/apiinline.hpp"
+#include "debugmap.hpp"
 #include "simgen.h"
 
 #include <functional>
@@ -59,12 +60,18 @@ struct RTLGenContext {
           emit_hls_api_helpers(emit_hls_api_helpers) {}
 
     vector<string> hls_header; // 文件开头的常量和结构体声明
+    VulDebugLocs hls_header_debug;
     vector<string> hls_arguments; // HLS主函数的参数列表，仅包含类型和参数名字符串，没有逗号或换行
     vector<string> hls_init; // HLS主函数开头的初始化代码，主要是寄存器和线网的定义和reset赋值
+    VulDebugLocs hls_init_debug;
     vector<string> hls_helpers; // HLS主函数中定义的辅助函数，用来将函数调用转换成对信号的操作
+    VulDebugLocs hls_helpers_debug;
     vector<string> hls_blocks; // HLS主函数中每个逻辑块的代码
+    VulDebugLocs hls_blocks_debug;
     vector<string> hls_body; // HLS主函数的主体代码，调用逻辑块
+    VulDebugLocs hls_body_debug;
     vector<string> hls_final; // HLS主函数结尾的代码，主要是对输出信号的收尾赋值
+    VulDebugLocs hls_final_debug;
 
     vector<string> rtl_ports;  // RTL框架模块的端口声明，每个一行，没有逗号或换行
     vector<string> rtl_decl;   // RTL框架模块的声明部分代码，主要是寄存器和线网的定义
@@ -429,9 +436,10 @@ void _procConstAndBundle(RTLGenContext &ctx){
         ctx.hls_header.push_back("\n");
     }
 
-    ctx.hls_header.insert(ctx.hls_header.end(), ctx.module.helper_codes.begin(), ctx.module.helper_codes.end());
+    vulDebugAppendLines(ctx.hls_header, ctx.hls_header_debug, ctx.module.helper_codes, ctx.module.helper_codes_debug);
     if (!ctx.module.helper_codes.empty()) {
         ctx.hls_header.push_back("\n");
+        ctx.hls_header_debug.push_back({});
     }
 };
 
@@ -441,9 +449,12 @@ void _procWires(RTLGenContext &ctx) {
     for (const auto &wire : ctx.module.wires) {
         string def = wire.signature.toString() + " " + wire.name + ";\n";
         ctx.hls_init.push_back(def);
+        ctx.hls_init_debug.push_back({});
         ctx.hls_init.push_back("{\n");
-        ctx.hls_init.insert(ctx.hls_init.end(), wire.reset_codelines.begin(), wire.reset_codelines.end());
+        ctx.hls_init_debug.push_back({});
+        vulDebugAppendLines(ctx.hls_init, ctx.hls_init_debug, wire.reset_codelines, wire.reset_codelines_debug);
         ctx.hls_init.push_back("}\n");
+        ctx.hls_init_debug.push_back({});
     }
 };
 
@@ -978,7 +989,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         } else {
             ctx.hls_blocks.push_back("auto " + implFuncName(serv_name) + " = [&](" + arglists + ") -> void {\n");
         }
-        ctx.hls_blocks.insert(ctx.hls_blocks.end(), lb.codelines.begin(), lb.codelines.end());
+        vulDebugAppendLines(ctx.hls_blocks, ctx.hls_blocks_debug, lb.codelines, lb.codelines_debug);
         ctx.hls_blocks.push_back("};\n");
         if (has_rdy) {
             if (is_arrayed) {
@@ -986,7 +997,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
             } else {
                 ctx.hls_blocks.push_back("auto " + condFuncName(serv_name) + " = [&](" + arglists + ") -> bool {\n");
             }
-            ctx.hls_blocks.insert(ctx.hls_blocks.end(), lb.cond_codelines.begin(), lb.cond_codelines.end());
+            vulDebugAppendLines(ctx.hls_blocks, ctx.hls_blocks_debug, lb.cond_codelines, lb.cond_codelines_debug);
             ctx.hls_blocks.push_back("};\n");
         }
 
@@ -1010,7 +1021,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
     for (const auto &tb : ctx.module.tick_blocks) {
         string name = "tick" + std::to_string(tick_count++) + "__";
         ctx.hls_blocks.push_back("auto " + name + " = [&]() {\n");
-        ctx.hls_blocks.insert(ctx.hls_blocks.end(), tb.codelines.begin(), tb.codelines.end());
+        vulDebugAppendLines(ctx.hls_blocks, ctx.hls_blocks_debug, tb.codelines, tb.codelines_debug);
         ctx.hls_blocks.push_back("};\n");
 
         // cache tick info
@@ -1147,7 +1158,7 @@ void _procQueries(RTLGenContext &ctx) {
         ctx.rtl_logicports.push_back("." + port_name + "(" + port_name + ")");
 
         ctx.hls_blocks.push_back("auto " + query_name + " = [&]() -> " + ret_type_str + " {\n");
-        ctx.hls_blocks.insert(ctx.hls_blocks.end(), iter->second.codelines.begin(), iter->second.codelines.end());
+        vulDebugAppendLines(ctx.hls_blocks, ctx.hls_blocks_debug, iter->second.codelines, iter->second.codelines_debug);
         ctx.hls_blocks.push_back("};\n");
 
         ctx.hls_body.push_back("{\n");
@@ -2289,11 +2300,13 @@ RTLGenResult genModuleRTLImpl(
     const string module_name = module.simClassName();
     const string logic_module_name = LogicSubModuleName(module_name);
 
-    auto append_lines = [](vector<string> &dst, const vector<string> &src) {
-        dst.insert(dst.end(), src.begin(), src.end());
+    auto append_lines = [](vector<string> &dst, VulDebugLocs &dst_debug, vector<string> &src, VulDebugLocs &src_debug) {
+        vulDebugNormalize(src, src_debug);
+        vulDebugAppendLines(dst, dst_debug, src, src_debug);
     };
 
     auto &hls = result.logic_hls_codes;
+    auto &hls_debug = result.logic_hls_debug;
     hls.push_back("#include <array>\n");
     hls.push_back("#include <cstdint>\n");
     hls.push_back("\n");
@@ -2311,7 +2324,7 @@ RTLGenResult genModuleRTLImpl(
     hls.push_back("#define assert(...) ((void)0)\n");
     hls.push_back("\n");
 
-    append_lines(hls, ctx.hls_header);
+    append_lines(hls, hls_debug, ctx.hls_header, ctx.hls_header_debug);
     if (!ctx.hls_header.empty()) {
         hls.push_back("\n");
     }
@@ -2322,25 +2335,26 @@ RTLGenResult genModuleRTLImpl(
     }
     hls.push_back(") {\n");
 
-    append_lines(hls, ctx.hls_init);
+    append_lines(hls, hls_debug, ctx.hls_init, ctx.hls_init_debug);
     if (!ctx.hls_init.empty()) {
         hls.push_back("\n");
     }
-    append_lines(hls, ctx.hls_helpers);
+    append_lines(hls, hls_debug, ctx.hls_helpers, ctx.hls_helpers_debug);
     if (!ctx.hls_helpers.empty()) {
         hls.push_back("\n");
     }
-    append_lines(hls, ctx.hls_blocks);
+    append_lines(hls, hls_debug, ctx.hls_blocks, ctx.hls_blocks_debug);
     if (!ctx.hls_blocks.empty()) {
         hls.push_back("\n");
     }
-    append_lines(hls, ctx.hls_body);
+    append_lines(hls, hls_debug, ctx.hls_body, ctx.hls_body_debug);
     if (!ctx.hls_body.empty()) {
         hls.push_back("\n");
     }
-    append_lines(hls, ctx.hls_final);
+    append_lines(hls, hls_debug, ctx.hls_final, ctx.hls_final_debug);
     hls.push_back("}\n");
     hls.push_back("\n");
+    vulDebugNormalize(result.logic_hls_codes, result.logic_hls_debug);
 
     auto &rtl = result.rtl_skeleten_codes;
     vector<string> ports;
@@ -2356,11 +2370,11 @@ RTLGenResult genModuleRTLImpl(
     rtl.push_back(");\n");
     rtl.push_back("\n");
 
-    append_lines(rtl, ctx.rtl_decl);
+    rtl.insert(rtl.end(), ctx.rtl_decl.begin(), ctx.rtl_decl.end());
     if (!ctx.rtl_decl.empty()) {
         rtl.push_back("\n");
     }
-    append_lines(rtl, ctx.rtl_logic);
+    rtl.insert(rtl.end(), ctx.rtl_logic.begin(), ctx.rtl_logic.end());
     if (!ctx.rtl_logic.empty()) {
         rtl.push_back("\n");
     }
@@ -2372,17 +2386,23 @@ RTLGenResult genModuleRTLImpl(
     rtl.push_back(");\n");
     rtl.push_back("\n");
 
-    append_lines(rtl, ctx.rtl_inst);
+    rtl.insert(rtl.end(), ctx.rtl_inst.begin(), ctx.rtl_inst.end());
     if (!ctx.rtl_inst.empty()) {
         rtl.push_back("\n");
     }
     rtl.push_back("endmodule\n");
     rtl.push_back("\n");
+    vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
 
     result.resource_files = std::move(ctx.resource_files);
     if (!ctx.emit_hls_api_helpers) {
-        result.logic_hls_codes = apiinline::inlineAPIs(module, local_bundlelib, result.logic_hls_codes);
+        auto inlined = apiinline::inlineAPIs(module, local_bundlelib, result.logic_hls_codes, result.logic_hls_debug);
+        result.logic_hls_codes = std::move(inlined.lines);
+        result.logic_hls_debug = std::move(inlined.debug);
+        vulDebugNormalize(result.logic_hls_codes, result.logic_hls_debug);
     }
+    result.logic_hls_debug_lines = vulDebugBuildGeneratedMap(result.logic_hls_debug);
+    result.rtl_skeleten_debug_lines = vulDebugBuildGeneratedMap(result.rtl_skeleten_debug);
 
     return result;
 }

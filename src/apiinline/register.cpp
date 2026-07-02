@@ -127,10 +127,11 @@ string inlineRegisterReadsInExpr(
 
 } // namespace
 
-vector<string> inlineRegisterAPIs(
+InlineCode inlineRegisterAPIs(
     const VulStaticModuleInstance &module,
     const VulStaticBundleLib &bundlelib,
-    const vector<string> &logic_hls_codes
+    const vector<string> &logic_hls_codes,
+    const VulDebugLocs &logic_hls_debug
 ) {
     unordered_map<string, RegisterInfo> registers;
     for (const auto &reg : module.registers) {
@@ -144,13 +145,13 @@ vector<string> inlineRegisterAPIs(
         registers[reg.name] = std::move(info);
     }
     if (registers.empty()) {
-        return logic_hls_codes;
+        return {logic_hls_codes, logic_hls_debug};
     }
 
     string code = joinLines(logic_hls_codes);
     vector<TokenInfo> tokens = tokenizeWithLibclang(code);
     if (tokens.empty()) {
-        return logic_hls_codes;
+        return {logic_hls_codes, logic_hls_debug};
     }
 
     vector<Replacement> repls;
@@ -250,7 +251,15 @@ vector<string> inlineRegisterAPIs(
         }
     }
 
-    return splitLinesKeepEnds(applyReplacements(std::move(code), std::move(repls)));
+    return applyReplacementsWithDebug(logic_hls_codes, logic_hls_debug, std::move(repls));
+}
+
+vector<string> inlineRegisterAPIs(
+    const VulStaticModuleInstance &module,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &logic_hls_codes
+) {
+    return inlineRegisterAPIs(module, bundlelib, logic_hls_codes, {}).lines;
 }
 
 } // namespace apiinline

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "simgen.h"
+#include "debugmap.hpp"
 #include "stringop.hpp"
 
 #include <cerrno>
@@ -885,12 +886,16 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     vector<string> decl_include_field;
     vector<string> decl_public_field;
     vector<string> decl_private_field;
+    VulDebugLocs decl_private_field_debug;
 
     vector<string> impl_field;
+    VulDebugLocs impl_field_debug;
     vector<string> impl_init_field;
     vector<string> impl_commit_field;
+    VulDebugLocs impl_commit_field_debug;
     vector<string> impl_sys_reset_field;
     vector<string> impl_reg_reset_field;
+    VulDebugLocs impl_reg_reset_field_debug;
 
     string mod_class_name = mod.simClassName();
 
@@ -994,7 +999,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                     impl_field.push_back(CodeTab + "assert(!" + call_guard_name + " && \"" + service_assert_msg + "\");\n");
                     impl_field.push_back(CodeTab + call_guard_name + " = true;\n");
                 }
-                impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
+                vulDebugAppendLines(impl_field, impl_field_debug, lb_iter->second.codelines, lb_iter->second.codelines_debug);
                 impl_field.push_back("}\n");
             } else {
                 if (is_arrayed) {
@@ -1032,14 +1037,14 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
                     impl_field.push_back("template <uint32_t IDX>\n");
                 }
                 impl_field.push_back("bool " + mod_class_name + "::__cond_" + serv_entry.first + "(" + arglists + ") {\n");
-                impl_field.insert(impl_field.end(), lb_iter->second.cond_codelines.begin(), lb_iter->second.cond_codelines.end());
+                vulDebugAppendLines(impl_field, impl_field_debug, lb_iter->second.cond_codelines, lb_iter->second.cond_codelines_debug);
                 impl_field.push_back("}\n");
 
                 if (is_arrayed) {
                     impl_field.push_back("template <uint32_t IDX>\n");
                 }
                 impl_field.push_back("void " + mod_class_name + "::__impl_" + serv_entry.first + "(" + arglists + ") {\n");
-                impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
+                vulDebugAppendLines(impl_field, impl_field_debug, lb_iter->second.codelines, lb_iter->second.codelines_debug);
                 impl_field.push_back("}\n");
             }
         }
@@ -1059,7 +1064,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
         decl_public_field.push_back(query.ret_type.toString() + " " + query_name + "() const;\n");
         impl_field.push_back(query.ret_type.toString() + " " + mod_class_name + "::" + query_name + "() const {\n");
-        impl_field.insert(impl_field.end(), lb_iter->second.codelines.begin(), lb_iter->second.codelines.end());
+        vulDebugAppendLines(impl_field, impl_field_debug, lb_iter->second.codelines, lb_iter->second.codelines_debug);
         impl_field.push_back("}\n");
         impl_field.push_back("\n");
     }
@@ -1111,7 +1116,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         sig_as_member.dims = reg.dims;
         impl_reg_reset_field.push_back("{\n");
         impl_reg_reset_field.push_back(_genStaticMemberTypeStr(sig_as_member) + " " + reg.name + ";\n");
-        impl_reg_reset_field.insert(impl_reg_reset_field.end(), reg.reset_codelines.begin(), reg.reset_codelines.end());
+        vulDebugAppendLines(impl_reg_reset_field, impl_reg_reset_field_debug, reg.reset_codelines, reg.reset_codelines_debug);
         impl_reg_reset_field.push_back("this->" + reg.name + ".reset(" + reg.name + ");\n");
         impl_reg_reset_field.push_back("}\n");
 
@@ -1127,10 +1132,10 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         decl_private_field.push_back("\n");
 
         impl_commit_field.push_back("{\n");
-        impl_commit_field.insert(impl_commit_field.end(), wire.reset_codelines.begin(), wire.reset_codelines.end());
+        vulDebugAppendLines(impl_commit_field, impl_commit_field_debug, wire.reset_codelines, wire.reset_codelines_debug);
         impl_commit_field.push_back("}\n");
         impl_reg_reset_field.push_back("{\n");
-        impl_reg_reset_field.insert(impl_reg_reset_field.end(), wire.reset_codelines.begin(), wire.reset_codelines.end());
+        vulDebugAppendLines(impl_reg_reset_field, impl_reg_reset_field_debug, wire.reset_codelines, wire.reset_codelines_debug);
         impl_reg_reset_field.push_back("}\n");
     }
 
@@ -1377,13 +1382,13 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         decl_private_field.push_back("void " + tick_func_name + "();\n");
 
         impl_field.push_back("void " + mod_class_name + "::" + tick_func_name + "() {\n");
-        impl_field.insert(impl_field.end(), tick.codelines.begin(), tick.codelines.end());
+        vulDebugAppendLines(impl_field, impl_field_debug, tick.codelines, tick.codelines_debug);
         impl_field.push_back("}\n");
         impl_field.push_back("\n");
     }
 
     // helper field
-    decl_private_field.insert(decl_private_field.end(), mod.helper_codes.begin(), mod.helper_codes.end());
+    vulDebugAppendLines(decl_private_field, decl_private_field_debug, mod.helper_codes, mod.helper_codes_debug);
 
     // trace
     if (!traced_signals.empty()) {
@@ -1474,6 +1479,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     // preparation done, start generating code lines
 
     vector<string> decl = genHeaderPrelude();
+    VulDebugLocs decl_debug;
     decl.push_back("#include \"common.h\"\n");
     decl.push_back("#include \"header.hpp\"\n");
     decl.push_back("#include \"vullib.h\"\n");
@@ -1532,9 +1538,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
     // private member declaration
     decl.push_back("private:\n");
-    for (const auto &line : decl_private_field) {
-        decl.push_back(line);
-    }
+    vulDebugAppendLines(decl, decl_debug, decl_private_field, decl_private_field_debug);
     decl.push_back("\n");
 
     // public member declaration
@@ -1550,6 +1554,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
 
     vector<string> impl = genHeaderPrelude();
+    VulDebugLocs impl_debug;
 
     impl.push_back("#include \"" + mod.simDeclPath() + "\"\n");
     impl.push_back("\n");
@@ -1583,7 +1588,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
     // apply tick function implementations
     impl.push_back("void " + mod_class_name + "::" + ApplyTickFunctionName + "() {\n");
-    impl.insert(impl.end(), impl_commit_field.begin(), impl_commit_field.end());
+    vulDebugAppendLines(impl, impl_debug, impl_commit_field, impl_commit_field_debug);
     impl.push_back("}\n");
 
     // sys reset function implementations
@@ -1594,7 +1599,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
 
     // reg reset function implementations
     impl.push_back("void " + mod_class_name + "::__reg_reset() {\n");
-    impl.insert(impl.end(), impl_reg_reset_field.begin(), impl_reg_reset_field.end());
+    vulDebugAppendLines(impl, impl_debug, impl_reg_reset_field, impl_reg_reset_field_debug);
     impl.push_back("}\n");
     impl.push_back("\n");
 
@@ -1605,13 +1610,15 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     impl.push_back("\n");
 
     // other function implementations
-    impl.insert(impl.end(), impl_field.begin(), impl_field.end());
+    vulDebugAppendLines(impl, impl_debug, impl_field, impl_field_debug);
 
-    return {decl, impl, bram_resources_files};
+    vulDebugNormalize(decl, decl_debug);
+    vulDebugNormalize(impl, impl_debug);
+    return {decl, decl_debug, vulDebugBuildGeneratedMap(decl_debug), impl, impl_debug, vulDebugBuildGeneratedMap(impl_debug), bram_resources_files};
 }
 
 
-vector<string> genStaticTestHarnessHpp(
+StaticTestHarnessCodeHpp genStaticTestHarnessCodeHpp(
     const VulStaticTestHarnessModule &test_module,
     const VulStaticModuleInstance &top_module,
     bool enable_tracing,
@@ -1621,8 +1628,10 @@ vector<string> genStaticTestHarnessHpp(
     
     vector<string> init_field;
     vector<string> member_field;
+    VulDebugLocs member_field_debug;
     vector<string> public_member_field;
     vector<string> simulation_field;
+    VulDebugLocs simulation_field_debug;
     vector<string> const_field;
 
     string child_instptr_name = "__instptr_top";
@@ -1702,21 +1711,23 @@ vector<string> genStaticTestHarnessHpp(
             member_field.push_back("template <uint32_t IDX = 0>\n");
         }
         member_field.push_back("void __impl_" + serv_name + "(" + arglists + ") {\n");
-        member_field.insert(member_field.end(), serv.codelines.begin(), serv.codelines.end());
+        vulDebugAppendLines(member_field, member_field_debug, serv.codelines, serv.codelines_debug);
         member_field.push_back("}\n");
         if (serv.has_handshake) {
             if (is_arrayed) {
                 member_field.push_back("template <uint32_t IDX = 0>\n");
             }
             member_field.push_back("bool __cond_" + serv_name + "(" + arglists + ") {\n");
-            member_field.push_back("return (" + serv.cond + ");\n");
+            vulDebugAppendLine(member_field, member_field_debug, "return (" + serv.cond + ");\n", serv.cond_debug);
             member_field.push_back("}\n");
         }
     }
 
     simulation_field = test_module.test_codelines;
+    simulation_field_debug = test_module.test_codelines_debug;
 
     vector<string> out_lines = genHeaderPrelude();
+    VulDebugLocs out_debug;
     out_lines.push_back("#include \"common.h\"\n");
     out_lines.push_back("#include \"header.hpp\"\n");
     out_lines.push_back("#include \"vullib.h\"\n");
@@ -1737,9 +1748,7 @@ vector<string> genStaticTestHarnessHpp(
     for (const auto &line : const_field) {
         out_lines.push_back(line);
     }
-    for (const auto &line : test_module.globalCodes) {
-        out_lines.push_back(line);
-    }
+    vulDebugAppendLines(out_lines, out_debug, test_module.globalCodes, test_module.globalCodes_debug);
 
     out_lines.push_back("public:\n");
     out_lines.push_back(class_name + "() {\n");
@@ -1767,13 +1776,7 @@ vector<string> genStaticTestHarnessHpp(
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
     out_lines.push_back("void simulation() {\n");
-    for (const auto &line : simulation_field) {
-        if (line.ends_with("\n")) {
-            out_lines.push_back(line);
-        } else {
-            out_lines.push_back(line + "\n");
-        }
-    }
+    vulDebugAppendLines(out_lines, out_debug, simulation_field, simulation_field_debug);
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
 
@@ -1800,14 +1803,29 @@ vector<string> genStaticTestHarnessHpp(
     out_lines.push_back("}\n");
     out_lines.push_back("\n");
 
-    for (const auto &line : member_field) {
-        out_lines.push_back(line);
-    }
+    vulDebugAppendLines(out_lines, out_debug, member_field, member_field_debug);
 
     out_lines.push_back("};\n");
     out_lines.push_back("\n");
 
-    return out_lines;
+    vulDebugNormalize(out_lines, out_debug);
+    return {out_lines, out_debug, vulDebugBuildGeneratedMap(out_debug)};
+}
+
+vector<string> genStaticTestHarnessHpp(
+    const VulStaticTestHarnessModule &test_module,
+    const VulStaticModuleInstance &top_module,
+    bool enable_tracing,
+    const vector<VulBreakPointSpec> &break_specs,
+    uint64_t break_cycles
+) {
+    return genStaticTestHarnessCodeHpp(
+        test_module,
+        top_module,
+        enable_tracing,
+        break_specs,
+        break_cycles
+    ).codes;
 }
 
 vector<string> genStaticTestMainHpp(shared_ptr<VulStaticModuleInstance> top_module) {

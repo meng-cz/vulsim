@@ -151,10 +151,11 @@ bool parseMethodCall(
 
 } // namespace
 
-vector<string> inlineQueueAPIs(
+InlineCode inlineQueueAPIs(
     const VulStaticModuleInstance &module,
     const VulStaticBundleLib &bundlelib,
-    const vector<string> &logic_hls_codes
+    const vector<string> &logic_hls_codes,
+    const VulDebugLocs &logic_hls_debug
 ) {
     unordered_map<string, QueueInfo> queues;
     for (const auto &queue : module.queues) {
@@ -172,7 +173,7 @@ vector<string> inlineQueueAPIs(
         queues[queue.name] = std::move(info);
     }
     if (queues.empty()) {
-        return logic_hls_codes;
+        return {logic_hls_codes, logic_hls_debug};
     }
 
     string code = joinLines(logic_hls_codes);
@@ -211,7 +212,15 @@ vector<string> inlineQueueAPIs(
         }
     }
 
-    return splitLinesKeepEnds(applyReplacements(std::move(code), std::move(repls)));
+    return applyReplacementsWithDebug(logic_hls_codes, logic_hls_debug, std::move(repls));
+}
+
+vector<string> inlineQueueAPIs(
+    const VulStaticModuleInstance &module,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &logic_hls_codes
+) {
+    return inlineQueueAPIs(module, bundlelib, logic_hls_codes, {}).lines;
 }
 
 } // namespace apiinline

@@ -6,6 +6,7 @@
 
 #include "bundlelib.h"
 #include "module.h"
+#include "apiinline/utils.hpp"
 
 namespace apiinline {
 
@@ -13,6 +14,13 @@ vector<string> inlineRegisterAPIs(
     const VulStaticModuleInstance &module,
     const VulStaticBundleLib &bundlelib,
     const vector<string> &logic_hls_codes
+);
+
+InlineCode inlineRegisterAPIs(
+    const VulStaticModuleInstance &module,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &logic_hls_codes,
+    const VulDebugLocs &logic_hls_debug
 );
 
 } // namespace apiinline

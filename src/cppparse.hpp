@@ -71,6 +71,7 @@ struct MacroEntry {
     std::string name;
     std::vector<std::string> args;
     std::vector<std::string> body;
+    std::vector<LinePosition> body_pos;
 };
 
 std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code);

@@ -2,6 +2,7 @@
 #include "vcpp.hpp"
 
 #include "simgen.h"
+#include "debugmap.hpp"
 #include "argparse.hpp"
 #include "breakpoint.hpp"
 #include "trace.hpp"
@@ -213,7 +214,10 @@ int simgenStatic(const SimGenArgs &args) {
 
         auto codes = simgen::genStaticModuleCodeHpp(*mod_instance, trace_table[mod_instance->instance_id]);
         writeLinesToFile(codes.decl, (out_path / decl_path).string());
-        writeLinesToFile(codes.impl, (out_path / (mod_instance->simImplPath())).string());
+        vulDebugWriteMapToFile(codes.decl_debug_lines, (out_path / (decl_path + ".dbgmap")).string());
+        const auto impl_path = mod_instance->simImplPath();
+        writeLinesToFile(codes.impl, (out_path / impl_path).string());
+        vulDebugWriteMapToFile(codes.impl_debug_lines, (out_path / (impl_path + ".dbgmap")).string());
         for (const auto &res_file : codes.resource_files) {
             std::filesystem::path src_file = proj_path / res_file;
             if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
@@ -229,13 +233,15 @@ int simgenStatic(const SimGenArgs &args) {
     {
         VulErrorContextGuard _err("generating test harness code");
 
-        vector<string> testharness_code = simgen::genStaticTestHarnessHpp(
+        auto testharness_code = simgen::genStaticTestHarnessCodeHpp(
             project.test_harness, *project.top_module_instance,
             /*enable_tracing=*/trace_matchers.size() > 0,
             break_specs,
             args.break_cycles
         );
-        writeLinesToFile(testharness_code, (out_path / project.top_module_instance->parent->simDeclPath()).string());
+        const auto harness_path = project.top_module_instance->parent->simDeclPath();
+        writeLinesToFile(testharness_code.codes, (out_path / harness_path).string());
+        vulDebugWriteMapToFile(testharness_code.debug_lines, (out_path / (harness_path + ".dbgmap")).string());
     }
 
     // gen VulTestMain.hpp

@@ -149,10 +149,11 @@ string readDataExpr(const MemoryInfo &info, const string &port_expr) {
 
 } // namespace
 
-vector<string> inlineMemoryAPIs(
+InlineCode inlineMemoryAPIs(
     const VulStaticModuleInstance &module,
     const VulStaticBundleLib &bundlelib,
-    const vector<string> &logic_hls_codes
+    const vector<string> &logic_hls_codes,
+    const VulDebugLocs &logic_hls_debug
 ) {
     unordered_map<string, MemoryInfo> memories;
     for (const auto &bram : module.brams) {
@@ -172,7 +173,7 @@ vector<string> inlineMemoryAPIs(
         memories[rom.name] = std::move(info);
     }
     if (memories.empty()) {
-        return logic_hls_codes;
+        return {logic_hls_codes, logic_hls_debug};
     }
 
     string code = joinLines(logic_hls_codes);
@@ -221,7 +222,15 @@ vector<string> inlineMemoryAPIs(
         }
     }
 
-    return splitLinesKeepEnds(applyReplacements(std::move(code), std::move(repls)));
+    return applyReplacementsWithDebug(logic_hls_codes, logic_hls_debug, std::move(repls));
+}
+
+vector<string> inlineMemoryAPIs(
+    const VulStaticModuleInstance &module,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &logic_hls_codes
+) {
+    return inlineMemoryAPIs(module, bundlelib, logic_hls_codes, {}).lines;
 }
 
 } // namespace apiinline

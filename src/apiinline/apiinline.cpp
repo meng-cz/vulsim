@@ -16,10 +16,19 @@ vector<string> inlineAPIs(
     const VulStaticBundleLib &bundlelib,
     const vector<string> &logic_hls_codes
 ) {
-    vector<string> codes = inlineRegisterAPIs(module, bundlelib, logic_hls_codes);
-    codes = inlineQueueAPIs(module, bundlelib, codes);
-    codes = inlineMemoryAPIs(module, bundlelib, codes);
-    codes = inlineRequestAPIs(module, bundlelib, codes);
+    return inlineAPIs(module, bundlelib, logic_hls_codes, {}).lines;
+}
+
+InlineCode inlineAPIs(
+    const VulStaticModuleInstance &module,
+    const VulStaticBundleLib &bundlelib,
+    const vector<string> &logic_hls_codes,
+    const VulDebugLocs &logic_hls_debug
+) {
+    InlineCode codes = inlineRegisterAPIs(module, bundlelib, logic_hls_codes, logic_hls_debug);
+    codes = inlineQueueAPIs(module, bundlelib, codes.lines, codes.debug);
+    codes = inlineMemoryAPIs(module, bundlelib, codes.lines, codes.debug);
+    codes = inlineRequestAPIs(module, bundlelib, codes.lines, codes.debug);
     return codes;
 }
 

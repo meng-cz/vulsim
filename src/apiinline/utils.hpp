@@ -5,6 +5,7 @@
 #pragma once
 
 #include "bundlelib.h"
+#include "module.h"
 
 #include <clang-c/Index.h>
 
@@ -21,6 +22,11 @@ struct Replacement {
     uint32_t start = 0;
     uint32_t end = 0;
     string text;
+};
+
+struct InlineCode {
+    vector<string> lines;
+    VulDebugLocs debug;
 };
 
 string joinLines(const vector<string> &lines);
@@ -52,5 +58,11 @@ bool overlapsExisting(const vector<Replacement> &repls, uint32_t start, uint32_t
 vector<TokenInfo> tokenizeWithLibclang(const string &code);
 
 string applyReplacements(string code, vector<Replacement> repls);
+
+InlineCode applyReplacementsWithDebug(
+    const vector<string> &lines,
+    const VulDebugLocs &debug,
+    vector<Replacement> repls
+);
 
 } // namespace apiinline

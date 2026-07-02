@@ -3,6 +3,7 @@
 
 #include "simgen.h"
 #include "rtlgen.h"
+#include "debugmap.hpp"
 #include "argparse.hpp"
 #include "vullib.hpp"
 
@@ -136,7 +137,10 @@ int main(int argc, char * argv[]) {
                 project.global_helper_codes
             );
         writeLinesToFile(codes.logic_hls_codes, (out_path / hls_path).string());
-        writeLinesToFile(codes.rtl_skeleten_codes, (out_path / (mod_instance->rtlSvPath())).string());
+        vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
+        const auto sv_path = mod_instance->rtlSvPath();
+        writeLinesToFile(codes.rtl_skeleten_codes, (out_path / sv_path).string());
+        vulDebugWriteMapToFile(codes.rtl_skeleten_debug_lines, (out_path / (sv_path + ".dbgmap")).string());
         for (const auto &res_file : codes.resource_files) {
             std::filesystem::path src_file = std::filesystem::path(proj_dir) / res_file;
             if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
