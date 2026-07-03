@@ -18,6 +18,8 @@ struct QueueInfo {
     uint32_t data_width = 0;
     vector<FlatField> fields;
     string type_str;
+    string helper_name;
+    string front_helper_name;
     string enqready;
     string deqready;
     string enqvalid;
@@ -28,16 +30,21 @@ struct QueueInfo {
 };
 
 string unpackValueExpr(const QueueInfo &info, const string &packed_expr) {
+    return info.helper_name + "(" + packed_expr + ")";
+}
+
+string unpackValueHelper(const QueueInfo &info) {
     std::ostringstream os;
-    os << "([&]() -> " << info.type_str << " {\n";
+    os << "static " << info.type_str << " " << info.helper_name
+       << "(const Int<" << info.data_width << "> &__vul_queue_packed) {\n";
     os << "  " << info.type_str << " value;\n";
     for (const auto &field : info.fields) {
         os << "  " << field.name << " = "
-           << uintExtractExpr(packed_expr, field.offset + field.width - 1, field.offset)
+           << uintExtractExpr("__vul_queue_packed", field.offset + field.width - 1, field.offset)
            << ";\n";
     }
     os << "  return value;\n";
-    os << "}())";
+    os << "}\n";
     return os.str();
 }
 
@@ -89,21 +96,28 @@ string frontExpr(const QueueInfo &info, const vector<string> &args) {
     if (!is_mp) {
         return unpackValueExpr(info, info.deqdata);
     }
+    return info.front_helper_name + "(" + info.deqvalid + ", " + info.deqdata + ")";
+}
+
+string frontHelper(const QueueInfo &info) {
+    const uint32_t deq_width = static_cast<uint32_t>(info.queue->deq_width);
+    const bool is_mp = (info.queue->enq_width > 1 || info.queue->deq_width > 1);
+    if (!is_mp) {
+        return "";
+    }
     std::ostringstream os;
-    os << "([&]() -> std::array<" << info.type_str << ", " << deq_width << "> {\n";
-    os << "  std::array<" << info.type_str << ", " << deq_width << "> __vul_queue_values;\n";
+    os << "static std::array<" << info.type_str << ", " << deq_width << "> "
+       << info.front_helper_name << "(const uint32_t __vul_queue_deqvalid, const std::array<Int<"
+       << info.data_width << ">, " << deq_width << "> &__vul_queue_deqdata) {\n";
+    os << "  std::array<" << info.type_str << ", " << deq_width << "> __vul_queue_values = {};\n";
     for (uint32_t i = 0; i < deq_width; ++i) {
-        os << "  if (" << info.deqvalid << " > " << i << ") {\n";
-        os << "    auto &value = __vul_queue_values[" << i << "];\n";
-        for (const auto &field : info.fields) {
-            os << "    " << field.name << " = "
-               << uintExtractExpr(info.deqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset)
-               << ";\n";
-        }
+        os << "  if (__vul_queue_deqvalid > " << i << ") {\n";
+        os << "    __vul_queue_values[" << i << "] = "
+           << unpackValueExpr(info, "__vul_queue_deqdata[" + std::to_string(i) + "]") << ";\n";
         os << "  }\n";
     }
     os << "  return __vul_queue_values;\n";
-    os << "}())";
+    os << "}\n";
     return os.str();
 }
 
@@ -163,6 +177,8 @@ InlineCode inlineQueueAPIs(
         info.queue = &queue;
         info.type_str = queue.type.toString();
         flatten_type_signature(queue.type, bundlelib, "value", info.data_width, info.fields);
+        info.helper_name = "__vul_queue_unpack_" + queue.name;
+        info.front_helper_name = "__vul_queue_front_" + queue.name;
         info.enqready = queue.name + "__enqready__";
         info.deqready = queue.name + "__deqready__";
         info.enqvalid = queue.name + "__enqvalid__";
@@ -179,7 +195,33 @@ InlineCode inlineQueueAPIs(
     string code = joinLines(logic_hls_codes);
     vector<TokenInfo> tokens = tokenizeWithLibclang(code);
     vector<Replacement> repls;
+    string helper_defs;
+    for (const auto &[name, info] : queues) {
+        helper_defs += unpackValueHelper(info);
+        helper_defs += "\n";
+        string front_helper = frontHelper(info);
+        if (!front_helper.empty()) {
+            helper_defs += front_helper;
+            helper_defs += "\n";
+        }
+    }
+    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
+    if (logic_func_pos == string::npos) {
+        logic_func_pos = code.find("void LogicSubModule_");
+    } else {
+        ++logic_func_pos;
+    }
+    if (logic_func_pos != string::npos && !helper_defs.empty()) {
+        repls.push_back(Replacement{
+            static_cast<uint32_t>(logic_func_pos),
+            static_cast<uint32_t>(logic_func_pos),
+            helper_defs
+        });
+    }
     for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
+        if (logic_func_pos != string::npos && tokens[i].start < logic_func_pos) {
+            continue;
+        }
         auto it = queues.find(tokens[i].spelling);
         if (it == queues.end() || tokens[i].kind != CXToken_Identifier) {
             continue;

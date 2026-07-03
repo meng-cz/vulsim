@@ -37,6 +37,7 @@ inline string LogicSubModuleName(const ModuleName &module_name) {
 }
 
 struct RTLGenResult {
+    bool has_logic_submodule = true;
     vector<string> logic_hls_codes;
     VulDebugLocs logic_hls_debug;
     VulDebugLines logic_hls_debug_lines;
@@ -58,6 +59,14 @@ RTLGenResult genModuleRTLV2(
     const VulStaticConfigLib &configlib,
     const VulStaticBundleLib &bundlelib,
     const vector<string> &global_helper_codes
+);
+
+void appendRTLV2LogicRTL(
+    RTLGenResult &result,
+    const VulStaticModuleInstance &module,
+    const string &logic_hls_filepath,
+    const string &lib_include_dir,
+    int unroll_limit = 1024
 );
 
 

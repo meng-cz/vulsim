@@ -18,22 +18,33 @@ struct RegisterInfo {
     uint32_t width = 0;
     vector<FlatField> fields;
     string type_str;
+    string helper_name;
     string rdata_port;
     string wen_port;
     string wdata_port;
 };
 
 string readRegisterExpr(const RegisterInfo &info, const string &rdata_expr) {
+    return info.helper_name + "(" + rdata_expr + ")";
+}
+
+string readRegisterHelper(const RegisterInfo &info) {
     std::ostringstream os;
-    os << "([&]() -> " << info.type_str << " {\n";
-    os << "  " << info.type_str << " value;\n";
+    const string rdata_arg = "__vul_rdata_" + info.reg->name;
+    os << "static " << info.type_str << " " << info.helper_name
+       << "(const Int<" << info.width << "> &" << rdata_arg << ") {\n";
+    if (info.fields.size() == 1 && info.fields[0].name == "value") {
+        os << "  " << info.type_str << " value = 0;\n";
+    } else {
+        os << "  " << info.type_str << " value;\n";
+    }
     for (const auto &field : info.fields) {
         os << "  " << field.name << " = "
-           << uintExtractExpr(rdata_expr, field.offset + field.width - 1, field.offset)
+           << uintExtractExpr(rdata_arg, field.offset + field.width - 1, field.offset)
            << ";\n";
     }
     os << "  return value;\n";
-    os << "}())";
+    os << "}\n";
     return os.str();
 }
 
@@ -47,7 +58,7 @@ string writeRegisterBlock(
     const bool is_array = (!info.reg->dims.empty());
     std::ostringstream os;
     os << "{\n";
-    os << "  auto __vul_reg_value = (" << value_expr << ");\n";
+    os << "  " << info.type_str << " __vul_reg_value = (" << value_expr << ");\n";
     os << "  Int<" << info.width << "> __vul_reg_wdata;\n";
     for (const auto &field : info.fields) {
         os << "  " << uintExtractExpr("__vul_reg_wdata", field.offset + field.width - 1, field.offset)
@@ -138,6 +149,7 @@ InlineCode inlineRegisterAPIs(
         RegisterInfo info;
         info.reg = &reg;
         info.type_str = reg.signature.toString();
+        info.helper_name = "__vul_read_reg_" + reg.name;
         info.rdata_port = "rdata_" + reg.name + "__";
         info.wen_port = "wen_" + reg.name + "__";
         info.wdata_port = "wdata_" + reg.name + "__";
@@ -155,7 +167,28 @@ InlineCode inlineRegisterAPIs(
     }
 
     vector<Replacement> repls;
+    string helper_defs;
+    for (const auto &entry : registers) {
+        helper_defs += readRegisterHelper(entry.second);
+        helper_defs += "\n";
+    }
+    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
+    if (logic_func_pos == string::npos) {
+        logic_func_pos = code.find("void LogicSubModule_");
+    } else {
+        ++logic_func_pos;
+    }
+    if (logic_func_pos != string::npos && !helper_defs.empty()) {
+        repls.push_back(Replacement{
+            static_cast<uint32_t>(logic_func_pos),
+            static_cast<uint32_t>(logic_func_pos),
+            helper_defs
+        });
+    }
     for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
+        if (logic_func_pos != string::npos && tokens[i].start < logic_func_pos) {
+            continue;
+        }
         auto reg_it = registers.find(tokens[i].spelling);
         if (reg_it == registers.end() || tokens[i].kind != CXToken_Identifier) {
             continue;

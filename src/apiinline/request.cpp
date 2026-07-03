@@ -24,6 +24,7 @@ struct RequestInfo {
     const VulStaticReqServ *req = nullptr;
     vector<ReqArgInfo> args;
     vector<ReqArgInfo> rets;
+    string helper_name;
 };
 
 string vldPort(const string &name) { return name + "__vld__"; }
@@ -72,14 +73,14 @@ bool parseRequestCall(
     return true;
 }
 
-string requestCallExpr(const RequestInfo &info, const string &idx_expr, const vector<string> &call_args) {
+void emitRequestBody(
+    std::ostringstream &os,
+    const RequestInfo &info,
+    const string &idx_expr,
+    const vector<string> &call_args,
+    bool emit_return = true
+) {
     const auto &req = *info.req;
-    std::ostringstream os;
-    os << "([&]()";
-    if (req.has_handshake) {
-        os << " -> bool";
-    }
-    os << " {\n";
     const string sel = req.is_arrayed ? ("[" + idx_expr + "]") : "";
     os << "  " << vldPort(req.name) << sel << " = true;\n";
 
@@ -109,10 +110,104 @@ string requestCallExpr(const RequestInfo &info, const string &idx_expr, const ve
         ++arg_idx;
     }
 
-    if (req.has_handshake) {
+    if (emit_return && req.has_handshake) {
         os << "  return " << rdyPort(req.name) << sel << ";\n";
     }
-    os << "}())";
+}
+
+string requestHelperDef(const RequestInfo &info) {
+    const auto &req = *info.req;
+    if (!req.has_handshake) {
+        return "";
+    }
+    std::ostringstream os;
+    os << "auto " << info.helper_name << " = [&](";
+    bool need_comma = false;
+    if (req.is_arrayed) {
+        os << "uint32_t __vul_req_idx";
+        need_comma = true;
+    }
+    for (const auto &arg : info.args) {
+        if (need_comma) os << ", ";
+        os << "const " << arg.type_str << " &" << arg.name;
+        need_comma = true;
+    }
+    for (const auto &ret : info.rets) {
+        if (need_comma) os << ", ";
+        os << ret.type_str << " &" << ret.name;
+        need_comma = true;
+    }
+    os << ") -> bool {\n";
+    vector<string> arg_names;
+    for (const auto &arg : info.args) {
+        arg_names.push_back(arg.name);
+    }
+    for (const auto &ret : info.rets) {
+        arg_names.push_back(ret.name);
+    }
+    emitRequestBody(os, info, req.is_arrayed ? "__vul_req_idx" : "0", arg_names);
+    os << "};\n";
+    return os.str();
+}
+
+bool findDirectIfCondition(
+    const vector<TokenInfo> &tokens,
+    int call_idx,
+    int close_idx,
+    int &if_idx
+) {
+    if (call_idx < 2) {
+        return false;
+    }
+    if (tokens[call_idx - 1].spelling != "(" || tokens[call_idx - 2].spelling != "if") {
+        return false;
+    }
+    if (close_idx + 1 >= static_cast<int>(tokens.size()) || tokens[close_idx + 1].spelling != ")") {
+        return false;
+    }
+    if_idx = call_idx - 2;
+    return true;
+}
+
+string requestReadyPrelude(
+    const RequestInfo &info,
+    const string &idx_expr,
+    const vector<string> &call_args,
+    const string &ready_name
+) {
+    const auto &req = *info.req;
+    std::ostringstream os;
+    os << "{\n";
+    emitRequestBody(os, info, idx_expr, call_args, false);
+    os << "}\n";
+    const string sel = req.is_arrayed ? ("[" + idx_expr + "]") : "";
+    os << "bool " << ready_name << " = " << rdyPort(req.name) << sel << ";\n";
+    return os.str();
+}
+
+string requestCallExpr(const RequestInfo &info, const string &idx_expr, const vector<string> &call_args) {
+    const auto &req = *info.req;
+    std::ostringstream os;
+    if (req.has_handshake) {
+        os << info.helper_name << "(";
+        bool need_comma = false;
+        if (req.is_arrayed) {
+            os << idx_expr;
+            need_comma = true;
+        }
+        for (const auto &arg : call_args) {
+            if (need_comma) os << ", ";
+            os << arg;
+            need_comma = true;
+        }
+        os << ")";
+        return os.str();
+    }
+    os << "{\n";
+    emitRequestBody(os, info, idx_expr, call_args);
+    if (!req.has_handshake) {
+        os << "}";
+    }
     return os.str();
 }
 
@@ -128,6 +223,7 @@ InlineCode inlineRequestAPIs(
     for (const auto &[name, req] : module.requests) {
         RequestInfo info;
         info.req = &req;
+        info.helper_name = "__vul_req_call_" + req.name;
         for (const auto &arg : req.args) {
             ReqArgInfo out;
             out.name = arg.name;
@@ -151,6 +247,31 @@ InlineCode inlineRequestAPIs(
     string code = joinLines(logic_hls_codes);
     vector<TokenInfo> tokens = tokenizeWithLibclang(code);
     vector<Replacement> repls;
+    string helper_defs;
+    for (const auto &[name, info] : requests) {
+        string helper = requestHelperDef(info);
+        if (!helper.empty()) {
+            helper_defs += helper;
+            helper_defs += "\n";
+        }
+    }
+    if (!helper_defs.empty()) {
+        size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
+        if (logic_func_pos == string::npos) {
+            logic_func_pos = code.find("void LogicSubModule_");
+        } else {
+            ++logic_func_pos;
+        }
+        size_t body_pos = logic_func_pos == string::npos ? string::npos : code.find(") {\n", logic_func_pos);
+        if (body_pos != string::npos) {
+            repls.push_back(Replacement{
+                static_cast<uint32_t>(body_pos + 4),
+                static_cast<uint32_t>(body_pos + 4),
+                helper_defs
+            });
+        }
+    }
+    int ready_counter = 0;
     for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
         auto it = requests.find(tokens[i].spelling);
         if (it == requests.end() || tokens[i].kind != CXToken_Identifier) {
@@ -166,6 +287,26 @@ InlineCode inlineRequestAPIs(
         int close_idx = -1;
         if (!parseRequestCall(code, tokens, i, idx_expr, args, close_idx)) {
             continue;
+        }
+        if (it->second.req->has_handshake) {
+            int if_idx = -1;
+            if (findDirectIfCondition(tokens, i, close_idx, if_idx)) {
+                string ready_name = "__vul_req_ready_" + it->second.req->name + "_" + std::to_string(ready_counter++);
+                if (!overlapsExisting(repls, tokens[if_idx].start, tokens[if_idx].start) &&
+                    !overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
+                    repls.push_back(Replacement{
+                        tokens[if_idx].start,
+                        tokens[if_idx].start,
+                        requestReadyPrelude(it->second, idx_expr, args, ready_name)
+                    });
+                    repls.push_back(Replacement{
+                        tokens[i].start,
+                        tokens[close_idx].end,
+                        ready_name
+                    });
+                }
+                continue;
+            }
         }
         if (!overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
             repls.push_back(Replacement{

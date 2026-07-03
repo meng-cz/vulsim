@@ -136,9 +136,13 @@ int main(int argc, char * argv[]) {
                 project.global_bundlelib,
                 project.global_helper_codes
             );
-        writeLinesToFile(codes.logic_hls_codes, (out_path / hls_path).string());
+        const auto hls_out_path = out_path / hls_path;
+        writeLinesToFile(codes.logic_hls_codes, hls_out_path.string());
         vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
         const auto sv_path = mod_instance->rtlSvPath();
+        if (use_v2) {
+            rtlgen::appendRTLV2LogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir);
+        }
         writeLinesToFile(codes.rtl_skeleten_codes, (out_path / sv_path).string());
         vulDebugWriteMapToFile(codes.rtl_skeleten_debug_lines, (out_path / (sv_path + ".dbgmap")).string());
         for (const auto &res_file : codes.resource_files) {

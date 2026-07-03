@@ -498,7 +498,7 @@ void _procRegisters(RTLGenContext &ctx) {
         if (is_array) {
             rdata_type_str = "std::array<" + rdata_type_str + ", " + size_str + ">";
             wdata_type_str = "std::array<" + wdata_type_str + ", " + size_str + ">";
-            wen_type_str = "std::array<bool, " + size_str + ">";
+            wen_type_str = "std::array<" + wen_type_str + ", " + size_str + ">";
         }
 
         if (ctx.emit_hls_api_helpers) {
@@ -588,6 +588,28 @@ void _procRegisters(RTLGenContext &ctx) {
         ctx.hls_arguments.push_back("const " + rdata_type_str + " &" + rdata_port_name);
         ctx.hls_arguments.push_back(wen_type_str + " &" + wen_port_name);
         ctx.hls_arguments.push_back(wdata_type_str + " &" + wdata_port_name);
+
+        if (is_array && is_ported) {
+            ctx.hls_init.push_back("for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) {\n");
+            ctx.hls_init.push_back("  for (uint32_t __vul_p = 0; __vul_p < " + wrport_num_str + "; ++__vul_p) {\n");
+            ctx.hls_init.push_back("    " + wen_port_name + "[__vul_i][__vul_p] = false;\n");
+            ctx.hls_init.push_back("    " + wdata_port_name + "[__vul_i][__vul_p] = 0;\n");
+            ctx.hls_init.push_back("  }\n");
+            ctx.hls_init.push_back("}\n");
+        } else if (is_array) {
+            ctx.hls_init.push_back("for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) {\n");
+            ctx.hls_init.push_back("  " + wen_port_name + "[__vul_i] = false;\n");
+            ctx.hls_init.push_back("  " + wdata_port_name + "[__vul_i] = 0;\n");
+            ctx.hls_init.push_back("}\n");
+        } else if (is_ported) {
+            ctx.hls_init.push_back("for (uint32_t __vul_p = 0; __vul_p < " + wrport_num_str + "; ++__vul_p) {\n");
+            ctx.hls_init.push_back("  " + wen_port_name + "[__vul_p] = false;\n");
+            ctx.hls_init.push_back("  " + wdata_port_name + "[__vul_p] = 0;\n");
+            ctx.hls_init.push_back("}\n");
+        } else {
+            ctx.hls_init.push_back(wen_port_name + " = false;\n");
+            ctx.hls_init.push_back(wdata_port_name + " = 0;\n");
+        }
 
         if (ctx.emit_hls_api_helpers) {
             ctx.hls_init.push_back(proxy_class_name + " " + reg.name + "(" + rdata_port_name + ", " + wen_port_name + ", " + wdata_port_name + ");\n");
@@ -761,6 +783,18 @@ void _procRequests(RTLGenContext &ctx) {
             if (is_arrayed) {
                 for (uint32_t idx = 0; idx < array_size; ++idx) {
                     ctx.hls_init.push_back(vld_port_name + "[" + std::to_string(idx) + "] = false;\n");
+                }
+            } else {
+                ctx.hls_init.push_back(vld_port_name + " = false;\n");
+            }
+            for (const auto &arg : arg_ports) {
+                const string arg_port_name = reqservArgPort(req_name, arg.name);
+                if (is_arrayed) {
+                    for (uint32_t idx = 0; idx < array_size; ++idx) {
+                        ctx.hls_init.push_back(arg_port_name + "[" + std::to_string(idx) + "] = 0;\n");
+                    }
+                } else {
+                    ctx.hls_init.push_back(arg_port_name + " = 0;\n");
                 }
             }
 
@@ -1465,6 +1499,71 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             ctx.hls_helpers.push_back("};\n");
             ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
             ctx.hls_final.push_back("#undef " + alias_name + "\n");
+        } else {
+            const bool is_alias_arrayed = group.front().alias_indexed;
+            if (!is_alias_arrayed && serv.returnType() == "void") {
+                const string signal_base = childServiceSignalBase(group.front().instance_name, group.front().service_name);
+                ctx.hls_header.push_back("#define " + alias_name + "(" + serv.signatureArgNameList() + ") { \\\n");
+                ctx.hls_header.push_back("  " + reqservVldPort(signal_base) + " = true; \\\n");
+                for (const auto &arg : arg_ports) {
+                    const string arg_port_name = reqservArgPort(signal_base, arg.name);
+                    for (const auto &field : arg.flat_fields) {
+                        ctx.hls_header.push_back("  " + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + field.name + "; \\\n");
+                    }
+                }
+                ctx.hls_header.push_back("}\n");
+                ctx.hls_final.push_back("#undef " + alias_name + "\n");
+                continue;
+            }
+            string v2_arglists;
+            for (const auto &arg : serv.args) {
+                if (!v2_arglists.empty()) v2_arglists += ", ";
+                v2_arglists += arg.type.toString() + " " + arg.name;
+            }
+            for (const auto &ret : serv.rets) {
+                if (!v2_arglists.empty()) v2_arglists += ", ";
+                v2_arglists += ret.type.toString() + " & " + ret.name;
+            }
+            if (is_alias_arrayed) {
+                ctx.hls_helpers.push_back("auto " + alias_name + " = [&]<uint32_t IDX = 0>(" + v2_arglists + ") -> " + serv.returnType() + " {\n");
+                ctx.hls_helpers.push_back("  static_assert(IDX < " + std::to_string(group.size()) + ", \"Implicit request index out of range\");\n");
+            } else {
+                ctx.hls_helpers.push_back("auto " + alias_name + " = [&](" + v2_arglists + ") -> " + serv.returnType() + " {\n");
+            }
+            for (size_t i = 0; i < group.size(); ++i) {
+                const string signal_base = childServiceSignalBase(group[i].instance_name, group[i].service_name);
+                string indent = "  ";
+                if (is_alias_arrayed) {
+                    string branch = (i == 0 ? "if constexpr" : "else if constexpr");
+                    ctx.hls_helpers.push_back("  " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
+                    indent = "    ";
+                }
+                ctx.hls_helpers.push_back(indent + reqservVldPort(signal_base) + " = true;\n");
+                for (const auto &arg : arg_ports) {
+                    const string arg_port_name = reqservArgPort(signal_base, arg.name);
+                    for (const auto &field : arg.flat_fields) {
+                        ctx.hls_helpers.push_back(indent + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                    }
+                }
+                for (const auto &ret : ret_ports) {
+                    const string ret_port_name = reqservArgPort(signal_base, ret.name);
+                    for (const auto &field : ret.flat_fields) {
+                        ctx.hls_helpers.push_back(indent + field.name + " = " + uintExtractExpr(ret_port_name, field.offset + field.width - 1, field.offset) + ";\n");
+                    }
+                }
+                if (serv.has_handshake) {
+                    ctx.hls_helpers.push_back(indent + "return " + reqservRdyPort(signal_base) + ";\n");
+                } else if (serv.returnType() == "void") {
+                    ctx.hls_helpers.push_back(indent + "return;\n");
+                }
+                if (is_alias_arrayed) {
+                    ctx.hls_helpers.push_back("  }\n");
+                }
+                if (!is_alias_arrayed) {
+                    break;
+                }
+            }
+            ctx.hls_helpers.push_back("};\n");
         }
     }
 
@@ -1533,6 +1632,35 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             ctx.hls_helpers.push_back("};\n");
             ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
             ctx.hls_final.push_back("#undef " + alias_name + "\n");
+        } else {
+            const bool is_alias_arrayed = group.front().alias_indexed;
+            const string ret_type_str = query_iter->second.ret_type.toString();
+            if (is_alias_arrayed) {
+                ctx.hls_helpers.push_back("auto " + alias_name + " = [&]<uint32_t IDX = 0>() -> " + ret_type_str + " {\n");
+                for (size_t i = 0; i < group.size(); ++i) {
+                    const string signal_base = childQuerySignalBase(group[i].instance_name, group[i].query_name);
+                    const string value_name = queryPort(signal_base);
+                    string branch = (i == 0 ? "if constexpr" : "else if constexpr");
+                    ctx.hls_helpers.push_back("  " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
+                    ctx.hls_helpers.push_back("    " + ret_type_str + " value;\n");
+                    for (const auto &field : flat_fields) {
+                        ctx.hls_helpers.push_back("    " + field.name + " = " + uintExtractExpr(value_name, field.offset + field.width - 1, field.offset) + ";\n");
+                    }
+                    ctx.hls_helpers.push_back("    return value;\n");
+                    ctx.hls_helpers.push_back("  }\n");
+                }
+                ctx.hls_helpers.push_back("};\n");
+            } else {
+                const string signal_base = childQuerySignalBase(group.front().instance_name, group.front().query_name);
+                const string value_name = queryPort(signal_base);
+                ctx.hls_helpers.push_back("auto " + alias_name + " = [&]() -> " + ret_type_str + " {\n");
+                ctx.hls_helpers.push_back("  " + ret_type_str + " value;\n");
+                for (const auto &field : flat_fields) {
+                    ctx.hls_helpers.push_back("  " + field.name + " = " + uintExtractExpr(value_name, field.offset + field.width - 1, field.offset) + ";\n");
+                }
+                ctx.hls_helpers.push_back("  return value;\n");
+                ctx.hls_helpers.push_back("};\n");
+            }
         }
     }
 }
@@ -1673,6 +1801,7 @@ void _procQueues(RTLGenContext &ctx) {
 
             ctx.hls_init.push_back(port_enqvalid + " = false;\n");
             ctx.hls_init.push_back(port_deqready + " = false;\n");
+            ctx.hls_init.push_back(port_enqdata + " = 0;\n");
             ctx.hls_init.push_back(port_clrnext + " = false;\n");
             if (ctx.emit_hls_api_helpers) {
                 ctx.hls_init.push_back(proxy_class_name + " " + que_name + "(" + port_enqready + ", " + port_deqvalid + ", " + port_enqvalid + ", " + port_deqready + ", " + port_enqdata + ", " + port_deqdata + ", " + port_clrnext + ");\n");
@@ -2296,6 +2425,7 @@ RTLGenResult genModuleRTLImpl(
     _procBRAMAndROM(ctx);
 
     RTLGenResult result;
+    result.has_logic_submodule = !ctx.hls_arguments.empty();
 
     const string module_name = module.simClassName();
     const string logic_module_name = LogicSubModuleName(module_name);
@@ -2307,54 +2437,56 @@ RTLGenResult genModuleRTLImpl(
 
     auto &hls = result.logic_hls_codes;
     auto &hls_debug = result.logic_hls_debug;
-    hls.push_back("#include <array>\n");
-    hls.push_back("#include <cstdint>\n");
-    hls.push_back("\n");
-    hls.push_back("using std::array;\n");
-    hls.push_back("\n");
-    hls.push_back("using int8 = int8_t;\n");
-    hls.push_back("using uint8 = uint8_t;\n");
-    hls.push_back("using int16 = int16_t;\n");
-    hls.push_back("using uint16 = uint16_t;\n");
-    hls.push_back("using int32 = int32_t;\n");
-    hls.push_back("using uint32 = uint32_t;\n");
-    hls.push_back("using int64 = int64_t;\n");
-    hls.push_back("using uint64 = uint64_t;\n");
-    hls.push_back("\n");
-    hls.push_back("#define assert(...) ((void)0)\n");
-    hls.push_back("\n");
+    if (result.has_logic_submodule) {
+        hls.push_back("#include <array>\n");
+        hls.push_back("#include <cstdint>\n");
+        hls.push_back("\n");
+        hls.push_back("using std::array;\n");
+        hls.push_back("\n");
+        hls.push_back("using int8 = int8_t;\n");
+        hls.push_back("using uint8 = uint8_t;\n");
+        hls.push_back("using int16 = int16_t;\n");
+        hls.push_back("using uint16 = uint16_t;\n");
+        hls.push_back("using int32 = int32_t;\n");
+        hls.push_back("using uint32 = uint32_t;\n");
+        hls.push_back("using int64 = int64_t;\n");
+        hls.push_back("using uint64 = uint64_t;\n");
+        hls.push_back("\n");
+        hls.push_back("#define assert(...) ((void)0)\n");
+        hls.push_back("\n");
 
-    append_lines(hls, hls_debug, ctx.hls_header, ctx.hls_header_debug);
-    if (!ctx.hls_header.empty()) {
-        hls.push_back("\n");
-    }
+        append_lines(hls, hls_debug, ctx.hls_header, ctx.hls_header_debug);
+        if (!ctx.hls_header.empty()) {
+            hls.push_back("\n");
+        }
 
-    hls.push_back("void " + logic_module_name + "(\n");
-    for (size_t i = 0; i < ctx.hls_arguments.size(); ++i) {
-        hls.push_back("  " + ctx.hls_arguments[i] + (i + 1 == ctx.hls_arguments.size() ? "" : ",") + "\n");
-    }
-    hls.push_back(") {\n");
+        hls.push_back("void " + logic_module_name + "(\n");
+        for (size_t i = 0; i < ctx.hls_arguments.size(); ++i) {
+            hls.push_back("  " + ctx.hls_arguments[i] + (i + 1 == ctx.hls_arguments.size() ? "" : ",") + "\n");
+        }
+        hls.push_back(") {\n");
 
-    append_lines(hls, hls_debug, ctx.hls_init, ctx.hls_init_debug);
-    if (!ctx.hls_init.empty()) {
+        append_lines(hls, hls_debug, ctx.hls_init, ctx.hls_init_debug);
+        if (!ctx.hls_init.empty()) {
+            hls.push_back("\n");
+        }
+        append_lines(hls, hls_debug, ctx.hls_helpers, ctx.hls_helpers_debug);
+        if (!ctx.hls_helpers.empty()) {
+            hls.push_back("\n");
+        }
+        append_lines(hls, hls_debug, ctx.hls_blocks, ctx.hls_blocks_debug);
+        if (!ctx.hls_blocks.empty()) {
+            hls.push_back("\n");
+        }
+        append_lines(hls, hls_debug, ctx.hls_body, ctx.hls_body_debug);
+        if (!ctx.hls_body.empty()) {
+            hls.push_back("\n");
+        }
+        append_lines(hls, hls_debug, ctx.hls_final, ctx.hls_final_debug);
+        hls.push_back("}\n");
         hls.push_back("\n");
+        vulDebugNormalize(result.logic_hls_codes, result.logic_hls_debug);
     }
-    append_lines(hls, hls_debug, ctx.hls_helpers, ctx.hls_helpers_debug);
-    if (!ctx.hls_helpers.empty()) {
-        hls.push_back("\n");
-    }
-    append_lines(hls, hls_debug, ctx.hls_blocks, ctx.hls_blocks_debug);
-    if (!ctx.hls_blocks.empty()) {
-        hls.push_back("\n");
-    }
-    append_lines(hls, hls_debug, ctx.hls_body, ctx.hls_body_debug);
-    if (!ctx.hls_body.empty()) {
-        hls.push_back("\n");
-    }
-    append_lines(hls, hls_debug, ctx.hls_final, ctx.hls_final_debug);
-    hls.push_back("}\n");
-    hls.push_back("\n");
-    vulDebugNormalize(result.logic_hls_codes, result.logic_hls_debug);
 
     auto &rtl = result.rtl_skeleten_codes;
     vector<string> ports;
@@ -2379,12 +2511,14 @@ RTLGenResult genModuleRTLImpl(
         rtl.push_back("\n");
     }
 
-    rtl.push_back(logic_module_name + " u_logic (\n");
-    for (size_t i = 0; i < ctx.rtl_logicports.size(); ++i) {
-        rtl.push_back("  " + ctx.rtl_logicports[i] + (i + 1 == ctx.rtl_logicports.size() ? "" : ",") + "\n");
+    if (result.has_logic_submodule) {
+        rtl.push_back(logic_module_name + " u_logic (\n");
+        for (size_t i = 0; i < ctx.rtl_logicports.size(); ++i) {
+            rtl.push_back("  " + ctx.rtl_logicports[i] + (i + 1 == ctx.rtl_logicports.size() ? "" : ",") + "\n");
+        }
+        rtl.push_back(");\n");
+        rtl.push_back("\n");
     }
-    rtl.push_back(");\n");
-    rtl.push_back("\n");
 
     rtl.insert(rtl.end(), ctx.rtl_inst.begin(), ctx.rtl_inst.end());
     if (!ctx.rtl_inst.empty()) {
@@ -2395,7 +2529,7 @@ RTLGenResult genModuleRTLImpl(
     vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
 
     result.resource_files = std::move(ctx.resource_files);
-    if (!ctx.emit_hls_api_helpers) {
+    if (result.has_logic_submodule && !ctx.emit_hls_api_helpers) {
         auto inlined = apiinline::inlineAPIs(module, local_bundlelib, result.logic_hls_codes, result.logic_hls_debug);
         result.logic_hls_codes = std::move(inlined.lines);
         result.logic_hls_debug = std::move(inlined.debug);

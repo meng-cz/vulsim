@@ -20,22 +20,31 @@ struct MemoryInfo {
     string data_type_str;
     uint32_t data_width = 0;
     vector<FlatField> fields;
+    string helper_name;
 };
 
 string unpackExpr(const MemoryInfo &info, const string &packed_expr) {
     if (info.is_rom) {
         return packed_expr;
     }
+    return info.helper_name + "(" + packed_expr + ")";
+}
+
+string unpackHelper(const MemoryInfo &info) {
+    if (info.is_rom) {
+        return "";
+    }
     std::ostringstream os;
-    os << "([&]() -> " << info.data_type_str << " {\n";
+    os << "static " << info.data_type_str << " " << info.helper_name
+       << "(const Int<" << info.data_width << "> &__vul_bram_packed) {\n";
     os << "  " << info.data_type_str << " value;\n";
     for (const auto &field : info.fields) {
         os << "  " << field.name << " = "
-           << uintExtractExpr(packed_expr, field.offset + field.width - 1, field.offset)
+           << uintExtractExpr("__vul_bram_packed", field.offset + field.width - 1, field.offset)
            << ";\n";
     }
     os << "  return value;\n";
-    os << "}())";
+    os << "}\n";
     return os.str();
 }
 
@@ -162,6 +171,7 @@ InlineCode inlineMemoryAPIs(
         info.is_1rw = (bram.read_ports == 0 || bram.write_ports == 0);
         info.data_type_str = bram.data_type.toString();
         flatten_type_signature(bram.data_type, bundlelib, "value", info.data_width, info.fields);
+        info.helper_name = "__vul_bram_unpack_" + bram.name;
         memories[bram.name] = std::move(info);
     }
     for (const auto &rom : module.roms) {
@@ -170,6 +180,7 @@ InlineCode inlineMemoryAPIs(
         info.is_rom = true;
         info.data_type_str = "Int<" + std::to_string(rom.data_width) + ">";
         info.data_width = static_cast<uint32_t>(rom.data_width);
+        info.helper_name = "__vul_rom_unpack_" + rom.name;
         memories[rom.name] = std::move(info);
     }
     if (memories.empty()) {
@@ -179,7 +190,31 @@ InlineCode inlineMemoryAPIs(
     string code = joinLines(logic_hls_codes);
     vector<TokenInfo> tokens = tokenizeWithLibclang(code);
     vector<Replacement> repls;
+    string helper_defs;
+    for (const auto &[name, info] : memories) {
+        string helper = unpackHelper(info);
+        if (!helper.empty()) {
+            helper_defs += helper;
+            helper_defs += "\n";
+        }
+    }
+    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
+    if (logic_func_pos == string::npos) {
+        logic_func_pos = code.find("void LogicSubModule_");
+    } else {
+        ++logic_func_pos;
+    }
+    if (logic_func_pos != string::npos && !helper_defs.empty()) {
+        repls.push_back(Replacement{
+            static_cast<uint32_t>(logic_func_pos),
+            static_cast<uint32_t>(logic_func_pos),
+            helper_defs
+        });
+    }
     for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
+        if (logic_func_pos != string::npos && tokens[i].start < logic_func_pos) {
+            continue;
+        }
         auto it = memories.find(tokens[i].spelling);
         if (it == memories.end() || tokens[i].kind != CXToken_Identifier) {
             continue;

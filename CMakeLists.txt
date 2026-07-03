@@ -23,8 +23,14 @@ if (LIBCLANG_INCLUDE_DIR)
 endif()
 
 file (GLOB_RECURSE LIB_CXX_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(REMOVE_ITEM LIB_CXX_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rtlzz_bridge.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rtlgen_rtlzz.cpp"
+)
 
 add_library(vulcore OBJECT ${LIB_CXX_SRC})
+
+add_subdirectory(rtlzz EXCLUDE_FROM_ALL)
 
 # Tools
 
@@ -34,6 +40,14 @@ foreach(tool ${TOOL_SOURCES})
     get_filename_component(tool_name ${tool} NAME_WE)
 
     add_executable(${tool_name} ${tool}  $<TARGET_OBJECTS:vulcore>)
+    if (tool_name STREQUAL "vulrtlgen")
+        target_sources(${tool_name} PRIVATE
+            src/rtlzz_bridge.cpp
+            src/rtlgen_rtlzz.cpp
+        )
+        target_include_directories(${tool_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtlzz/src)
+        target_link_libraries(${tool_name} predicate-expand-objects)
+    endif()
     if (LIBCLANG_LIBRARY)
         target_link_libraries(${tool_name} ${LIBCLANG_LIBRARY})
     endif()
