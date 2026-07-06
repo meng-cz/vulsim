@@ -35,21 +35,22 @@ string unpackHelper(const MemoryInfo &info) {
         return "";
     }
     std::ostringstream os;
-    os << "static " << info.data_type_str << " " << info.helper_name
-       << "(const Int<" << info.data_width << "> &__vul_bram_packed) {\n";
-    os << "  " << info.data_type_str << " value;\n";
+    os << "auto " << info.helper_name
+       << " = [&](const Int<" << info.data_width
+       << "> &__vul_bram_packed) -> " << info.data_type_str << " {\n";
+    os << "  " << info.data_type_str << " value = {};\n";
     for (const auto &field : info.fields) {
         os << "  " << field.name << " = "
            << uintExtractExpr("__vul_bram_packed", field.offset + field.width - 1, field.offset)
            << ";\n";
     }
     os << "  return value;\n";
-    os << "}\n";
+    os << "};\n";
     return os.str();
 }
 
 void emitPack(std::ostringstream &os, const MemoryInfo &info, const string &packed_name, const string &value_name) {
-    os << "  Int<" << info.data_width << "> " << packed_name << ";\n";
+    os << "  Int<" << info.data_width << "> " << packed_name << " = 0;\n";
     for (const auto &field : info.fields) {
         os << "  " << uintExtractExpr(packed_name, field.offset + field.width - 1, field.offset)
            << " = " << flatFieldValueExpr(value_name, field.name) << ";\n";
@@ -198,16 +199,12 @@ InlineCode inlineMemoryAPIs(
             helper_defs += "\n";
         }
     }
-    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
-    if (logic_func_pos == string::npos) {
-        logic_func_pos = code.find("void LogicSubModule_");
-    } else {
-        ++logic_func_pos;
-    }
-    if (logic_func_pos != string::npos && !helper_defs.empty()) {
+    size_t logic_func_pos = findLogicSubmoduleFunctionStart(code);
+    size_t body_pos = findLogicSubmoduleBodyInsertion(code);
+    if (body_pos != string::npos && !helper_defs.empty()) {
         repls.push_back(Replacement{
-            static_cast<uint32_t>(logic_func_pos),
-            static_cast<uint32_t>(logic_func_pos),
+            static_cast<uint32_t>(body_pos),
+            static_cast<uint32_t>(body_pos),
             helper_defs
         });
     }

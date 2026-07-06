@@ -59,6 +59,10 @@ vector<TokenInfo> tokenizeWithLibclang(const string &code);
 
 string applyReplacements(string code, vector<Replacement> repls);
 
+size_t findLogicSubmoduleFunctionStart(const string &code);
+
+size_t findLogicSubmoduleBodyInsertion(const string &code);
+
 InlineCode applyReplacementsWithDebug(
     const vector<string> &lines,
     const VulDebugLocs &debug,

@@ -35,21 +35,22 @@ string unpackValueExpr(const QueueInfo &info, const string &packed_expr) {
 
 string unpackValueHelper(const QueueInfo &info) {
     std::ostringstream os;
-    os << "static " << info.type_str << " " << info.helper_name
-       << "(const Int<" << info.data_width << "> &__vul_queue_packed) {\n";
-    os << "  " << info.type_str << " value;\n";
+    os << "auto " << info.helper_name
+       << " = [&](const Int<" << info.data_width
+       << "> &__vul_queue_packed) -> " << info.type_str << " {\n";
+    os << "  " << info.type_str << " value = {};\n";
     for (const auto &field : info.fields) {
         os << "  " << field.name << " = "
            << uintExtractExpr("__vul_queue_packed", field.offset + field.width - 1, field.offset)
            << ";\n";
     }
     os << "  return value;\n";
-    os << "}\n";
+    os << "};\n";
     return os.str();
 }
 
 void emitPackValue(std::ostringstream &os, const QueueInfo &info, const string &packed_name, const string &value_name) {
-    os << "  Int<" << info.data_width << "> " << packed_name << ";\n";
+    os << "  Int<" << info.data_width << "> " << packed_name << " = 0;\n";
     for (const auto &field : info.fields) {
         os << "  " << uintExtractExpr(packed_name, field.offset + field.width - 1, field.offset)
            << " = " << flatFieldValueExpr(value_name, field.name) << ";\n";
@@ -76,7 +77,7 @@ string enqNextBlock(const QueueInfo &info, const vector<string> &args) {
         for (uint32_t i = 0; i < enq_width; ++i) {
             os << "  if (__vul_queue_req > " << i << ") {\n";
             os << "    auto __vul_queue_value = __vul_queue_values[" << i << "];\n";
-            os << "    Int<" << info.data_width << "> __vul_queue_packed;\n";
+            os << "    Int<" << info.data_width << "> __vul_queue_packed = 0;\n";
             for (const auto &field : info.fields) {
                 os << "    " << uintExtractExpr("__vul_queue_packed", field.offset + field.width - 1, field.offset)
                    << " = " << flatFieldValueExpr("__vul_queue_value", field.name) << ";\n";
@@ -106,9 +107,11 @@ string frontHelper(const QueueInfo &info) {
         return "";
     }
     std::ostringstream os;
-    os << "static std::array<" << info.type_str << ", " << deq_width << "> "
-       << info.front_helper_name << "(const uint32_t __vul_queue_deqvalid, const std::array<Int<"
-       << info.data_width << ">, " << deq_width << "> &__vul_queue_deqdata) {\n";
+    os << "auto " << info.front_helper_name
+       << " = [&](const uint32_t __vul_queue_deqvalid, const std::array<Int<"
+       << info.data_width << ">, " << deq_width
+       << "> &__vul_queue_deqdata) -> std::array<"
+       << info.type_str << ", " << deq_width << "> {\n";
     os << "  std::array<" << info.type_str << ", " << deq_width << "> __vul_queue_values = {};\n";
     for (uint32_t i = 0; i < deq_width; ++i) {
         os << "  if (__vul_queue_deqvalid > " << i << ") {\n";
@@ -117,7 +120,7 @@ string frontHelper(const QueueInfo &info) {
         os << "  }\n";
     }
     os << "  return __vul_queue_values;\n";
-    os << "}\n";
+    os << "};\n";
     return os.str();
 }
 
@@ -205,16 +208,12 @@ InlineCode inlineQueueAPIs(
             helper_defs += "\n";
         }
     }
-    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
-    if (logic_func_pos == string::npos) {
-        logic_func_pos = code.find("void LogicSubModule_");
-    } else {
-        ++logic_func_pos;
-    }
-    if (logic_func_pos != string::npos && !helper_defs.empty()) {
+    size_t logic_func_pos = findLogicSubmoduleFunctionStart(code);
+    size_t body_pos = findLogicSubmoduleBodyInsertion(code);
+    if (body_pos != string::npos && !helper_defs.empty()) {
         repls.push_back(Replacement{
-            static_cast<uint32_t>(logic_func_pos),
-            static_cast<uint32_t>(logic_func_pos),
+            static_cast<uint32_t>(body_pos),
+            static_cast<uint32_t>(body_pos),
             helper_defs
         });
     }

@@ -210,6 +210,26 @@ string applyReplacements(string code, vector<Replacement> repls) {
     return code;
 }
 
+size_t findLogicSubmoduleFunctionStart(const string &code) {
+    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
+    if (logic_func_pos == string::npos) {
+        return code.find("void LogicSubModule_");
+    }
+    return logic_func_pos + 1;
+}
+
+size_t findLogicSubmoduleBodyInsertion(const string &code) {
+    size_t logic_func_pos = findLogicSubmoduleFunctionStart(code);
+    if (logic_func_pos == string::npos) {
+        return string::npos;
+    }
+    size_t body_pos = code.find(") {\n", logic_func_pos);
+    if (body_pos == string::npos) {
+        return string::npos;
+    }
+    return body_pos + 4;
+}
+
 InlineCode applyReplacementsWithDebug(
     const vector<string> &lines,
     const VulDebugLocs &debug,

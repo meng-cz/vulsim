@@ -31,12 +31,13 @@ string readRegisterExpr(const RegisterInfo &info, const string &rdata_expr) {
 string readRegisterHelper(const RegisterInfo &info) {
     std::ostringstream os;
     const string rdata_arg = "__vul_rdata_" + info.reg->name;
-    os << "static " << info.type_str << " " << info.helper_name
-       << "(const Int<" << info.width << "> &" << rdata_arg << ") {\n";
+    os << "auto " << info.helper_name
+       << " = [&](const Int<" << info.width << "> &" << rdata_arg
+       << ") -> " << info.type_str << " {\n";
     if (info.fields.size() == 1 && info.fields[0].name == "value") {
         os << "  " << info.type_str << " value = 0;\n";
     } else {
-        os << "  " << info.type_str << " value;\n";
+        os << "  " << info.type_str << " value = {};\n";
     }
     for (const auto &field : info.fields) {
         os << "  " << field.name << " = "
@@ -44,7 +45,7 @@ string readRegisterHelper(const RegisterInfo &info) {
            << ";\n";
     }
     os << "  return value;\n";
-    os << "}\n";
+    os << "};\n";
     return os.str();
 }
 
@@ -59,7 +60,7 @@ string writeRegisterBlock(
     std::ostringstream os;
     os << "{\n";
     os << "  " << info.type_str << " __vul_reg_value = (" << value_expr << ");\n";
-    os << "  Int<" << info.width << "> __vul_reg_wdata;\n";
+    os << "  Int<" << info.width << "> __vul_reg_wdata = 0;\n";
     for (const auto &field : info.fields) {
         os << "  " << uintExtractExpr("__vul_reg_wdata", field.offset + field.width - 1, field.offset)
            << " = " << flatFieldValueExpr("__vul_reg_value", field.name) << ";\n";
@@ -172,16 +173,12 @@ InlineCode inlineRegisterAPIs(
         helper_defs += readRegisterHelper(entry.second);
         helper_defs += "\n";
     }
-    size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
-    if (logic_func_pos == string::npos) {
-        logic_func_pos = code.find("void LogicSubModule_");
-    } else {
-        ++logic_func_pos;
-    }
-    if (logic_func_pos != string::npos && !helper_defs.empty()) {
+    size_t logic_func_pos = findLogicSubmoduleFunctionStart(code);
+    size_t body_pos = findLogicSubmoduleBodyInsertion(code);
+    if (body_pos != string::npos && !helper_defs.empty()) {
         repls.push_back(Replacement{
-            static_cast<uint32_t>(logic_func_pos),
-            static_cast<uint32_t>(logic_func_pos),
+            static_cast<uint32_t>(body_pos),
+            static_cast<uint32_t>(body_pos),
             helper_defs
         });
     }

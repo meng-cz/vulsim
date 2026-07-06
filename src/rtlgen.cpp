@@ -920,7 +920,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
 
     auto emit_unpack_arg = [&](const ArgPort &arg, const string &portname, string &call_names) {
         string typestr = arg.type.toString();
-        ctx.hls_body.push_back("  " + typestr + " " + arg.name + ";\n");
+        ctx.hls_body.push_back("  " + typestr + " " + arg.name + " = {};\n");
         for (const auto &field : arg.flat_fields) {
             ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
         }
@@ -929,13 +929,13 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
 
     auto emit_construct_ret = [&](const ArgPort &ret, string &call_names) {
         string typestr = ret.type.toString();
-        ctx.hls_body.push_back("  " + typestr + " " + ret.name + ";\n");
+        ctx.hls_body.push_back("  " + typestr + " " + ret.name + " = {};\n");
         append_call_name(call_names, ret.name);
     };
 
     auto emit_pack_ret = [&](const ArgPort &ret, const string &portname) {
         string temp_var_name = ret.name + "_packed";
-        ctx.hls_body.push_back("    Int<" + std::to_string(ret.width) + "> " + ret.name + "_packed;\n");
+        ctx.hls_body.push_back("    Int<" + std::to_string(ret.width) + "> " + ret.name + "_packed = 0;\n");
         for (const auto &field : ret.flat_fields) {
             ctx.hls_body.push_back("    " + uintExtractExpr(temp_var_name, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
         }
@@ -1197,7 +1197,7 @@ void _procQueries(RTLGenContext &ctx) {
 
         ctx.hls_body.push_back("{\n");
         ctx.hls_body.push_back("  " + ret_type_str + " value = " + query_name + "();\n");
-        ctx.hls_body.push_back("  Int<" + std::to_string(width) + "> packed;\n");
+        ctx.hls_body.push_back("  Int<" + std::to_string(width) + "> packed = 0;\n");
         for (const auto &field : flat_fields) {
             ctx.hls_body.push_back("  " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
         }
@@ -1605,7 +1605,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 for (size_t i = 0; i < group.size(); ++i) {
                     string branch = (i == 0 ? "if constexpr" : "else if constexpr");
                     ctx.hls_header.push_back("    " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
-                    ctx.hls_header.push_back("      " + ret_type_str + " value;\n");
+                    ctx.hls_header.push_back("      " + ret_type_str + " value = {};\n");
                     for (const auto &field : flat_fields) {
                         ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr("value_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
                     }
@@ -1615,7 +1615,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("  }\n");
             } else {
                 ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
-                ctx.hls_header.push_back("    " + ret_type_str + " value;\n");
+                ctx.hls_header.push_back("    " + ret_type_str + " value = {};\n");
                 for (const auto &field : flat_fields) {
                     ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("value_0", field.offset + field.width - 1, field.offset) + ";\n");
                 }
@@ -1642,7 +1642,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                     const string value_name = queryPort(signal_base);
                     string branch = (i == 0 ? "if constexpr" : "else if constexpr");
                     ctx.hls_helpers.push_back("  " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
-                    ctx.hls_helpers.push_back("    " + ret_type_str + " value;\n");
+                    ctx.hls_helpers.push_back("    " + ret_type_str + " value = {};\n");
                     for (const auto &field : flat_fields) {
                         ctx.hls_helpers.push_back("    " + field.name + " = " + uintExtractExpr(value_name, field.offset + field.width - 1, field.offset) + ";\n");
                     }
@@ -1654,7 +1654,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 const string signal_base = childQuerySignalBase(group.front().instance_name, group.front().query_name);
                 const string value_name = queryPort(signal_base);
                 ctx.hls_helpers.push_back("auto " + alias_name + " = [&]() -> " + ret_type_str + " {\n");
-                ctx.hls_helpers.push_back("  " + ret_type_str + " value;\n");
+                ctx.hls_helpers.push_back("  " + ret_type_str + " value = {};\n");
                 for (const auto &field : flat_fields) {
                     ctx.hls_helpers.push_back("  " + field.name + " = " + uintExtractExpr(value_name, field.offset + field.width - 1, field.offset) + ";\n");
                 }
