@@ -27,6 +27,7 @@ struct QueueInfo {
     string enqdata;
     string deqdata;
     string clrnext;
+    string default_expr;
 };
 
 string unpackValueExpr(const QueueInfo &info, const string &packed_expr) {
@@ -38,11 +39,11 @@ string unpackValueHelper(const QueueInfo &info) {
     os << "auto " << info.helper_name
        << " = [&](const Int<" << info.data_width
        << "> &__vul_queue_packed) -> " << info.type_str << " {\n";
-    os << "  " << info.type_str << " value = {};\n";
+    os << "  " << info.type_str << " value = " << info.default_expr << ";\n";
     for (const auto &field : info.fields) {
+        const string extracted = uintExtractExpr("__vul_queue_packed", field.offset + field.width - 1, field.offset);
         os << "  " << field.name << " = "
-           << uintExtractExpr("__vul_queue_packed", field.offset + field.width - 1, field.offset)
-           << ";\n";
+           << castToLvalueTypeExpr(field.name, extracted) << ";\n";
     }
     os << "  return value;\n";
     os << "};\n";
@@ -52,8 +53,9 @@ string unpackValueHelper(const QueueInfo &info) {
 void emitPackValue(std::ostringstream &os, const QueueInfo &info, const string &packed_name, const string &value_name) {
     os << "  Int<" << info.data_width << "> " << packed_name << " = 0;\n";
     for (const auto &field : info.fields) {
+        const string value = packFlatFieldValueExpr(flatFieldValueExpr(value_name, field.name), field.width);
         os << "  " << uintExtractExpr(packed_name, field.offset + field.width - 1, field.offset)
-           << " = " << flatFieldValueExpr(value_name, field.name) << ";\n";
+           << " = " << value << ";\n";
     }
 }
 
@@ -180,6 +182,7 @@ InlineCode inlineQueueAPIs(
         info.queue = &queue;
         info.type_str = queue.type.toString();
         flatten_type_signature(queue.type, bundlelib, "value", info.data_width, info.fields);
+        info.default_expr = defaultValueExprForType(queue.type, bundlelib);
         info.helper_name = "__vul_queue_unpack_" + queue.name;
         info.front_helper_name = "__vul_queue_front_" + queue.name;
         info.enqready = queue.name + "__enqready__";

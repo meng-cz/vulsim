@@ -86,6 +86,14 @@ inline string uintExtractExpr(const string &var, uint32_t high, uint32_t low) {
     return var + ".at<" + std::to_string(high) + ", " + std::to_string(low) + ">()";
 }
 
+inline string typedExtractExpr(const string &lvalue, const string &var, uint32_t high, uint32_t low) {
+    return apiinline::castToLvalueTypeExpr(lvalue, uintExtractExpr(var, high, low));
+}
+
+inline string packFlatFieldExpr(const FlatField &field, const string &value_expr) {
+    return apiinline::packFlatFieldValueExpr(value_expr, field.width);
+}
+
 inline string flatFieldValueExpr(const string &root, const string &flat_name) {
     if (flat_name == root) {
         return root;
@@ -517,7 +525,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("operator " + element_type_str + "() const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = " + uintExtractExpr("rdata", field.offset + field.width - 1, field.offset) + ";\n");
+                ctx.hls_header.push_back("  " + field.name + " = " + typedExtractExpr(field.name, "rdata", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("  return value;\n");
             ctx.hls_header.push_back("}\n");
@@ -526,7 +534,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back(element_type_str + " get() const {\n");
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = " + uintExtractExpr("rdata", field.offset + field.width - 1, field.offset) + ";\n");
+                ctx.hls_header.push_back("  " + field.name + " = " + typedExtractExpr(field.name, "rdata", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("  return value;\n");
             ctx.hls_header.push_back("}\n");
@@ -537,7 +545,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + flatFieldValueExpr("value", field.name) + ";\n");
+                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, flatFieldValueExpr("value", field.name)) + ";\n");
             }
             if (is_ported) {
                 ctx.hls_header.push_back("  wdata[P] = wdata_val;\n");
@@ -553,7 +561,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  " + element_type_str + " value;\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> rdata_val = rdata[idx];\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = " + uintExtractExpr("rdata_val", field.offset + field.width - 1, field.offset) + ";\n");
+                ctx.hls_header.push_back("  " + field.name + " = " + typedExtractExpr(field.name, "rdata_val", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("  return value;\n");
             ctx.hls_header.push_back("}\n");
@@ -564,7 +572,7 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
             ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
             for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + flatFieldValueExpr("value", field.name) + ";\n");
+                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, flatFieldValueExpr("value", field.name)) + ";\n");
             }
             if (is_ported) {
                 ctx.hls_header.push_back("  wdata[idx][P] = wdata_val;\n");
@@ -824,12 +832,12 @@ void _procRequests(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
                 for (const auto &arg : arg_ports) {
                     for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("    " + uintExtractExpr("arg_" + arg.name + sel_str, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                        ctx.hls_header.push_back("    " + uintExtractExpr("arg_" + arg.name + sel_str, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
                     }
                 }
                 for (const auto &ret : ret_ports) {
                     for (const auto &field : ret.flat_fields) {
-                        ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("ret_" + ret.name + sel_str, field.offset + field.width - 1, field.offset) + ";\n");
+                        ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field.name, "ret_" + ret.name + sel_str, field.offset + field.width - 1, field.offset) + ";\n");
                     }
                 }
                 if (has_rdy) {
@@ -920,16 +928,18 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
 
     auto emit_unpack_arg = [&](const ArgPort &arg, const string &portname, string &call_names) {
         string typestr = arg.type.toString();
-        ctx.hls_body.push_back("  " + typestr + " " + arg.name + " = {};\n");
+        ctx.hls_body.push_back("  " + typestr + " " + arg.name + " = " +
+                               apiinline::defaultValueExprForType(arg.type, ctx.local_bundlelib) + ";\n");
         for (const auto &field : arg.flat_fields) {
-            ctx.hls_body.push_back("  " + field.name + " = " + uintExtractExpr(portname, field.offset + field.width - 1, field.offset) + ";\n");
+            ctx.hls_body.push_back("  " + field.name + " = " + typedExtractExpr(field.name, portname, field.offset + field.width - 1, field.offset) + ";\n");
         }
         append_call_name(call_names, arg.name);
     };
 
     auto emit_construct_ret = [&](const ArgPort &ret, string &call_names) {
         string typestr = ret.type.toString();
-        ctx.hls_body.push_back("  " + typestr + " " + ret.name + " = {};\n");
+        ctx.hls_body.push_back("  " + typestr + " " + ret.name + " = " +
+                               apiinline::defaultValueExprForType(ret.type, ctx.local_bundlelib) + ";\n");
         append_call_name(call_names, ret.name);
     };
 
@@ -937,7 +947,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         string temp_var_name = ret.name + "_packed";
         ctx.hls_body.push_back("    Int<" + std::to_string(ret.width) + "> " + ret.name + "_packed = 0;\n");
         for (const auto &field : ret.flat_fields) {
-            ctx.hls_body.push_back("    " + uintExtractExpr(temp_var_name, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+            ctx.hls_body.push_back("    " + uintExtractExpr(temp_var_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
         }
         ctx.hls_body.push_back("    " + portname + " = " + temp_var_name + ";\n");
     };
@@ -1199,7 +1209,7 @@ void _procQueries(RTLGenContext &ctx) {
         ctx.hls_body.push_back("  " + ret_type_str + " value = " + query_name + "();\n");
         ctx.hls_body.push_back("  Int<" + std::to_string(width) + "> packed = 0;\n");
         for (const auto &field : flat_fields) {
-            ctx.hls_body.push_back("  " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+            ctx.hls_body.push_back("  " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
         }
         ctx.hls_body.push_back("  " + port_name + " = packed;\n");
         ctx.hls_body.push_back("}\n");
@@ -1464,12 +1474,12 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("      vld_ports_" + std::to_string(i) + " = true;\n");
                 for (const auto &arg : arg_ports) {
                     for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("      " + uintExtractExpr("arg_" + arg.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                        ctx.hls_header.push_back("      " + uintExtractExpr("arg_" + arg.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
                     }
                 }
                 for (const auto &ret : ret_ports) {
                     for (const auto &field : ret.flat_fields) {
-                        ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr("ret_" + ret.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
+                        ctx.hls_header.push_back("      " + field.name + " = " + typedExtractExpr(field.name, "ret_" + ret.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
                     }
                 }
                 if (serv.has_handshake) {
@@ -1508,7 +1518,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 for (const auto &arg : arg_ports) {
                     const string arg_port_name = reqservArgPort(signal_base, arg.name);
                     for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("  " + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + field.name + "; \\\n");
+                        ctx.hls_header.push_back("  " + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + "; \\\n");
                     }
                 }
                 ctx.hls_header.push_back("}\n");
@@ -1542,13 +1552,13 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 for (const auto &arg : arg_ports) {
                     const string arg_port_name = reqservArgPort(signal_base, arg.name);
                     for (const auto &field : arg.flat_fields) {
-                        ctx.hls_helpers.push_back(indent + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                        ctx.hls_helpers.push_back(indent + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
                     }
                 }
                 for (const auto &ret : ret_ports) {
                     const string ret_port_name = reqservArgPort(signal_base, ret.name);
                     for (const auto &field : ret.flat_fields) {
-                        ctx.hls_helpers.push_back(indent + field.name + " = " + uintExtractExpr(ret_port_name, field.offset + field.width - 1, field.offset) + ";\n");
+                        ctx.hls_helpers.push_back(indent + field.name + " = " + typedExtractExpr(field.name, ret_port_name, field.offset + field.width - 1, field.offset) + ";\n");
                     }
                 }
                 if (serv.has_handshake) {
@@ -1602,12 +1612,13 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
                 ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
                 ctx.hls_header.push_back("    static_assert(IDX < " + std::to_string(group.size()) + ", \"Child query index out of range\");\n");
+                const string ret_default = apiinline::defaultValueExprForType(query_iter->second.ret_type, ctx.local_bundlelib);
                 for (size_t i = 0; i < group.size(); ++i) {
                     string branch = (i == 0 ? "if constexpr" : "else if constexpr");
                     ctx.hls_header.push_back("    " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
-                    ctx.hls_header.push_back("      " + ret_type_str + " value = {};\n");
+                    ctx.hls_header.push_back("      " + ret_type_str + " value = " + ret_default + ";\n");
                     for (const auto &field : flat_fields) {
-                        ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr("value_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
+                        ctx.hls_header.push_back("      " + field.name + " = " + typedExtractExpr(field.name, "value_" + std::to_string(i), field.offset + field.width - 1, field.offset) + ";\n");
                     }
                     ctx.hls_header.push_back("      return value;\n");
                     ctx.hls_header.push_back("    }\n");
@@ -1615,9 +1626,10 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("  }\n");
             } else {
                 ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
-                ctx.hls_header.push_back("    " + ret_type_str + " value = {};\n");
+                ctx.hls_header.push_back("    " + ret_type_str + " value = " +
+                                         apiinline::defaultValueExprForType(query_iter->second.ret_type, ctx.local_bundlelib) + ";\n");
                 for (const auto &field : flat_fields) {
-                    ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr("value_0", field.offset + field.width - 1, field.offset) + ";\n");
+                    ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field.name, "value_0", field.offset + field.width - 1, field.offset) + ";\n");
                 }
                 ctx.hls_header.push_back("    return value;\n");
                 ctx.hls_header.push_back("  }\n");
@@ -1642,9 +1654,10 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                     const string value_name = queryPort(signal_base);
                     string branch = (i == 0 ? "if constexpr" : "else if constexpr");
                     ctx.hls_helpers.push_back("  " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
-                    ctx.hls_helpers.push_back("    " + ret_type_str + " value = {};\n");
+                    ctx.hls_helpers.push_back("    " + ret_type_str + " value = " +
+                                              apiinline::defaultValueExprForType(query_iter->second.ret_type, ctx.local_bundlelib) + ";\n");
                     for (const auto &field : flat_fields) {
-                        ctx.hls_helpers.push_back("    " + field.name + " = " + uintExtractExpr(value_name, field.offset + field.width - 1, field.offset) + ";\n");
+                        ctx.hls_helpers.push_back("    " + field.name + " = " + typedExtractExpr(field.name, value_name, field.offset + field.width - 1, field.offset) + ";\n");
                     }
                     ctx.hls_helpers.push_back("    return value;\n");
                     ctx.hls_helpers.push_back("  }\n");
@@ -1654,9 +1667,10 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 const string signal_base = childQuerySignalBase(group.front().instance_name, group.front().query_name);
                 const string value_name = queryPort(signal_base);
                 ctx.hls_helpers.push_back("auto " + alias_name + " = [&]() -> " + ret_type_str + " {\n");
-                ctx.hls_helpers.push_back("  " + ret_type_str + " value = {};\n");
+                ctx.hls_helpers.push_back("  " + ret_type_str + " value = " +
+                                          apiinline::defaultValueExprForType(query_iter->second.ret_type, ctx.local_bundlelib) + ";\n");
                 for (const auto &field : flat_fields) {
-                    ctx.hls_helpers.push_back("  " + field.name + " = " + uintExtractExpr(value_name, field.offset + field.width - 1, field.offset) + ";\n");
+                    ctx.hls_helpers.push_back("  " + field.name + " = " + typedExtractExpr(field.name, value_name, field.offset + field.width - 1, field.offset) + ";\n");
                 }
                 ctx.hls_helpers.push_back("  return value;\n");
                 ctx.hls_helpers.push_back("};\n");
@@ -1763,7 +1777,7 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  void enqnext(const " + data_type_str + " &value) {\n");
             ctx.hls_header.push_back("    assert(enqready());\n");
             for (const auto &field : data_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr(port_enqdata, field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr(port_enqdata, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
             }
             ctx.hls_header.push_back("    " + port_enqvalid + " = true;\n");
             ctx.hls_header.push_back("  }\n");
@@ -1772,7 +1786,7 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  " + data_type_str + " front() const {\n");
             ctx.hls_header.push_back("    " + data_type_str + " value;\n");
             for (const auto &field : data_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr(port_deqdata, field.offset + field.width - 1, field.offset) + ";\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field.name, port_deqdata, field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("    return value;\n");
             ctx.hls_header.push_back("  }\n");
@@ -1893,7 +1907,7 @@ void _procQueues(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("    if (req > " + std::to_string(i) + ") {\n");
                 ctx.hls_header.push_back("      const " + data_type_str + " &value = values[" + std::to_string(i) + "];\n");
                 for (const auto &field : data_fields) {
-                    ctx.hls_header.push_back("      " + uintExtractExpr(port_enqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                    ctx.hls_header.push_back("      " + uintExtractExpr(port_enqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
                 }
                 ctx.hls_header.push_back("    }\n");
             }
@@ -1908,7 +1922,7 @@ void _procQueues(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("    if (deqvalid() > " + std::to_string(i) + ") {\n");
                 ctx.hls_header.push_back("      auto &value = deq_buf[" + std::to_string(i) + "];\n");
                 for (const auto &field : data_fields) {
-                    ctx.hls_header.push_back("      " + field.name + " = " + uintExtractExpr(port_deqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + ";\n");
+                    ctx.hls_header.push_back("      " + field.name + " = " + typedExtractExpr(field.name, port_deqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + ";\n");
                 }
                 ctx.hls_header.push_back("    }\n");
             }
@@ -2068,7 +2082,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("    " + port_s1_addr + " = addr;\n");
             ctx.hls_header.push_back("    Int<" + data_width_str + "> packed;\n");
             for (const auto &field : write_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
             }
             ctx.hls_header.push_back("    " + port_s1_wdata + " = packed;\n");
             ctx.hls_header.push_back("  }\n");
@@ -2077,7 +2091,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("  const DataType& readdata() const {\n");
             ctx.hls_header.push_back("    DataType value;\n");
             for (const auto &field : read_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr(port_s2_rdata, field.offset + field.width - 1, field.offset) + ";\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field.name, port_s2_rdata, field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("    readdata_buf = value;\n");
             ctx.hls_header.push_back("    return readdata_buf;\n");
@@ -2196,7 +2210,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("    static_assert(PortIndex < " + read_ports_str + ", \"Read port index out of range\");\n");
             ctx.hls_header.push_back("    DataType value;\n");
             for (const auto &field : read_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + uintExtractExpr(port_s2_readdata + "[PortIndex]", field.offset + field.width - 1, field.offset) + ";\n");
+                ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field.name, port_s2_readdata + "[PortIndex]", field.offset + field.width - 1, field.offset) + ";\n");
             }
             ctx.hls_header.push_back("    readdata_buf[PortIndex] = value;\n");
             ctx.hls_header.push_back("    return readdata_buf[PortIndex];\n");
@@ -2210,7 +2224,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_header.push_back("    " + port_s1_writeaddr + "[PortIndex] = addr;\n");
             ctx.hls_header.push_back("    Int<" + data_width_str + "> packed;\n");
             for (const auto &field : write_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + field.name + ";\n");
+                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
             }
             ctx.hls_header.push_back("    " + port_s1_writedata + "[PortIndex] = packed;\n");
             ctx.hls_header.push_back("  }\n");
@@ -2440,6 +2454,7 @@ RTLGenResult genModuleRTLImpl(
     if (result.has_logic_submodule) {
         hls.push_back("#include <array>\n");
         hls.push_back("#include <cstdint>\n");
+        hls.push_back("#include <type_traits>\n");
         hls.push_back("\n");
         hls.push_back("using std::array;\n");
         hls.push_back("\n");
@@ -2852,7 +2867,8 @@ vector<string> genVerilatorTestMainCpp(
         flatten_type_signature(query.ret_type, bundlelib, "value", width, flat_fields);
         out.push_back("  " + query.ret_type.toString() + " " + name + "() {\n");
         out.push_back("    eval_and_process_services();\n");
-        out.push_back("    " + query.ret_type.toString() + " value = {};\n");
+        out.push_back("    " + query.ret_type.toString() + " value = " +
+                      apiinline::defaultValueExprForType(query.ret_type, bundlelib) + ";\n");
         for (const auto &field : flat_fields) {
             out.push_back(
                 "    " + field.name + " = static_cast<decltype(" + field.name + ")>(__vul_get_bits(" +

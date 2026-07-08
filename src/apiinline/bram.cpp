@@ -21,6 +21,7 @@ struct MemoryInfo {
     uint32_t data_width = 0;
     vector<FlatField> fields;
     string helper_name;
+    string default_expr;
 };
 
 string unpackExpr(const MemoryInfo &info, const string &packed_expr) {
@@ -38,11 +39,11 @@ string unpackHelper(const MemoryInfo &info) {
     os << "auto " << info.helper_name
        << " = [&](const Int<" << info.data_width
        << "> &__vul_bram_packed) -> " << info.data_type_str << " {\n";
-    os << "  " << info.data_type_str << " value = {};\n";
+    os << "  " << info.data_type_str << " value = " << info.default_expr << ";\n";
     for (const auto &field : info.fields) {
+        const string extracted = uintExtractExpr("__vul_bram_packed", field.offset + field.width - 1, field.offset);
         os << "  " << field.name << " = "
-           << uintExtractExpr("__vul_bram_packed", field.offset + field.width - 1, field.offset)
-           << ";\n";
+           << castToLvalueTypeExpr(field.name, extracted) << ";\n";
     }
     os << "  return value;\n";
     os << "};\n";
@@ -52,8 +53,9 @@ string unpackHelper(const MemoryInfo &info) {
 void emitPack(std::ostringstream &os, const MemoryInfo &info, const string &packed_name, const string &value_name) {
     os << "  Int<" << info.data_width << "> " << packed_name << " = 0;\n";
     for (const auto &field : info.fields) {
+        const string value = packFlatFieldValueExpr(flatFieldValueExpr(value_name, field.name), field.width);
         os << "  " << uintExtractExpr(packed_name, field.offset + field.width - 1, field.offset)
-           << " = " << flatFieldValueExpr(value_name, field.name) << ";\n";
+           << " = " << value << ";\n";
     }
 }
 
@@ -172,6 +174,7 @@ InlineCode inlineMemoryAPIs(
         info.is_1rw = (bram.read_ports == 0 || bram.write_ports == 0);
         info.data_type_str = bram.data_type.toString();
         flatten_type_signature(bram.data_type, bundlelib, "value", info.data_width, info.fields);
+        info.default_expr = defaultValueExprForType(bram.data_type, bundlelib);
         info.helper_name = "__vul_bram_unpack_" + bram.name;
         memories[bram.name] = std::move(info);
     }

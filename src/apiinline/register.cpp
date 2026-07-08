@@ -22,6 +22,7 @@ struct RegisterInfo {
     string rdata_port;
     string wen_port;
     string wdata_port;
+    string default_expr;
 };
 
 string readRegisterExpr(const RegisterInfo &info, const string &rdata_expr) {
@@ -35,14 +36,14 @@ string readRegisterHelper(const RegisterInfo &info) {
        << " = [&](const Int<" << info.width << "> &" << rdata_arg
        << ") -> " << info.type_str << " {\n";
     if (info.fields.size() == 1 && info.fields[0].name == "value") {
-        os << "  " << info.type_str << " value = 0;\n";
+        os << "  " << info.type_str << " value = " << info.default_expr << ";\n";
     } else {
-        os << "  " << info.type_str << " value = {};\n";
+        os << "  " << info.type_str << " value = " << info.default_expr << ";\n";
     }
     for (const auto &field : info.fields) {
+        const string extracted = uintExtractExpr(rdata_arg, field.offset + field.width - 1, field.offset);
         os << "  " << field.name << " = "
-           << uintExtractExpr(rdata_arg, field.offset + field.width - 1, field.offset)
-           << ";\n";
+           << castToLvalueTypeExpr(field.name, extracted) << ";\n";
     }
     os << "  return value;\n";
     os << "};\n";
@@ -62,8 +63,9 @@ string writeRegisterBlock(
     os << "  " << info.type_str << " __vul_reg_value = (" << value_expr << ");\n";
     os << "  Int<" << info.width << "> __vul_reg_wdata = 0;\n";
     for (const auto &field : info.fields) {
+        const string value = packFlatFieldValueExpr(flatFieldValueExpr("__vul_reg_value", field.name), field.width);
         os << "  " << uintExtractExpr("__vul_reg_wdata", field.offset + field.width - 1, field.offset)
-           << " = " << flatFieldValueExpr("__vul_reg_value", field.name) << ";\n";
+           << " = " << value << ";\n";
     }
     if (is_array && is_ported) {
         os << "  " << info.wdata_port << "[" << idx_expr << "][" << port_expr << "] = __vul_reg_wdata;\n";
@@ -155,6 +157,12 @@ InlineCode inlineRegisterAPIs(
         info.wen_port = "wen_" + reg.name + "__";
         info.wdata_port = "wdata_" + reg.name + "__";
         flatten_type_signature(reg.signature, bundlelib, "value", info.width, info.fields);
+        if (info.fields.size() == 1 && info.fields[0].name == "value" &&
+            enumDefaultValueExpr(reg.signature, bundlelib).empty()) {
+            info.default_expr = "0";
+        } else {
+            info.default_expr = defaultValueExprForType(reg.signature, bundlelib);
+        }
         registers[reg.name] = std::move(info);
     }
     if (registers.empty()) {

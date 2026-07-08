@@ -45,6 +45,18 @@ string uintExtractExpr(const string &var, uint32_t high, uint32_t low) {
     return var + ".at<" + std::to_string(high) + ", " + std::to_string(low) + ">()";
 }
 
+string castToLvalueTypeExpr(const string &lvalue_expr, const string &value_expr) {
+    return "static_cast<typename std::remove_reference<decltype(" +
+           lvalue_expr + ")>::type>(static_cast<uint64_t>(" + value_expr + "))";
+}
+
+string packFlatFieldValueExpr(const string &value_expr, uint32_t width) {
+    if (width > 64) {
+        return value_expr;
+    }
+    return "static_cast<uint64_t>(" + value_expr + ")";
+}
+
 string flatFieldValueExpr(const string &root, const string &flat_name) {
     if (flat_name == "value") {
         return root;
@@ -61,6 +73,52 @@ string flatFieldValueExpr(const string &root, const string &flat_name) {
         return root + "." + flat_name.substr(prefix.size());
     }
     return flat_name;
+}
+
+string enumDefaultValueExpr(
+    const VulStaticTypeSignature &type,
+    const VulStaticBundleLib &bundlelib
+) {
+    if (type.uint_length > 0) {
+        return "";
+    }
+    string type_name = type.type;
+    unordered_set<string> visited;
+    for (int depth = 0; depth < 32 && !type_name.empty(); ++depth) {
+        if (!visited.insert(type_name).second) {
+            return "";
+        }
+        const VulStaticBundle *bundle = nullptr;
+        for (const auto &item : bundlelib) {
+            if (item.name == type_name) {
+                bundle = &item;
+                break;
+            }
+        }
+        if (bundle == nullptr) {
+            return "";
+        }
+        if (!bundle->enum_members.empty()) {
+            return type.toString() + "::" + bundle->enum_members.front().name;
+        }
+        if (!bundle->is_alias || bundle->members.empty()) {
+            return "";
+        }
+        const auto &alias = bundle->members.front();
+        if (alias.type.uint_length > 0) {
+            return "";
+        }
+        type_name = alias.type.type;
+    }
+    return "";
+}
+
+string defaultValueExprForType(
+    const VulStaticTypeSignature &type,
+    const VulStaticBundleLib &bundlelib
+) {
+    string enum_default = enumDefaultValueExpr(type, bundlelib);
+    return enum_default.empty() ? "{}" : enum_default;
 }
 
 int findMatching(
