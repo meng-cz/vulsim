@@ -56,8 +56,8 @@ int main(int argc, char * argv[]) {
     parser.add_argument("-p", "--project")
         .help("sets the project directory (default: parent directory of the top module file)")
         .default_value(std::string(""));
-    parser.add_argument("--v2")
-        .help("use experimental RTL generator v2 path")
+    parser.add_argument("--v1")
+        .help("use experimental RTL generator v1 path")
         .default_value(false)
         .implicit_value(true);
 
@@ -74,7 +74,7 @@ int main(int argc, char * argv[]) {
     string out_dir = parser.get<std::string>("--out");
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
-    bool use_v2 = parser.get<bool>("--v2");
+    bool use_v2 = !(parser.get<bool>("--v1"));
 
     if (top_file.empty() && main_file.empty()) {
         std::cerr << "Error: Specify -t/--top, -m/--main, or a TestMain with TOP(...)." << std::endl;
