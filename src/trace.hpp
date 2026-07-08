@@ -38,6 +38,7 @@ struct VulTraceMatcher {
 struct VulTracedSignal {
     SignalPath signal_path;
     uint32_t bit_width;
+    bool is_fixint = false;
     bool trace_all_instances = true;
     vector<vector<std::optional<ConfigRealValue>>> instance_index_filters;
 };

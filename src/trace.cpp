@@ -268,7 +268,11 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
             uint32_t offset = 0;
             flatten_type_signature(reg.signature, local_bundlelib, reg.name, offset, flat_fields);
             for (const auto &f : flat_fields) {
-                all_signals.push_back(VulTracedSignal{f.name, f.width});
+                VulTracedSignal signal;
+                signal.signal_path = f.name;
+                signal.bit_width = f.width;
+                signal.is_fixint = f.is_fixint;
+                all_signals.push_back(std::move(signal));
             }
         }
 
@@ -308,6 +312,7 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
                 auto &dst = traced_signal_map[signal.signal_path];
                 dst.signal_path = signal.signal_path;
                 dst.bit_width = signal.bit_width;
+                dst.is_fixint = signal.is_fixint;
                 if (applied.trace_all_instances) {
                     dst.trace_all_instances = true;
                     dst.instance_index_filters.clear();

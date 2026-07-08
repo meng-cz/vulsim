@@ -1424,6 +1424,8 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             access_path = regname + access_path;
             if (sig.bit_width > 64) {
                 access_path = access_path + ".get_data()";
+            } else if (sig.is_fixint) {
+                access_path = "(" + access_path + ").template to<uint64_t>()";
             } else {
                 access_path = "static_cast<uint64_t>(" + access_path + ")";
             }

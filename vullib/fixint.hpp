@@ -416,6 +416,10 @@ private:
     }
 
 public:
+    std::array<uint64_t, NUM_WORDS> get_data() const {
+        return data;
+    }
+
     constexpr Int() : data{} {}
 
     constexpr Int(bool value) : data{} {
