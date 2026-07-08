@@ -6,6 +6,7 @@
 
 #include "apiinline/utils.hpp"
 
+#include <cctype>
 #include <sstream>
 #include <unordered_map>
 
@@ -100,6 +101,91 @@ string frontExpr(const QueueInfo &info, const vector<string> &args) {
         return unpackValueExpr(info, info.deqdata);
     }
     return info.front_helper_name + "(" + info.deqvalid + ", " + info.deqdata + ")";
+}
+
+string frontAssignBlock(const QueueInfo &info, const string &lhs) {
+    const uint32_t deq_width = static_cast<uint32_t>(info.queue->deq_width);
+    std::ostringstream os;
+    os << "{\n";
+    for (uint32_t i = 0; i < deq_width; ++i) {
+        os << "  " << lhs << "[" << i << "] = " << info.default_expr << ";\n";
+    }
+    for (uint32_t i = 0; i < deq_width; ++i) {
+        os << "  if (" << info.deqvalid << " > " << i << ") {\n";
+        os << "    " << lhs << "[" << i << "] = "
+           << unpackValueExpr(info, info.deqdata + "[" + std::to_string(i) + "]") << ";\n";
+        os << "  }\n";
+    }
+    os << "}";
+    return os.str();
+}
+
+string trimCopy(string text) {
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) {
+        text.erase(text.begin());
+    }
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) {
+        text.pop_back();
+    }
+    return text;
+}
+
+bool parseSimpleAssignmentAroundCall(
+    const string &code,
+    const vector<TokenInfo> &tokens,
+    int object_idx,
+    int close_idx,
+    string &lhs,
+    uint32_t &replace_begin,
+    uint32_t &replace_end
+) {
+    int stmt_begin_idx = 0;
+    for (int i = object_idx - 1; i >= 0; --i) {
+        const string &spelling = tokens[i].spelling;
+        if (spelling == ";" || spelling == "{" || spelling == "}") {
+            stmt_begin_idx = i + 1;
+            break;
+        }
+    }
+
+    int assign_idx = -1;
+    for (int i = stmt_begin_idx; i < object_idx; ++i) {
+        if (tokens[i].spelling == "=") {
+            assign_idx = i;
+        }
+    }
+    if (assign_idx < 0 || assign_idx <= stmt_begin_idx) {
+        return false;
+    }
+
+    for (int i = assign_idx + 1; i < object_idx; ++i) {
+        if (!trimCopy(code.substr(tokens[i].start, tokens[i].end - tokens[i].start)).empty()) {
+            return false;
+        }
+    }
+
+    int semi_idx = -1;
+    for (int i = close_idx + 1; i < static_cast<int>(tokens.size()); ++i) {
+        if (tokens[i].spelling == ";") {
+            semi_idx = i;
+            break;
+        }
+        if (!trimCopy(code.substr(tokens[i].start, tokens[i].end - tokens[i].start)).empty()) {
+            return false;
+        }
+    }
+    if (semi_idx < 0) {
+        return false;
+    }
+
+    lhs = trimCopy(code.substr(tokens[stmt_begin_idx].start,
+                              tokens[assign_idx].start - tokens[stmt_begin_idx].start));
+    if (lhs.empty()) {
+        return false;
+    }
+    replace_begin = tokens[stmt_begin_idx].start;
+    replace_end = tokens[semi_idx].end;
+    return true;
 }
 
 string frontHelper(const QueueInfo &info) {
@@ -236,12 +322,21 @@ InlineCode inlineQueueAPIs(
             continue;
         }
         string text;
+        uint32_t replace_begin = tokens[i].start;
+        uint32_t replace_end = tokens[close_idx].end;
         if (method == "enqready" || method == "enqreqdy") {
             text = info.enqready;
         } else if (method == "deqvalid") {
             text = info.deqvalid;
         } else if (method == "front") {
-            text = frontExpr(info, args);
+            const bool is_mp = (info.queue->enq_width > 1 || info.queue->deq_width > 1);
+            string lhs;
+            if (is_mp && parseSimpleAssignmentAroundCall(code, tokens, i, close_idx,
+                                                         lhs, replace_begin, replace_end)) {
+                text = frontAssignBlock(info, lhs);
+            } else {
+                text = frontExpr(info, args);
+            }
         } else if (method == "enqnext") {
             text = enqNextBlock(info, args);
         } else if (method == "deqnext") {
@@ -251,8 +346,8 @@ InlineCode inlineQueueAPIs(
         } else {
             continue;
         }
-        if (!overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
-            repls.push_back(Replacement{tokens[i].start, tokens[close_idx].end, text});
+        if (!overlapsExisting(repls, replace_begin, replace_end)) {
+            repls.push_back(Replacement{replace_begin, replace_end, text});
         }
     }
 

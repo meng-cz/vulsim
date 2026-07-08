@@ -60,6 +60,10 @@ int main(int argc, char * argv[]) {
         .help("use experimental RTL generator v1 path")
         .default_value(false)
         .implicit_value(true);
+    parser.add_argument("--v2")
+        .help("use RTL generator v2 path")
+        .default_value(false)
+        .implicit_value(true);
 
     try {
         parser.parse_args(argc, argv);
@@ -74,7 +78,13 @@ int main(int argc, char * argv[]) {
     string out_dir = parser.get<std::string>("--out");
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
-    bool use_v2 = !(parser.get<bool>("--v1"));
+    bool use_v1 = parser.get<bool>("--v1");
+    bool explicit_v2 = parser.get<bool>("--v2");
+    if (use_v1 && explicit_v2) {
+        std::cerr << "Error: --v1 and --v2 cannot be used together." << std::endl;
+        return 1;
+    }
+    bool use_v2 = explicit_v2 || !use_v1;
 
     if (top_file.empty() && main_file.empty()) {
         std::cerr << "Error: Specify -t/--top, -m/--main, or a TestMain with TOP(...)." << std::endl;

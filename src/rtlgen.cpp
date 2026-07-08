@@ -1026,6 +1026,13 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
             string ret_port_name = reqservArgPort(serv_name, ret.name);
             ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " &" + ret_port_name);
             ctx.rtl_logicports.push_back("." + ret_port_name + "(" + ret_port_name + ")");
+            if (is_arrayed) {
+                for (uint32_t idx = 0; idx < array_size; ++idx) {
+                    ctx.hls_init.push_back(ret_port_name + "[" + std::to_string(idx) + "] = 0;\n");
+                }
+            } else {
+                ctx.hls_init.push_back(ret_port_name + " = 0;\n");
+            }
         }
 
         if (is_arrayed) {
@@ -1955,6 +1962,9 @@ void _procQueues(RTLGenContext &ctx) {
 
             ctx.hls_init.push_back(port_enqvalid + " = 0;\n");
             ctx.hls_init.push_back(port_deqready + " = 0;\n");
+            for (uint32_t i = 0; i < static_cast<uint32_t>(que.enq_width); ++i) {
+                ctx.hls_init.push_back(port_enqdata + "[" + std::to_string(i) + "] = 0;\n");
+            }
             ctx.hls_init.push_back(port_clrnext + " = false;\n");
             if (ctx.emit_hls_api_helpers) {
                 ctx.hls_init.push_back(proxy_class_name + " " + que_name + "(" + port_enqready + ", " + port_deqvalid + ", " + port_enqvalid + ", " + port_deqready + ", " + port_enqdata + ", " + port_deqdata + ", " + port_clrnext + ");\n");
