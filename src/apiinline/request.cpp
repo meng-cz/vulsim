@@ -91,8 +91,11 @@ void emitRequestBody(
         }
         os << "  auto __vul_req_arg_" << arg.name << " = (" << call_args[arg_idx] << ");\n";
         for (const auto &field : arg.fields) {
+            const string value = packFlatFieldValueExpr(
+                argFieldExpr("__vul_req_arg_" + arg.name, arg.name, field.name),
+                field);
             os << "  " << uintExtractExpr(argPort(req.name, arg.name) + sel, field.offset + field.width - 1, field.offset)
-               << " = " << argFieldExpr("__vul_req_arg_" + arg.name, arg.name, field.name) << ";\n";
+               << " = " << value << ";\n";
         }
         ++arg_idx;
     }

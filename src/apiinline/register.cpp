@@ -63,7 +63,7 @@ string writeRegisterBlock(
     os << "  " << info.type_str << " __vul_reg_value = (" << value_expr << ");\n";
     os << "  Int<" << info.width << "> __vul_reg_wdata = 0;\n";
     for (const auto &field : info.fields) {
-        const string value = packFlatFieldValueExpr(flatFieldValueExpr("__vul_reg_value", field.name), field.width);
+        const string value = packFlatFieldValueExpr(flatFieldValueExpr("__vul_reg_value", field.name), field);
         os << "  " << uintExtractExpr("__vul_reg_wdata", field.offset + field.width - 1, field.offset)
            << " = " << value << ";\n";
     }

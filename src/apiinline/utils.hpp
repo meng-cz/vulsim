@@ -37,7 +37,7 @@ string uintExtractExpr(const string &var, uint32_t high, uint32_t low);
 
 string castToLvalueTypeExpr(const string &lvalue_expr, const string &value_expr);
 
-string packFlatFieldValueExpr(const string &value_expr, uint32_t width);
+string packFlatFieldValueExpr(const string &value_expr, const FlatField &field);
 
 string flatFieldValueExpr(const string &root, const string &flat_name);
 

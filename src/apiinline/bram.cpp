@@ -53,7 +53,7 @@ string unpackHelper(const MemoryInfo &info) {
 void emitPack(std::ostringstream &os, const MemoryInfo &info, const string &packed_name, const string &value_name) {
     os << "  Int<" << info.data_width << "> " << packed_name << " = 0;\n";
     for (const auto &field : info.fields) {
-        const string value = packFlatFieldValueExpr(flatFieldValueExpr(value_name, field.name), field.width);
+        const string value = packFlatFieldValueExpr(flatFieldValueExpr(value_name, field.name), field);
         os << "  " << uintExtractExpr(packed_name, field.offset + field.width - 1, field.offset)
            << " = " << value << ";\n";
     }

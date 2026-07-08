@@ -54,7 +54,7 @@ string unpackValueHelper(const QueueInfo &info) {
 void emitPackValue(std::ostringstream &os, const QueueInfo &info, const string &packed_name, const string &value_name) {
     os << "  Int<" << info.data_width << "> " << packed_name << " = 0;\n";
     for (const auto &field : info.fields) {
-        const string value = packFlatFieldValueExpr(flatFieldValueExpr(value_name, field.name), field.width);
+        const string value = packFlatFieldValueExpr(flatFieldValueExpr(value_name, field.name), field);
         os << "  " << uintExtractExpr(packed_name, field.offset + field.width - 1, field.offset)
            << " = " << value << ";\n";
     }
@@ -82,8 +82,9 @@ string enqNextBlock(const QueueInfo &info, const vector<string> &args) {
             os << "    auto __vul_queue_value = __vul_queue_values[" << i << "];\n";
             os << "    Int<" << info.data_width << "> __vul_queue_packed = 0;\n";
             for (const auto &field : info.fields) {
+                const string value = packFlatFieldValueExpr(flatFieldValueExpr("__vul_queue_value", field.name), field);
                 os << "    " << uintExtractExpr("__vul_queue_packed", field.offset + field.width - 1, field.offset)
-                   << " = " << flatFieldValueExpr("__vul_queue_value", field.name) << ";\n";
+                   << " = " << value << ";\n";
             }
             os << "    " << info.enqdata << "[" << i << "] = __vul_queue_packed;\n";
             os << "  }\n";

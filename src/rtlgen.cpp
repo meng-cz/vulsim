@@ -91,7 +91,7 @@ inline string typedExtractExpr(const string &lvalue, const string &var, uint32_t
 }
 
 inline string packFlatFieldExpr(const FlatField &field, const string &value_expr) {
-    return apiinline::packFlatFieldValueExpr(value_expr, field.width);
+    return apiinline::packFlatFieldValueExpr(value_expr, field);
 }
 
 inline string flatFieldValueExpr(const string &root, const string &flat_name) {

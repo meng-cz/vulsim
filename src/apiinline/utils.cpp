@@ -50,9 +50,12 @@ string castToLvalueTypeExpr(const string &lvalue_expr, const string &value_expr)
            lvalue_expr + ")>::type>(static_cast<uint64_t>(" + value_expr + "))";
 }
 
-string packFlatFieldValueExpr(const string &value_expr, uint32_t width) {
-    if (width > 64) {
+string packFlatFieldValueExpr(const string &value_expr, const FlatField &field) {
+    if (field.width > 64) {
         return value_expr;
+    }
+    if (field.is_fixint) {
+        return "(" + value_expr + ").template to<uint64_t>()";
     }
     return "static_cast<uint64_t>(" + value_expr + ")";
 }

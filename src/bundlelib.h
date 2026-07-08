@@ -120,6 +120,7 @@ struct FlatField {
     std::string name;  // 展平后的访问路径
     uint32_t    offset;
     uint32_t    width;
+    bool        is_fixint = false;
 };
 
 void flatten_bundle(
