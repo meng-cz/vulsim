@@ -1785,6 +1785,12 @@ StaticTestHarnessCodeHpp genStaticTestHarnessCodeHpp(
     out_lines.push_back("protected:\n");
     out_lines.push_back("\n");
 
+    out_lines.push_back("void sim_nextcycle() {\n");
+    out_lines.push_back(CodeTab + "sim_execute();\n");
+    out_lines.push_back(CodeTab + "sim_commit();\n");
+    out_lines.push_back("}\n");
+    out_lines.push_back("\n");
+
     out_lines.push_back("void sim_execute() {\n");
     out_lines.push_back(CodeTab + child_instptr_name + "->" + TickFunctionName + "();\n");
     out_lines.push_back("}\n");

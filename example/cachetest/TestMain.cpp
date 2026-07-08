@@ -173,16 +173,14 @@ SIMULATION() {
             model_refill(addr, refill_data);
         }
 
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 
     // 冲刷水线：检查最后一拍 read_s0 的响应。
     ++test_tick;
     should_hit = should_hit_next;
     expected_data = expected_data_next;
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     printf("Simulation finished after %lu ticks.\n", test_tick);
 }

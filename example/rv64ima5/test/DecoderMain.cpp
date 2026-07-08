@@ -30,98 +30,79 @@ SIMULATION() {
 
     decode(0x00500093U, out);
     check(out.valid, 0, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x00500093U, out);
     check(out.rd == 1U, 1, out.rd, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x00500093U, out);
     check(out.rs1 == 0U, 2, out.rs1, 0);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x00500093U, out);
     check(out.imm == 5ULL, 3, out.imm, 5);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x00500093U, out);
     check(out.alu_op == ALU_ADD, 4, out.alu_op, ALU_ADD);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020c1b3U, out);
     check(out.valid, 5, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020c1b3U, out);
     check(out.rd == 3U, 6, out.rd, 3);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020c1b3U, out);
     check(out.rs1 == 1U, 7, out.rs1, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020c1b3U, out);
     check(out.rs2 == 2U, 8, out.rs2, 2);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020c1b3U, out);
     check(out.alu_op == ALU_XOR, 9, out.alu_op, ALU_XOR);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x02208233U, out);
     check(out.is_muldiv, 10, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x02208233U, out);
     check(out.muldiv_op == MDU_MUL, 11, out.muldiv_op, MDU_MUL);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020b023U, out);
     check(out.is_store, 12, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020b023U, out);
     check(out.mem_width == 8U, 13, out.mem_width, 8);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x0020b023U, out);
     check(out.imm == 0ULL, 14, out.imm, 0);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x002535afU, out);
     check(out.is_atomic, 15, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x002535afU, out);
     check(out.atomic_op == AMO_ADD, 16, out.atomic_op, AMO_ADD);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x002535afU, out);
     check(out.mem_width == 8U, 17, out.mem_width, 8);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     decode(0x00100073U, out);
     check(out.is_ebreak, 18, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     std::printf("decoder unit passed 19 checks\n");
 }

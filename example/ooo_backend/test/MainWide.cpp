@@ -107,8 +107,7 @@ SIMULATION() {
                 pc++;
             }
         }
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
         BackendStatus st = status();
         if (st.halted) {
             ArchRegSnapshot snap = regs();

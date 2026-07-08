@@ -29,32 +29,26 @@ SIMULATION() {
 
     CoreState st = current_state();
     check(st == CoreState::RESET, "initial state", static_cast<uint32_t>(st), 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     set_state(CoreState::RUNNING, 11);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     StatusSnapshot snap = snapshot();
     check(snap.state == CoreState::RUNNING, "running state", static_cast<uint32_t>(snap.state), 2);
     check(snap.code == 11U, "running code", snap.code, 11);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     set_state(CoreState::WAITING, 99);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     snap = snapshot();
     check(snap.state == CoreState::WAITING, "waiting state", static_cast<uint32_t>(snap.state), 7);
     check(snap.code == 99U, "waiting code", snap.code, 99);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     set_state(CoreState::HALTED, 123);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     st = current_state();
     check(st == CoreState::HALTED, "halted state", static_cast<uint32_t>(st), 8);

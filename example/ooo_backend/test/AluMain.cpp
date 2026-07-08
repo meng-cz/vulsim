@@ -40,32 +40,26 @@ SIMULATION() {
     mul.seq = 2;
 
     if (!can_accept() || !issue(add)) fail("add issue rejected");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     if (!issue(mul)) fail("mul issue rejected");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     for (int i = 0; i < 2 && !has_result(); ++i) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
     if (!has_result()) fail("add result missing");
     WritebackEvent wb{};
     if (!pop_result(wb) || wb.value != 42 || wb.rob_idx != 1) fail("add result mismatch");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     for (int i = 0; i < 4 && !has_result(); ++i) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 
     if (!has_result()) fail("mul result missing");
     if (!pop_result(wb) || wb.value != 42 || wb.rob_idx != 2) fail("mul result mismatch");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     UnitStatus st = status();
     if (st.inflight != 0U || st.has_result) fail("pipeline not drained");

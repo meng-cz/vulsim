@@ -21,8 +21,7 @@ SERVICE(output, ARG(uint8_t) s) {
 
 SIMULATION() {
     for (tick_count = 0; tick_count < 20; ++tick_count) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 }
 

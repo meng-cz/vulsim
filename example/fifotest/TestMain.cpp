@@ -15,8 +15,7 @@ SERVICE(output, ARG(uint32_t) data) {
 SIMULATION() {
     constexpr uint64_t TestTick = 20;
     for (test_tick = 0; test_tick < TestTick; ++test_tick) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 }
 

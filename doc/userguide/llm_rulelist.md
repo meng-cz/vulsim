@@ -86,7 +86,7 @@ TICK_IMPL() { ... }
 
 ## 4. 状态语义
 
-- 所有寄存器、队列、BRAM 写入都是 next-cycle 语义：本周期调用 `setnext/enqnext/deqnext/readreq/write/req`，`sim_commit()` 后才提交。不要依赖同周期立即生效。
+- 所有寄存器、队列、BRAM 写入都是 next-cycle 语义：本周期调用 `setnext/enqnext/deqnext/readreq/write/req`，`sim_nextcycle()` 后才提交。不要依赖同周期立即生效。
 - `REGISTER` 复位块必须完整初始化标量/结构体所有字段。
 - 读寄存器当前值：基础类型可隐式读或 `.get()`；结构体/数组字段必须先 `.get()`：
 
@@ -162,8 +162,7 @@ CONNECT_CR_S(mesh[*][WID-1], right_out, output);
 SIMULATION() {
     sim_reset();       // 可选
     request_to_top(...);
-    sim_execute();     // 执行一拍行为/事务
-    sim_commit();      // 提交 next 状态
+    sim_nextcycle();   // 执行一拍行为/事务并提交 next 状态
     sim_exit();        // 可选退出
 }
 ```
@@ -274,8 +273,7 @@ QUERY(value, Int<W>);
 
 SIMULATION() {
     for (cycle = 0; cycle < 10; ++cycle) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 }
 ```

@@ -43,7 +43,10 @@ int main(int argc, char * argv[]) {
     argparse::ArgumentParser parser("vulsimgen", "VulSim Verilog Generator V1.0");
     parser.add_argument("-t", "--top")
         .help("sets the top module file")
-        .required();
+        .default_value(std::string(""));
+    parser.add_argument("-m", "--main")
+        .help("sets the TestMain file used to generate a Verilator main cpp")
+        .default_value(std::string(""));
     parser.add_argument("-o", "--out")
         .help("sets the output directory for generated code (default: ./rtlout)")
         .default_value(std::string("./rtlout"));
@@ -67,22 +70,34 @@ int main(int argc, char * argv[]) {
     }
 
     string top_file = parser.get<std::string>("--top");
+    string main_file = parser.get<std::string>("--main");
     string out_dir = parser.get<std::string>("--out");
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
     bool use_v2 = parser.get<bool>("--v2");
 
+    if (top_file.empty() && main_file.empty()) {
+        std::cerr << "Error: Specify -t/--top, -m/--main, or a TestMain with TOP(...)." << std::endl;
+        return 1;
+    }
     std::filesystem::path top_path(top_file);
-    if (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path)) {
+    if (!top_file.empty() && (!std::filesystem::exists(top_path) || !std::filesystem::is_regular_file(top_path))) {
         std::cerr << "Error: Top module file does not exist: " << top_file << std::endl;
         return 1;
     }
-    if (proj_dir.empty()) {
+    if (!main_file.empty()) {
+        std::filesystem::path main_path(main_file);
+        if (!std::filesystem::exists(main_path) || !std::filesystem::is_regular_file(main_path)) {
+            std::cerr << "Error: TestMain file does not exist: " << main_file << std::endl;
+            return 1;
+        }
+    }
+    if (proj_dir.empty() && !top_file.empty()) {
         proj_dir = top_path.parent_path().string();
     }
 
     VulErrorContextGuard _err{"generating project from " + proj_dir};
-    VulStaticProject project = parseVcppStaticProject(proj_dir, top_path.string(), "");
+    VulStaticProject project = parseVcppStaticProject(proj_dir, top_file, main_file);
 
     std::filesystem::path out_path(out_dir);
     if (!std::filesystem::exists(out_path)) {
@@ -154,6 +169,12 @@ int main(int argc, char * argv[]) {
             std::filesystem::create_directories(dst_file.parent_path());
             std::filesystem::copy_file(src_file, dst_file);
         }
+    }
+
+    if (!main_file.empty()) {
+        VulErrorContextGuard _err("generating Verilator TestMain cpp");
+        vector<string> testmain_code = rtlgen::genVerilatorTestMainCpp(project);
+        writeLinesToFile(testmain_code, (out_path / "VulTestMain.cpp").string());
     }
 
     // copy vullib files to output directory

@@ -7,9 +7,7 @@
 
 #include <iostream>
 
-void sim_execute();
-
-void sim_commit();
+void sim_nextcycle();
 
 void sim_reset();
 

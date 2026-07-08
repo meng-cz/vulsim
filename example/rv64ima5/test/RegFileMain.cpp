@@ -31,60 +31,48 @@ SIMULATION() {
     RegReadPair out;
 
     write(1, 11, true);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     write(0, 99, true);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     read2(1, 0, out);
     check(out.rs1_val == 11ULL, 0, out.rs1_val, 11);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     read2(1, 0, out);
     check(out.rs2_val == 0ULL, 1, out.rs2_val, 0);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     write(2, 22, true);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     read2(1, 2, out);
     check(out.rs1_val == 11ULL, 2, out.rs1_val, 11);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     read2(1, 2, out);
     check(out.rs2_val == 22ULL, 3, out.rs2_val, 22);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     write(1, 33, true);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     read2(1, 2, out);
     check(out.rs1_val == 33ULL, 4, out.rs1_val, 33);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     read2(1, 2, out);
     check(out.rs2_val == 22ULL, 5, out.rs2_val, 22);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     out = zero_and_ra();
     check(out.rs1_val == 0ULL, 6, out.rs1_val, 0);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     out = zero_and_ra();
     check(out.rs2_val == 33ULL, 7, out.rs2_val, 33);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     std::printf("regfile unit passed 8 checks\n");
 }

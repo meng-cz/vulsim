@@ -6,6 +6,5 @@ SERVICE(output, ARG(uint32_t) data) {
 }
 
 SIMULATION() {
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 }

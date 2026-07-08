@@ -71,8 +71,7 @@ SIMULATION() {
     req.dec.imm = 7;
     exec(req, out);
     check(out.result == 18ULL, 0, out.result, 18);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     req = make_req();
     req.rs1_val = 9;
@@ -82,8 +81,7 @@ SIMULATION() {
     req.dec.alu_op = static_cast<uint8_t>(ALU_SUB);
     exec(req, out);
     check(out.result == 5ULL, 1, out.result, 5);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     req = make_req();
     req.pc = 100;
@@ -96,8 +94,7 @@ SIMULATION() {
     req.dec.imm = 16;
     exec(req, out);
     check(out.branch_taken, 2, 0, 1);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     req = make_req();
     req.pc = 100;
@@ -110,8 +107,7 @@ SIMULATION() {
     req.dec.imm = 16;
     exec(req, out);
     check(out.branch_target == 116ULL, 3, out.branch_target, 116);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     req = make_req();
     req.rs1_val = 6;
@@ -122,8 +118,7 @@ SIMULATION() {
     req.dec.muldiv_op = static_cast<uint8_t>(MDU_MUL);
     exec(req, out);
     check(out.result == 42ULL, 4, out.result, 42);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     req = make_req();
     req.rs1_val = 0x100;
@@ -135,8 +130,7 @@ SIMULATION() {
     req.dec.mem_width = 8;
     exec(req, out);
     check(out.mem_addr == 0x100ULL, 5, out.mem_addr, 0x100);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     req = make_req();
     req.rs1_val = 0x100;
@@ -148,8 +142,7 @@ SIMULATION() {
     req.dec.mem_width = 8;
     exec(req, out);
     check(out.store_data == 0x55ULL, 6, out.store_data, 0x55);
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     std::printf("execute unit passed 7 checks\n");
 }

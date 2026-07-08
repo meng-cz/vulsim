@@ -311,8 +311,7 @@ SIMULATION() {
     const uint64_t max_cycles = 512;
     for (uint64_t tick = 0; tick < max_cycles; ++tick) {
         sim_cycle = tick;
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
         if (halted_seen) {
             break;
         }

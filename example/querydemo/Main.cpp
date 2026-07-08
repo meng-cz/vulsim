@@ -11,7 +11,6 @@ SERVICE(output, ARG(uint32_t) data) {
 
 SIMULATION() {
     for (tick_count = 0; tick_count < 8; ++tick_count) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 }

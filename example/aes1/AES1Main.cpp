@@ -33,8 +33,7 @@ SIMULATION() {
             //     byte = static_cast<uint8_t>(byte + 1);
             // }
         }
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 
     printf("Simulation finished after %lu ticks.\n", TestTick);

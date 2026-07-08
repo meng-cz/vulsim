@@ -66,31 +66,25 @@ SIMULATION() {
     load.seq = 2;
 
     if (!issue(store)) fail("store rejected");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     for (int i = 0; i < 5 && !status().has_result; ++i) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 
     WritebackEvent wb{};
     if (!pop_result(wb) || wb.rob_idx != 1 || wb.has_dest) fail("store completion mismatch");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     if (!issue(load)) fail("load rejected");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     for (int i = 0; i < 5 && !status().has_result; ++i) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 
     if (!pop_result(wb) || wb.rob_idx != 2 || wb.value != 55 || !wb.has_dest) fail("load completion mismatch");
-    sim_execute();
-    sim_commit();
+    sim_nextcycle();
 
     UnitStatus st = status();
     if (st.inflight != 0U) fail("lsu not drained");

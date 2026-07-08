@@ -69,5 +69,10 @@ void appendRTLV2LogicRTL(
     int unroll_limit = 1024
 );
 
+vector<string> genVerilatorTestMainCpp(
+    const VulStaticProject &project,
+    const string &top_verilator_class_name = ""
+);
+
 
 } // namespace rtlgen

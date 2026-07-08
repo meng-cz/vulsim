@@ -15,7 +15,6 @@ SERVICE(spill, ARG(uint32_t) data) {
 
 SIMULATION() {
     for (tick = 0; tick < 4; ++tick) {
-        sim_execute();
-        sim_commit();
+        sim_nextcycle();
     }
 }
