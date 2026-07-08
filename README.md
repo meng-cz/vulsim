@@ -17,15 +17,33 @@
 - [2. VulCPP header 常量与数据结构定义](./doc/userguide/2-header.md)
 - [3. VulCPP 硬件模块定义](./doc/userguide/3-module.md)
 - [4. VulCPP Main 模块（Test Harness）定义](./doc/userguide/4-Main.md)
-- [5. VulCPP 无符号任意宽度整数类型 UInt](./doc/userguide/5-uint.md)
-- [6. VulCPP 通用块内存组件 BRAM](./doc/userguide/6-bram.md)
+- [5. VulCPP 无符号任意宽度整数类型 Int](./doc/userguide/5-uint.md)
+- [6. VulCPP 通用块内存组件 BRAM/ROM](./doc/userguide/6-bram.md)
 - [7. VulCPP 通用队列组件 QUEUE](./doc/userguide/7-queue.md)
 - [8. VulCPP 阵列化子实例](./doc/userguide/8-arrayization.md)
 - [9. VulCPP 波形追踪与调试](./doc/userguide/9-debugging.md)
 
+介绍PPT：[Vul（泺源）项目介绍与工作整理](./doc/LuoYuan20260708-FULL.pdf)
+
 ## 构建
 
-基于 CMake 构建系统，除 CMake 和 C++20 编译器外无其他依赖（但仅支持 Linux 平台，Windows 下仍需测试），构建命令如下：
+基于 CMake 构建系统，除 libclang 之外无其他依赖（但仅支持 Linux 平台，Windows 下仍需测试）
+
+安装环境（以 Ubuntu / apt 工具为例）：
+
+```bash
+sudo apt install git gcc g++ make cmake clang libclang-dev 
+```
+
+初始化 git 目录与 submodule：
+
+```bash
+git clone https://github.com/meng-cz/vulsim.git
+cd vulsim
+git submodule update --init --recursive
+```
+
+构建命令如下：
 
 ```bash
 mkdir build
@@ -36,12 +54,10 @@ make -j8
 
 构建完成后会在 `build` 目录下生成如下文件：
 - `vulsimgen`：VulCPP 仿真代码生成工具，用于将 VulCPP 项目转换为可执行的仿真代码
-- `vullib`：VulCPP 仿真库目录，供生成的仿真代码链接使用
-- `example`：示例代码目录
-
-另外两个文件 `vulrtlgen` 和 `vulconsole` 是后续版本的工具，目前暂不可用：
 - `vulrtlgen`：VulCPP RTL代码生成工具，用于将 VulCPP 项目转换为可综合的RTL代码
-- `vulconsole`：VulSim GUI 的后端命令行工具，无法独立使用
+- `vullib`：VulCPP 仿真库目录，供生成的仿真代码链接使用，需要在使用工具时通过命令行参数指定该目录
+- `userguide`：用户手册文档目录
+- `example`：示例代码目录
 
 运行示例：
 
@@ -52,13 +68,22 @@ make -j8
 # -t: 可选，用于覆盖 Main 中通过 TOP(...) 声明的顶层模块路径
 # -p: 可选，用于覆盖 Main 中通过 PROJECT(...) 声明的项目根目录路径
 # -l: 指定 VulCPP 库文件的路径（默认./vullib/）
-# -o: 指定生成的仿真代码输出目录（默认./sim_out/）
+# -o: 指定生成的仿真代码输出目录（默认./simout/）
 
 # 编译生成的仿真代码 (build.sh 默认使用 g++)
-cd sim_out
+cd simout
 source build.sh
 # 运行仿真
 ./Main
+```
+
+```bash
+# 生成RTL代码
+./vulrtlgen -t example/prodcon/TopModule.hpp
+# -t: 指定顶层模块的路径
+# -l: 指定 VulCPP 库文件的路径（默认./vullib/）
+# -o: 指定生成的仿真代码输出目录（默认./rtlout/）
+ls -lah rtlout
 ```
 
 
