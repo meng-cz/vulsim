@@ -43,7 +43,7 @@ string unpackHelper(const MemoryInfo &info) {
     for (const auto &field : info.fields) {
         const string extracted = uintExtractExpr("__vul_bram_packed", field.offset + field.width - 1, field.offset);
         os << "  " << field.name << " = "
-           << castToLvalueTypeExpr(field.name, extracted) << ";\n";
+           << unpackFlatFieldValueExpr(field.name, extracted, field) << ";\n";
     }
     os << "  return value;\n";
     os << "};\n";

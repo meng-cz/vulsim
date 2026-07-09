@@ -274,7 +274,7 @@ void flatten_member(
             // uint<N>
             if (m.type.uint_length > 0) {
                 uint32_t w = m.type.uint_length;
-                out.push_back({cur_name, offset, w, true});
+                out.push_back({cur_name, offset, w, true, ""});
                 offset += w;
                 return;
             }
@@ -289,7 +289,7 @@ void flatten_member(
             }
             if (sub_ptr == nullptr) {
                 uint32_t w = get_basic_width(m.type.type);
-                out.push_back({cur_name, offset, w, false});
+                out.push_back({cur_name, offset, w, false, ""});
                 offset += w;
                 return;
             }
@@ -309,7 +309,7 @@ void flatten_member(
                 uint32_t n = sub.enum_members.size();
                 uint32_t w = 0;
                 while ((1u << w) < n) ++w;
-                out.push_back({cur_name, offset, w, false});
+                out.push_back({cur_name, offset, w, false, m.type.toString()});
                 offset += w;
                 return;
             }
@@ -348,7 +348,7 @@ void flatten_bundle(
         }
         uint32_t w = 0;
         while ((1u << w) < n) ++w;
-        out.push_back({prefix, offset, w, false});
+        out.push_back({prefix, offset, w, false, bundle.name});
         offset += w;
         return;
     } else {

@@ -39,6 +39,12 @@ string castToLvalueTypeExpr(const string &lvalue_expr, const string &value_expr)
 
 string packFlatFieldValueExpr(const string &value_expr, const FlatField &field);
 
+string unpackFlatFieldValueExpr(
+    const string &lvalue_expr,
+    const string &value_expr,
+    const FlatField &field
+);
+
 string flatFieldValueExpr(const string &root, const string &flat_name);
 
 string enumDefaultValueExpr(

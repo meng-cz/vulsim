@@ -51,13 +51,31 @@ string castToLvalueTypeExpr(const string &lvalue_expr, const string &value_expr)
 }
 
 string packFlatFieldValueExpr(const string &value_expr, const FlatField &field) {
-    if (field.width > 64) {
-        return value_expr;
+    if (!field.enum_type.empty()) {
+        return "Int<" + std::to_string(field.width) + ">(static_cast<uint64_t>(" + value_expr + "))";
     }
+    return "Int<" + std::to_string(field.width) + ">(" + value_expr + ")";
+}
+
+string unpackFlatFieldValueExpr(
+    const string &lvalue_expr,
+    const string &value_expr,
+    const FlatField &field
+) {
     if (field.is_fixint) {
-        return "(" + value_expr + ").template to<uint64_t>()";
+        return "Int<" + std::to_string(field.width) + ">(" + value_expr + ")";
     }
-    return "static_cast<uint64_t>(" + value_expr + ")";
+    if (!field.enum_type.empty()) {
+        return "static_cast<" + field.enum_type + ">(Int<" +
+               std::to_string(field.width) + ">(" + value_expr +
+               ").template to<uint64_t>())";
+    }
+    if (field.width == 1) {
+        return "ReduceOr(" + value_expr + ")";
+    }
+    return "Int<" + std::to_string(field.width) + ">(" + value_expr +
+           ").template to<typename std::remove_reference<decltype(" +
+           lvalue_expr + ")>::type>()";
 }
 
 string flatFieldValueExpr(const string &root, const string &flat_name) {

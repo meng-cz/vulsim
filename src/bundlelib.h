@@ -121,6 +121,7 @@ struct FlatField {
     uint32_t    offset;
     uint32_t    width;
     bool        is_fixint = false;
+    std::string enum_type; // empty means non-enum
 };
 
 void flatten_bundle(
