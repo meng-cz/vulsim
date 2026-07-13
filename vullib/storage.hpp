@@ -39,6 +39,9 @@ public:
     template <uint32_t P = 0>
     void setnext(const T &value) {
         static_assert(P < WRPortNum);
+        if (reset_next_ || hold_next_) {
+            return;
+        }
         assert((issued_write_ports_ & (uint64_t(1) << P)) == 0 &&
                "VulRegister::setnext() may only be called once per cycle for each write port");
         issued_write_ports_ |= uint64_t(1) << P;
@@ -57,23 +60,52 @@ public:
     }
 
     void apply_next_tick() {
-        data_ = next_;
+        if (reset_next_) {
+            data_ = reset_value_;
+            next_ = reset_value_;
+        } else if (hold_next_) {
+            next_ = data_;
+        } else {
+            data_ = next_;
+        }
         pending_write_ports_ = WRPortNum;
         issued_write_ports_ = 0;
+        hold_next_ = false;
+        reset_next_ = false;
     }
 
-    void reset(const T &value) {
-        data_ = value;
-        next_ = value;
+    void holdnext() {
+        if (!reset_next_) {
+            hold_next_ = true;
+        }
+    }
+
+    void resetnext() {
+        reset_next_ = true;
+        hold_next_ = false;
+    }
+
+    void _set_reset_value(const T &value) {
+        reset_value_ = value;
+    }
+
+    void _reset() {
+        data_ = reset_value_;
+        next_ = reset_value_;
         pending_write_ports_ = WRPortNum;
         issued_write_ports_ = 0;
+        hold_next_ = false;
+        reset_next_ = false;
     }
 
 protected:
     T data_{};
     T next_{};
+    T reset_value_{};
     uint32_t pending_write_ports_ = WRPortNum;
     uint64_t issued_write_ports_ = 0;
+    bool hold_next_ = false;
+    bool reset_next_ = false;
 };
 
 template<typename T>
@@ -82,6 +114,9 @@ class VulRegisterImpl1 {
 public:
     template <uint32_t P = 0>
     void setnext(const T &value) {
+        if (reset_next_ || hold_next_) {
+            return;
+        }
         assert(!write_issued_ &&
                "VulRegister::setnext() may only be called once per cycle for each write port");
         next_buffer_ = value;
@@ -89,24 +124,53 @@ public:
     }
 
     void apply_next_tick() {
-        data_ = next_buffer_;
+        if (reset_next_) {
+            data_ = reset_value_;
+            next_buffer_ = reset_value_;
+        } else if (hold_next_) {
+            next_buffer_ = data_;
+        } else {
+            data_ = next_buffer_;
+        }
         write_issued_ = false;
+        hold_next_ = false;
+        reset_next_ = false;
     }
 
     operator const T&() const {
         return data_;
     }
 
-    void reset(const T &value) {
-        data_ = value;
-        next_buffer_ = value;
+    void holdnext() {
+        if (!reset_next_) {
+            hold_next_ = true;
+        }
+    }
+
+    void resetnext() {
+        reset_next_ = true;
+        hold_next_ = false;
+    }
+
+    void _set_reset_value(const T &value) {
+        reset_value_ = value;
+    }
+
+    void _reset() {
+        data_ = reset_value_;
+        next_buffer_ = reset_value_;
         write_issued_ = false;
+        hold_next_ = false;
+        reset_next_ = false;
     }
 
 protected:
     T next_buffer_{};
     T data_{};
+    T reset_value_{};
     bool write_issued_ = false;
+    bool hold_next_ = false;
+    bool reset_next_ = false;
 };
 
 template<typename T, uint32_t WRPortNum = 1>
@@ -122,6 +186,12 @@ public:
     void setnext(const T &value) {
         impl_.template setnext<P>(value);
     }
+    void holdnext() {
+        impl_.holdnext();
+    }
+    void resetnext() {
+        impl_.resetnext();
+    }
     void apply_next_tick() {
         impl_.apply_next_tick();
     }
@@ -131,8 +201,11 @@ public:
     operator const T&() const {
         return impl_;
     }
-    void reset(const T &value) {
-        impl_.reset(value);
+    void _set_reset_value(const T &value) {
+        impl_._set_reset_value(value);
+    }
+    void _reset() {
+        impl_._reset();
     }
 };
 
@@ -152,6 +225,24 @@ public:
         assert(index < Size);
         data_[index].template setnext<P>(value);
     }
+    void holdnext(const uint32_t index) {
+        assert(index < Size);
+        data_[index].holdnext();
+    }
+    void holdnext() {
+        for (auto &elem : data_) {
+            elem.holdnext();
+        }
+    }
+    void resetnext(const uint32_t index) {
+        assert(index < Size);
+        data_[index].resetnext();
+    }
+    void resetnext() {
+        for (auto &elem : data_) {
+            elem.resetnext();
+        }
+    }
     void apply_next_tick() {
         for (auto &elem : data_) {
             elem.apply_next_tick();
@@ -161,14 +252,19 @@ public:
         assert(index < Size);
         return data_[index].get();
     }
-    void reset(const T &value) {
+    void _set_reset_value(const T &value) {
         for (auto &elem : data_) {
-            elem.reset(value);
+            elem._set_reset_value(value);
         }
     }
-    void reset(const array<T, Size> &values) {
+    void _set_reset_value(const array<T, Size> &values) {
         for (uint32_t i = 0; i < Size; i++) {
-            data_[i].reset(values[i]);
+            data_[i]._set_reset_value(values[i]);
+        }
+    }
+    void _reset() {
+        for (auto &elem : data_) {
+            elem._reset();
         }
     }
 };
@@ -185,12 +281,16 @@ protected:
         T value;
         uint32_t best_prio;
         bool has_write;
+        bool hold_next;
+        bool reset_next;
         uint64_t issued_write_ports;
 
         PendingSlot()
-            : value(), best_prio(WRPortNum), has_write(false), issued_write_ports(0) {}
+            : value(), best_prio(WRPortNum), has_write(false), hold_next(false),
+              reset_next(false), issued_write_ports(0) {}
     };
     std::array<T, Size> curr_;
+    std::array<T, Size> reset_values_;
     std::array<PendingSlot, Size> pending_;
 
     std::array<uint32_t, Size> dirty_indices_{};
@@ -204,6 +304,9 @@ public:
         for (auto &elem : curr_) {
             elem = initial_value;
         }
+        for (auto &elem : reset_values_) {
+            elem = initial_value;
+        }
         for (auto &slot : pending_) {
             slot.value = initial_value;
         }
@@ -214,6 +317,9 @@ public:
         assert(index < Size);
         static_assert(P < WRPortNum);
         auto &slot = pending_[index];
+        if (slot.reset_next || slot.hold_next) {
+            return;
+        }
         assert((slot.issued_write_ports & (uint64_t(1) << P)) == 0 &&
                "VulRegisterArray::setnext() may only be called once per cycle for each register write port");
         slot.issued_write_ports |= uint64_t(1) << P;
@@ -230,9 +336,18 @@ public:
     void apply_next_tick() {
         for (uint32_t i = 0; i < dirty_count_; i++) {
             uint32_t index = dirty_indices_[i];
-            curr_[index] = pending_[index].value;
+            if (pending_[index].reset_next) {
+                curr_[index] = reset_values_[index];
+                pending_[index].value = reset_values_[index];
+            } else if (pending_[index].hold_next) {
+                pending_[index].value = curr_[index];
+            } else if (pending_[index].has_write) {
+                curr_[index] = pending_[index].value;
+            }
             pending_[index].has_write = false;
             pending_[index].best_prio = WRPortNum;
+            pending_[index].hold_next = false;
+            pending_[index].reset_next = false;
             pending_[index].issued_write_ports = 0;
             dirty_flags_[index] = 0;
         }
@@ -242,29 +357,72 @@ public:
         assert(index < Size);
         return curr_[index];
     }
-    void reset(const T &value) {
-        for (auto &elem : curr_) {
+    void holdnext(uint32_t index) {
+        assert(index < Size);
+        auto &slot = pending_[index];
+        if (slot.reset_next) {
+            return;
+        }
+        slot.hold_next = true;
+        slot.has_write = false;
+        slot.best_prio = WRPortNum;
+        slot.issued_write_ports = 0;
+        mark_dirty(index);
+    }
+    void holdnext() {
+        for (uint32_t i = 0; i < Size; i++) {
+            holdnext(i);
+        }
+    }
+    void resetnext(uint32_t index) {
+        assert(index < Size);
+        auto &slot = pending_[index];
+        slot.reset_next = true;
+        slot.hold_next = false;
+        slot.has_write = false;
+        slot.best_prio = WRPortNum;
+        slot.issued_write_ports = 0;
+        mark_dirty(index);
+    }
+    void resetnext() {
+        for (uint32_t i = 0; i < Size; i++) {
+            resetnext(i);
+        }
+    }
+    void _set_reset_value(const T &value) {
+        for (auto &elem : reset_values_) {
             elem = value;
         }
+    }
+    void _set_reset_value(const array<T, Size> &values) {
+        reset_values_ = values;
+    }
+    void _reset() {
+        for (auto &elem : curr_) {
+            elem = T{};
+        }
+        curr_ = reset_values_;
         for (auto &slot : pending_) {
-            slot.value = value;
+            slot.value = T{};
             slot.best_prio = WRPortNum;
             slot.has_write = false;
+            slot.hold_next = false;
+            slot.reset_next = false;
             slot.issued_write_ports = 0;
+        }
+        for (uint32_t i = 0; i < Size; i++) {
+            pending_[i].value = reset_values_[i];
         }
         dirty_count_ = 0;
         dirty_flags_.fill(0);
     }
-    void reset(const array<T, Size> &values) {
-        for (uint32_t i = 0; i < Size; i++) {
-            curr_[i] = values[i];
-            pending_[i].value = values[i];
-            pending_[i].best_prio = WRPortNum;
-            pending_[i].has_write = false;
-            pending_[i].issued_write_ports = 0;
-            dirty_flags_[i] = 0;
+
+private:
+    void mark_dirty(uint32_t index) {
+        if (dirty_flags_[index] == 0) {
+            dirty_indices_[dirty_count_++] = index;
+            dirty_flags_[index] = 1;
         }
-        dirty_count_ = 0;
     }
 };
 
@@ -288,17 +446,32 @@ public:
     void setnext(const uint32_t index, const T &value) {
         impl_.template setnext<P>(index, value);
     }
+    void holdnext(const uint32_t index) {
+        impl_.holdnext(index);
+    }
+    void holdnext() {
+        impl_.holdnext();
+    }
+    void resetnext(const uint32_t index) {
+        impl_.resetnext(index);
+    }
+    void resetnext() {
+        impl_.resetnext();
+    }
     void apply_next_tick() {
         impl_.apply_next_tick();
     }
     const T& operator[](uint32_t index) const {
         return impl_[index];
     }
-    void reset(const T &value) {
-        impl_.reset(value);
+    void _set_reset_value(const T &value) {
+        impl_._set_reset_value(value);
     }
-    void reset(const array<T, Size> &values) {
-        impl_.reset(values);
+    void _set_reset_value(const array<T, Size> &values) {
+        impl_._set_reset_value(values);
+    }
+    void _reset() {
+        impl_._reset();
     }
 };
 

@@ -894,6 +894,8 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     vector<string> impl_commit_field;
     VulDebugLocs impl_commit_field_debug;
     vector<string> impl_sys_reset_field;
+    vector<string> impl_reg_reset_value_field;
+    VulDebugLocs impl_reg_reset_value_field_debug;
     vector<string> impl_reg_reset_field;
     VulDebugLocs impl_reg_reset_field_debug;
 
@@ -1114,11 +1116,13 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         sig_as_member.name = reg.name;
         sig_as_member.type = reg.signature;
         sig_as_member.dims = reg.dims;
-        impl_reg_reset_field.push_back("{\n");
-        impl_reg_reset_field.push_back(_genStaticMemberTypeStr(sig_as_member) + " " + reg.name + ";\n");
-        vulDebugAppendLines(impl_reg_reset_field, impl_reg_reset_field_debug, reg.reset_codelines, reg.reset_codelines_debug);
-        impl_reg_reset_field.push_back("this->" + reg.name + ".reset(" + reg.name + ");\n");
-        impl_reg_reset_field.push_back("}\n");
+        impl_reg_reset_value_field.push_back("{\n");
+        impl_reg_reset_value_field.push_back(_genStaticMemberTypeStr(sig_as_member) + " " + reg.name + ";\n");
+        vulDebugAppendLines(impl_reg_reset_value_field, impl_reg_reset_value_field_debug, reg.reset_codelines, reg.reset_codelines_debug);
+        impl_reg_reset_value_field.push_back("this->" + reg.name + "._set_reset_value(" + reg.name + ");\n");
+        impl_reg_reset_value_field.push_back("}\n");
+
+        impl_reg_reset_field.push_back("this->" + reg.name + "._reset();\n");
 
         impl_commit_field.push_back(reg.name + "." + ApplyTickFunctionName + "();\n");
     }
@@ -1517,6 +1521,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     decl.push_back("void " + TickFunctionName + "();\n");
     decl.push_back("void " + ApplyTickFunctionName + "();\n");
     decl.push_back("void __sys_reset();\n");
+    decl.push_back("void __init_reg_reset_values();\n");
     decl.push_back("void __reg_reset();\n");
     decl.push_back("void reset() { __sys_reset(); __reg_reset(); }\n");
     decl.push_back("void init();\n");
@@ -1534,6 +1539,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     ctor_sig += ")";
     decl.push_back(ctor_sig + " : " + ctor_init + " {\n");
     decl.push_back(CodeTab + "init();\n");
+    decl.push_back(CodeTab + "__init_reg_reset_values();\n");
     decl.push_back(CodeTab + "__reg_reset();\n");
     decl.push_back("}\n");
     decl.push_back("\n");
@@ -1596,6 +1602,12 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     // sys reset function implementations
     impl.push_back("void " + mod_class_name + "::__sys_reset() {\n");
     impl.insert(impl.end(), impl_sys_reset_field.begin(), impl_sys_reset_field.end());
+    impl.push_back("}\n");
+    impl.push_back("\n");
+
+    // register reset value initialization function implementations
+    impl.push_back("void " + mod_class_name + "::__init_reg_reset_values() {\n");
+    vulDebugAppendLines(impl, impl_debug, impl_reg_reset_value_field, impl_reg_reset_value_field_debug);
     impl.push_back("}\n");
     impl.push_back("\n");
 

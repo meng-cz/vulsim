@@ -10,6 +10,12 @@
 
 namespace {
 
+template <typename Reg, typename Value>
+void force_reset(Reg &reg, const Value &value) {
+    reg._set_reset_value(value);
+    reg._reset();
+}
+
 struct Payload {
     int32_t tag = 0;
     uint32_t seq = 0;
@@ -134,7 +140,7 @@ void run_register_script(Impl &impl, RegisterOracle<T, WRPortNum> &oracle) {
     for (uint32_t cycle = 0; cycle < 600; ++cycle) {
         if ((cycle % 37u) == 0u) {
             const T reset_value = make_payload(rng, seq++);
-            impl.reset(reset_value);
+            force_reset(impl, reset_value);
             oracle.reset(reset_value);
             check_register_value(impl, oracle.curr);
         }
@@ -202,7 +208,7 @@ void run_array_script(Impl &impl, RegisterArrayOracle<T, Size, WRPortNum> &oracl
         const uint32_t reset_mode = random_below(rng, 61u);
         if (reset_mode == 0u) {
             const T value = make_payload(rng, seq++);
-            impl.reset(value);
+            force_reset(impl, value);
             oracle.reset(value);
             check_array_values(impl, oracle.curr);
         } else if (reset_mode == 1u) {
@@ -210,7 +216,7 @@ void run_array_script(Impl &impl, RegisterArrayOracle<T, Size, WRPortNum> &oracl
             for (auto &value : values) {
                 value = make_payload(rng, seq++);
             }
-            impl.reset(values);
+            force_reset(impl, values);
             oracle.reset(values);
             check_array_values(impl, oracle.curr);
         }

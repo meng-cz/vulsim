@@ -9,9 +9,15 @@
 
 namespace {
 
+template <typename Reg, typename Value>
+void force_reset(Reg &reg, const Value &value) {
+    reg._set_reset_value(value);
+    reg._reset();
+}
+
 void test_single_register_basic() {
     VulRegister<int> reg;
-    reg.reset(1);
+    force_reset(reg, 1);
     reg.setnext(5);
     reg.apply_next_tick();
     assert(reg.get() == 5);
@@ -19,22 +25,74 @@ void test_single_register_basic() {
 
 void test_multiport_register_priority() {
     VulRegister<int, 2> reg;
-    reg.reset(0);
+    force_reset(reg, 0);
     reg.setnext<1>(7);
     reg.setnext<0>(9);
     reg.apply_next_tick();
     assert(reg.get() == 9);
 }
 
+void test_register_holdnext_and_resetnext_priority() {
+    VulRegister<int, 2> reg;
+    force_reset(reg, 4);
+    reg._set_reset_value(12);
+
+    reg.setnext<0>(8);
+    reg.holdnext();
+    reg.apply_next_tick();
+    assert(reg.get() == 4);
+
+    reg.setnext<1>(9);
+    reg.holdnext();
+    reg.resetnext();
+    reg.apply_next_tick();
+    assert(reg.get() == 12);
+
+    reg.holdnext();
+    reg.setnext<0>(15);
+    reg.apply_next_tick();
+    assert(reg.get() == 12);
+}
+
 void test_register_array_basic() {
     VulRegisterArray<int, 32, 2> reg_array;
-    reg_array.reset(0);
+    force_reset(reg_array, 0);
     reg_array.setnext<1>(7, 11);
     reg_array.setnext<0>(7, 13);
     reg_array.setnext<0>(3, 5);
     reg_array.apply_next_tick();
     assert(reg_array[7] == 13);
     assert(reg_array[3] == 5);
+}
+
+void test_register_array_holdnext_and_resetnext() {
+    VulRegisterArray<int, 32, 2> reg_array;
+    std::array<int, 32> reset_values{};
+    for (uint32_t i = 0; i < reset_values.size(); ++i) {
+        reset_values[i] = 100 + static_cast<int>(i);
+    }
+    force_reset(reg_array, reset_values);
+
+    reg_array.setnext<0>(7, 1);
+    reg_array.holdnext(7);
+    reg_array.setnext<0>(8, 2);
+    reg_array.apply_next_tick();
+    assert(reg_array[7] == 107);
+    assert(reg_array[8] == 2);
+
+    reg_array.setnext<0>(7, 3);
+    reg_array.resetnext(7);
+    reg_array.setnext<0>(8, 4);
+    reg_array.holdnext();
+    reg_array.apply_next_tick();
+    assert(reg_array[7] == 107);
+    assert(reg_array[8] == 2);
+
+    reg_array.setnext<0>(8, 5);
+    reg_array.resetnext();
+    reg_array.apply_next_tick();
+    assert(reg_array[7] == 107);
+    assert(reg_array[8] == 108);
 }
 
 struct PendingWrite {
@@ -79,8 +137,8 @@ void test_register_array_impl_equivalence() {
     vulstorage::VulRegisterArrayFullImpl<int, 32, 3> full;
     vulstorage::VulRegisterArrayDirtyImpl<int, 32, 3> dirty;
 
-    full.reset(0);
-    dirty.reset(0);
+    force_reset(full, 0);
+    force_reset(dirty, 0);
     assert_arrays_equal(full, dirty);
 
     std::mt19937 rng(20260610u);
@@ -97,12 +155,12 @@ void test_register_array_impl_equivalence() {
                 for (auto &value : values) {
                     value = value_dist(rng);
                 }
-                full.reset(values);
-                dirty.reset(values);
+                force_reset(full, values);
+                force_reset(dirty, values);
             } else {
                 const int value = value_dist(rng);
-                full.reset(value);
-                dirty.reset(value);
+                force_reset(full, value);
+                force_reset(dirty, value);
             }
             assert_arrays_equal(full, dirty);
         }
@@ -138,7 +196,9 @@ int main(int argc, char **argv) {
     if (mode == "legal") {
         test_single_register_basic();
         test_multiport_register_priority();
+        test_register_holdnext_and_resetnext_priority();
         test_register_array_basic();
+        test_register_array_holdnext_and_resetnext();
         test_register_array_impl_equivalence();
         std::cout << "Storage write contract tests passed!" << std::endl;
         return 0;

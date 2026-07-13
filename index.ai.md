@@ -63,6 +63,7 @@
 - `inlineRegisterAPIs(...)`：扫描并替换寄存器读写 API。
 - `readRegisterHelper(...)`：生成从寄存器 packed 读端口还原原类型的 helper。
 - `writeRegisterBlock(...)`：生成 `setnext` 写使能和写数据端口赋值代码。
+- `controlRegisterBlock(...)`：生成 `holdnext`/`resetnext` 控制端口赋值代码。
 - `inlineRegisterReadsInExpr(...)`：在表达式内部替换寄存器读操作。
 
 ## src/apiinline/register.hpp

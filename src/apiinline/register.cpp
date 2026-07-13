@@ -22,6 +22,8 @@ struct RegisterInfo {
     string rdata_port;
     string wen_port;
     string wdata_port;
+    string holdnext_port;
+    string resetnext_port;
     string default_expr;
 };
 
@@ -47,6 +49,28 @@ string readRegisterHelper(const RegisterInfo &info) {
     }
     os << "  return value;\n";
     os << "};\n";
+    return os.str();
+}
+
+string controlRegisterBlock(
+    const RegisterInfo &info,
+    const string &method_name,
+    const string &idx_expr
+) {
+    const bool is_array = (!info.reg->dims.empty());
+    const string &port = (method_name == "holdnext") ? info.holdnext_port : info.resetnext_port;
+    std::ostringstream os;
+    os << "{\n";
+    if (is_array && idx_expr.empty()) {
+        os << "  for (uint32_t __vul_i = 0; __vul_i < " << info.reg->dims[0] << "; ++__vul_i) {\n";
+        os << "    " << port << "[__vul_i] = true;\n";
+        os << "  }\n";
+    } else if (is_array) {
+        os << "  " << port << "[" << idx_expr << "] = true;\n";
+    } else {
+        os << "  " << port << " = true;\n";
+    }
+    os << "}";
     return os.str();
 }
 
@@ -156,6 +180,8 @@ InlineCode inlineRegisterAPIs(
         info.rdata_port = "rdata_" + reg.name + "__";
         info.wen_port = "wen_" + reg.name + "__";
         info.wdata_port = "wdata_" + reg.name + "__";
+        info.holdnext_port = "holdnext_" + reg.name + "__";
+        info.resetnext_port = "resetnext_" + reg.name + "__";
         flatten_type_signature(reg.signature, bundlelib, "value", info.width, info.fields);
         if (info.fields.size() == 1 && info.fields[0].name == "value" &&
             enumDefaultValueExpr(reg.signature, bundlelib).empty()) {
@@ -174,7 +200,6 @@ InlineCode inlineRegisterAPIs(
     if (tokens.empty()) {
         return {logic_hls_codes, logic_hls_debug};
     }
-
     vector<Replacement> repls;
     string helper_defs;
     for (const auto &entry : registers) {
@@ -222,14 +247,18 @@ InlineCode inlineRegisterAPIs(
             if (cursor < static_cast<int>(tokens.size()) && tokens[cursor].spelling == "template") {
                 ++cursor;
             }
-            if (cursor < static_cast<int>(tokens.size()) && tokens[cursor].spelling == "setnext") {
+            if (cursor < static_cast<int>(tokens.size()) &&
+                (tokens[cursor].spelling == "setnext" ||
+                 tokens[cursor].spelling == "holdnext" ||
+                 tokens[cursor].spelling == "resetnext")) {
                 method_idx = cursor;
             }
         }
         if (method_idx >= 0) {
+            const string method_name = tokens[method_idx].spelling;
             string port_expr = "0";
             int open_idx = method_idx + 1;
-            if (open_idx < static_cast<int>(tokens.size()) && tokens[open_idx].spelling == "<") {
+            if (method_name == "setnext" && open_idx < static_cast<int>(tokens.size()) && tokens[open_idx].spelling == "<") {
                 int close_angle = findMatching(tokens, open_idx, "<", ">");
                 if (close_angle >= 0) {
                     if (open_idx + 1 <= close_angle - 1) {
@@ -243,6 +272,22 @@ InlineCode inlineRegisterAPIs(
                 if (close_idx >= 0) {
                     vector<string> args = splitTopLevelArgs(code, tokens, open_idx + 1, close_idx - 1);
                     const bool is_array = !info.reg->dims.empty();
+                    if (method_name == "holdnext" || method_name == "resetnext") {
+                        string idx_expr;
+                        if (is_array && args.size() == 1) {
+                            idx_expr = inlineRegisterReadsInExpr(args[0], registers);
+                        } else if (!args.empty()) {
+                            continue;
+                        }
+                        if (!overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
+                            repls.push_back(Replacement{
+                                tokens[i].start,
+                                tokens[close_idx].end,
+                                controlRegisterBlock(info, method_name, idx_expr)
+                            });
+                        }
+                        continue;
+                    }
                     string idx_expr;
                     string value_expr;
                     if (is_array && args.size() >= 2) {

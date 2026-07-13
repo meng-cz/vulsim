@@ -25,6 +25,7 @@
 #include "debugmap.hpp"
 #include "simgen.h"
 
+#include <cctype>
 #include <functional>
 #include <optional>
 #include <sstream>
@@ -64,6 +65,8 @@ struct RTLGenContext {
     vector<string> hls_arguments; // HLS主函数的参数列表，仅包含类型和参数名字符串，没有逗号或换行
     vector<string> hls_init; // HLS主函数开头的初始化代码，主要是寄存器和线网的定义和reset赋值
     VulDebugLocs hls_init_debug;
+    vector<string> hls_reset_init; // 暂存寄存器 resetvalue 计算代码，v2 在 API inline 后插入
+    VulDebugLocs hls_reset_init_debug;
     vector<string> hls_helpers; // HLS主函数中定义的辅助函数，用来将函数调用转换成对信号的操作
     VulDebugLocs hls_helpers_debug;
     vector<string> hls_blocks; // HLS主函数中每个逻辑块的代码
@@ -98,8 +101,15 @@ inline string packFlatFieldExpr(const FlatField &field, const string &value_expr
 }
 
 inline string flatFieldValueExpr(const string &root, const string &flat_name) {
+    if (flat_name == "value") {
+        return root;
+    }
     if (flat_name == root) {
         return root;
+    }
+    constexpr const char *value_prefix = "value.";
+    if (flat_name.rfind(value_prefix, 0) == 0) {
+        return root + "." + flat_name.substr(std::char_traits<char>::length(value_prefix));
     }
     const string prefix = root + ".";
     if (flat_name.rfind(prefix, 0) == 0) {
@@ -110,6 +120,48 @@ inline string flatFieldValueExpr(const string &root, const string &flat_name) {
 
 inline string reqservArraySuffix(uint32_t idx) {
     return "__IDX" + std::to_string(idx);
+}
+
+inline bool isIdentifierChar(char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+}
+
+vector<string> substituteConfigConstants(
+    const vector<string> &lines,
+    const VulStaticConfigLib &configlib
+) {
+    vector<string> result;
+    result.reserve(lines.size());
+    for (const auto &line : lines) {
+        string out;
+        for (size_t i = 0; i < line.size();) {
+            if (std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_') {
+                size_t j = i + 1;
+                while (j < line.size() && isIdentifierChar(line[j])) {
+                    ++j;
+                }
+                string ident = line.substr(i, j - i);
+                auto it = configlib.find(ident);
+                if (it != configlib.end()) {
+                    const bool left_ok = (i == 0 || !isIdentifierChar(line[i - 1]));
+                    const bool right_ok = (j == line.size() || !isIdentifierChar(line[j]));
+                    if (left_ok && right_ok) {
+                        out += std::to_string(it->second);
+                    } else {
+                        out += ident;
+                    }
+                } else {
+                    out += ident;
+                }
+                i = j;
+            } else {
+                out.push_back(line[i]);
+                ++i;
+            }
+        }
+        result.push_back(std::move(out));
+    }
+    return result;
 }
 
 template<typename Fn>
@@ -502,6 +554,7 @@ void _procRegisters(RTLGenContext &ctx) {
         string rdata_type_str = "Int<" + ewid_str + ">";
         string wdata_type_str = "Int<" + ewid_str + ">";
         string wen_type_str = "bool";
+        string ctrl_type_str = "bool";
         if (is_ported) {
             wdata_type_str = "std::array<" + wdata_type_str + ", " + wrport_num_str + ">";
             wen_type_str = "std::array<bool, " + wrport_num_str + ">";
@@ -510,16 +563,20 @@ void _procRegisters(RTLGenContext &ctx) {
             rdata_type_str = "std::array<" + rdata_type_str + ", " + size_str + ">";
             wdata_type_str = "std::array<" + wdata_type_str + ", " + size_str + ">";
             wen_type_str = "std::array<" + wen_type_str + ", " + size_str + ">";
+            ctrl_type_str = "std::array<bool, " + size_str + ">";
         }
+        string resetvalue_type_str = rdata_type_str;
 
         if (ctx.emit_hls_api_helpers) {
             ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
             ctx.hls_header.push_back("const " + rdata_type_str + " &rdata;\n");
             ctx.hls_header.push_back(wen_type_str + " &wen;\n");
             ctx.hls_header.push_back(wdata_type_str + " &wdata;\n");
+            ctx.hls_header.push_back(ctrl_type_str + " &holdnext_req;\n");
+            ctx.hls_header.push_back(ctrl_type_str + " &resetnext_req;\n");
             ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back(proxy_class_name + "(const " + rdata_type_str + " &rdata, " + wen_type_str + " &wen, " + wdata_type_str + " &wdata) : rdata(rdata), wen(wen), wdata(wdata) {}\n");
+            ctx.hls_header.push_back(proxy_class_name + "(const " + rdata_type_str + " &rdata, " + wen_type_str + " &wen, " + wdata_type_str + " &wdata, " + ctrl_type_str + " &holdnext_req, " + ctrl_type_str + " &resetnext_req) : rdata(rdata), wen(wen), wdata(wdata), holdnext_req(holdnext_req), resetnext_req(resetnext_req) {}\n");
             ctx.hls_header.push_back("\n");
         }
 
@@ -558,6 +615,13 @@ void _procRegisters(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("  wen = true;\n");
             }
             ctx.hls_header.push_back("}\n");
+
+            ctx.hls_header.push_back("void holdnext() {\n");
+            ctx.hls_header.push_back("  holdnext_req = true;\n");
+            ctx.hls_header.push_back("}\n");
+            ctx.hls_header.push_back("void resetnext() {\n");
+            ctx.hls_header.push_back("  resetnext_req = true;\n");
+            ctx.hls_header.push_back("}\n");
         } else if (ctx.emit_hls_api_helpers) {
             // array element get for array register
             ctx.hls_header.push_back(element_type_str + " operator[](const uint32_t idx) const {\n");
@@ -585,6 +649,19 @@ void _procRegisters(RTLGenContext &ctx) {
                 ctx.hls_header.push_back("  wen[idx] = true;\n");
             }
             ctx.hls_header.push_back("}\n");
+
+            ctx.hls_header.push_back("void holdnext(const uint32_t idx) {\n");
+            ctx.hls_header.push_back("  holdnext_req[idx] = true;\n");
+            ctx.hls_header.push_back("}\n");
+            ctx.hls_header.push_back("void holdnext() {\n");
+            ctx.hls_header.push_back("  for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) holdnext_req[__vul_i] = true;\n");
+            ctx.hls_header.push_back("}\n");
+            ctx.hls_header.push_back("void resetnext(const uint32_t idx) {\n");
+            ctx.hls_header.push_back("  resetnext_req[idx] = true;\n");
+            ctx.hls_header.push_back("}\n");
+            ctx.hls_header.push_back("void resetnext() {\n");
+            ctx.hls_header.push_back("  for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) resetnext_req[__vul_i] = true;\n");
+            ctx.hls_header.push_back("}\n");
         }
 
         if (ctx.emit_hls_api_helpers) {
@@ -595,13 +672,21 @@ void _procRegisters(RTLGenContext &ctx) {
         string wdata_port_name = "wdata_" + reg.name + "__";
         string wen_port_name = "wen_" + reg.name + "__";
         string rdata_port_name = "rdata_" + reg.name + "__";
+        string holdnext_port_name = "holdnext_" + reg.name + "__";
+        string resetnext_port_name = "resetnext_" + reg.name + "__";
+        string resetvalue_port_name = "resetvalue_" + reg.name + "__";
 
         ctx.hls_arguments.push_back("const " + rdata_type_str + " &" + rdata_port_name);
         ctx.hls_arguments.push_back(wen_type_str + " &" + wen_port_name);
         ctx.hls_arguments.push_back(wdata_type_str + " &" + wdata_port_name);
+        ctx.hls_arguments.push_back(ctrl_type_str + " &" + holdnext_port_name);
+        ctx.hls_arguments.push_back(ctrl_type_str + " &" + resetnext_port_name);
+        ctx.hls_arguments.push_back(resetvalue_type_str + " &" + resetvalue_port_name);
 
         if (is_array && is_ported) {
             ctx.hls_init.push_back("for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) {\n");
+            ctx.hls_init.push_back("  " + holdnext_port_name + "[__vul_i] = false;\n");
+            ctx.hls_init.push_back("  " + resetnext_port_name + "[__vul_i] = false;\n");
             ctx.hls_init.push_back("  for (uint32_t __vul_p = 0; __vul_p < " + wrport_num_str + "; ++__vul_p) {\n");
             ctx.hls_init.push_back("    " + wen_port_name + "[__vul_i][__vul_p] = false;\n");
             ctx.hls_init.push_back("    " + wdata_port_name + "[__vul_i][__vul_p] = 0;\n");
@@ -609,30 +694,78 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_init.push_back("}\n");
         } else if (is_array) {
             ctx.hls_init.push_back("for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) {\n");
+            ctx.hls_init.push_back("  " + holdnext_port_name + "[__vul_i] = false;\n");
+            ctx.hls_init.push_back("  " + resetnext_port_name + "[__vul_i] = false;\n");
             ctx.hls_init.push_back("  " + wen_port_name + "[__vul_i] = false;\n");
             ctx.hls_init.push_back("  " + wdata_port_name + "[__vul_i] = 0;\n");
             ctx.hls_init.push_back("}\n");
         } else if (is_ported) {
+            ctx.hls_init.push_back(holdnext_port_name + " = false;\n");
+            ctx.hls_init.push_back(resetnext_port_name + " = false;\n");
             ctx.hls_init.push_back("for (uint32_t __vul_p = 0; __vul_p < " + wrport_num_str + "; ++__vul_p) {\n");
             ctx.hls_init.push_back("  " + wen_port_name + "[__vul_p] = false;\n");
             ctx.hls_init.push_back("  " + wdata_port_name + "[__vul_p] = 0;\n");
             ctx.hls_init.push_back("}\n");
         } else {
+            ctx.hls_init.push_back(holdnext_port_name + " = false;\n");
+            ctx.hls_init.push_back(resetnext_port_name + " = false;\n");
             ctx.hls_init.push_back(wen_port_name + " = false;\n");
             ctx.hls_init.push_back(wdata_port_name + " = 0;\n");
         }
+        ctx.hls_reset_init.push_back("{\n");
+        ctx.hls_reset_init_debug.push_back({});
+        if (is_array) {
+            ctx.hls_reset_init.push_back("  std::array<" + element_type_str + ", " + size_str + "> " + reg.name + ";\n");
+        } else {
+            ctx.hls_reset_init.push_back("  " + element_type_str + " " + reg.name + ";\n");
+        }
+        ctx.hls_reset_init_debug.push_back({});
+        vector<string> reset_codelines = substituteConfigConstants(reg.reset_codelines, ctx.local_configlib);
+        vulDebugAppendLines(ctx.hls_reset_init, ctx.hls_reset_init_debug, reset_codelines, reg.reset_codelines_debug);
+        if (is_array) {
+            for (uint32_t i = 0; i < size; i++) {
+                const string idx = std::to_string(i);
+                const string flat_name = reg.name + "_flatten_" + idx;
+                ctx.hls_reset_init.push_back("  Int<" + ewid_str + "> " + flat_name + " = 0;\n");
+                ctx.hls_reset_init_debug.push_back({});
+                for (const auto &field : out) {
+                    ctx.hls_reset_init.push_back("  " + uintExtractExpr(flat_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, flatFieldValueExpr(reg.name + "[" + idx + "]", field.name)) + ";\n");
+                    ctx.hls_reset_init_debug.push_back({});
+                }
+                ctx.hls_reset_init.push_back("  " + resetvalue_port_name + "[" + idx + "] = " + flat_name + ";\n");
+                ctx.hls_reset_init_debug.push_back({});
+            }
+        } else {
+            const string flat_name = reg.name + "_flatten";
+            ctx.hls_reset_init.push_back("  Int<" + ewid_str + "> " + flat_name + " = 0;\n");
+            ctx.hls_reset_init_debug.push_back({});
+            for (const auto &field : out) {
+                ctx.hls_reset_init.push_back("  " + uintExtractExpr(flat_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, flatFieldValueExpr(reg.name, field.name)) + ";\n");
+                ctx.hls_reset_init_debug.push_back({});
+            }
+            ctx.hls_reset_init.push_back("  " + resetvalue_port_name + " = " + flat_name + ";\n");
+            ctx.hls_reset_init_debug.push_back({});
+        }
+        ctx.hls_reset_init.push_back("}\n");
+        ctx.hls_reset_init_debug.push_back({});
 
         if (ctx.emit_hls_api_helpers) {
-            ctx.hls_init.push_back(proxy_class_name + " " + reg.name + "(" + rdata_port_name + ", " + wen_port_name + ", " + wdata_port_name + ");\n");
+            ctx.hls_init.push_back(proxy_class_name + " " + reg.name + "(" + rdata_port_name + ", " + wen_port_name + ", " + wdata_port_name + ", " + holdnext_port_name + ", " + resetnext_port_name + ");\n");
         }
 
         // generate register instances
         string reg_decl_name = reg.name;
         string wen_wire_name = "wen_" + reg.name + "__";
         string wdata_wire_name = "wdata_" + reg.name + "__";
+        string holdnext_wire_name = "holdnext_" + reg.name + "__";
+        string resetnext_wire_name = "resetnext_" + reg.name + "__";
+        string resetvalue_wire_name = "resetvalue_" + reg.name + "__";
 
         if (!is_array) {
             ctx.rtl_decl.push_back("reg [" + ewid_m1_str + ":0] " + reg_decl_name + ";\n");
+            ctx.rtl_decl.push_back("wire " + holdnext_wire_name + ";\n");
+            ctx.rtl_decl.push_back("wire " + resetnext_wire_name + ";\n");
+            ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + resetvalue_wire_name + ";\n");
             if (is_ported) {
                 ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + wrport_num_str + "];\n");
                 ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + "[" + wrport_num_str + "];\n");
@@ -644,8 +777,13 @@ void _procRegisters(RTLGenContext &ctx) {
             // generate always block for register update
             ctx.rtl_logic.push_back("always @(posedge clk) begin\n");
             ctx.rtl_logic.push_back("  if (rstn == 0) begin\n");
-            ctx.rtl_logic.push_back("    " + reg_decl_name + " <= 0;\n");
+            ctx.rtl_logic.push_back("    " + reg_decl_name + " <= " + resetvalue_wire_name + ";\n");
             ctx.rtl_logic.push_back("  end else begin\n");
+            ctx.rtl_logic.push_back("    if (" + resetnext_wire_name + ") begin\n");
+            ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + resetvalue_wire_name + ";\n");
+            ctx.rtl_logic.push_back("    end else if (" + holdnext_wire_name + ") begin\n");
+            ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + reg_decl_name + ";\n");
+            ctx.rtl_logic.push_back("    end else begin\n");
             if (!is_ported) {
                 ctx.rtl_logic.push_back("    if (" + wen_wire_name + ") begin\n");
                 ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + wdata_wire_name + ";\n");
@@ -657,10 +795,14 @@ void _procRegisters(RTLGenContext &ctx) {
                     ctx.rtl_logic.push_back("    end\n");
                 }
             }
+            ctx.rtl_logic.push_back("    end\n");
             ctx.rtl_logic.push_back("  end\n");
             ctx.rtl_logic.push_back("end\n");
         } else {
             ctx.rtl_decl.push_back("reg [" + ewid_m1_str + ":0] " + reg_decl_name + "[" + size_str + "];\n");
+            ctx.rtl_decl.push_back("wire " + holdnext_wire_name + "[" + size_str + "];\n");
+            ctx.rtl_decl.push_back("wire " + resetnext_wire_name + "[" + size_str + "];\n");
+            ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + resetvalue_wire_name + "[" + size_str + "];\n");
             if (is_ported) {
                 ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + size_str + "][" + wrport_num_str + "];\n");
                 ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + wdata_wire_name + "[" + size_str + "][" + wrport_num_str + "];\n");
@@ -673,10 +815,15 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.rtl_logic.push_back("always @(posedge clk) begin\n");
             ctx.rtl_logic.push_back("  if (rstn == 0) begin\n");
             ctx.rtl_logic.push_back("    for (int i = 0; i < " + size_str + "; i++) begin\n");
-            ctx.rtl_logic.push_back("      " + reg_decl_name + "[i] <= 0;\n");
+            ctx.rtl_logic.push_back("      " + reg_decl_name + "[i] <= " + resetvalue_wire_name + "[i];\n");
             ctx.rtl_logic.push_back("    end\n");
             ctx.rtl_logic.push_back("  end else begin\n");
             ctx.rtl_logic.push_back("    for (int i = 0; i < " + size_str + "; i++) begin\n");
+            ctx.rtl_logic.push_back("      if (" + resetnext_wire_name + "[i]) begin\n");
+            ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + resetvalue_wire_name + "[i];\n");
+            ctx.rtl_logic.push_back("      end else if (" + holdnext_wire_name + "[i]) begin\n");
+            ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + reg_decl_name + "[i];\n");
+            ctx.rtl_logic.push_back("      end else begin\n");
             if (!is_ported) {
                 ctx.rtl_logic.push_back("      if (" + wen_wire_name + "[i]) begin\n");
                 ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + wdata_wire_name + "[i];\n");
@@ -688,6 +835,7 @@ void _procRegisters(RTLGenContext &ctx) {
                     ctx.rtl_logic.push_back("      end\n");
                 }
             }
+            ctx.rtl_logic.push_back("      end\n");
             ctx.rtl_logic.push_back("    end\n");
             ctx.rtl_logic.push_back("  end\n");
             ctx.rtl_logic.push_back("end\n");
@@ -696,6 +844,9 @@ void _procRegisters(RTLGenContext &ctx) {
         ctx.rtl_logicports.push_back("." + rdata_port_name + "(" + reg_decl_name + ")");
         ctx.rtl_logicports.push_back("." + wen_port_name + "(" + wen_wire_name + ")");
         ctx.rtl_logicports.push_back("." + wdata_port_name + "(" + wdata_wire_name + ")");
+        ctx.rtl_logicports.push_back("." + holdnext_port_name + "(" + holdnext_wire_name + ")");
+        ctx.rtl_logicports.push_back("." + resetnext_port_name + "(" + resetnext_wire_name + ")");
+        ctx.rtl_logicports.push_back("." + resetvalue_port_name + "(" + resetvalue_wire_name + ")");
 
     }
     
@@ -715,6 +866,52 @@ inline ArgPort procArg(const VulStaticArg &arg, const VulStaticBundleLib &bundle
     port.type = arg.type;
     flatten_type_signature(arg.type, bundlelib, arg.name, port.width, port.flat_fields);
     return port;
+}
+
+static void insertHLSResetInitAfterFunctionOpen(
+    vector<string> &lines,
+    VulDebugLocs &debug,
+    const vector<string> &reset_lines,
+    const VulDebugLocs &reset_debug
+) {
+    if (reset_lines.empty()) {
+        return;
+    }
+    string code = apiinline::joinLines(lines);
+    size_t body_pos = apiinline::findLogicSubmoduleBodyInsertion(code);
+    if (body_pos == string::npos) {
+        return;
+    }
+    size_t insert_line = 0;
+    size_t offset = 0;
+    while (insert_line < lines.size() && offset + lines[insert_line].size() <= body_pos) {
+        offset += lines[insert_line].size();
+        ++insert_line;
+    }
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insert_line), reset_lines.begin(), reset_lines.end());
+    debug.insert(debug.begin() + static_cast<std::ptrdiff_t>(insert_line), reset_debug.begin(), reset_debug.end());
+}
+
+static void replaceHLSResetInitAnchor(
+    vector<string> &lines,
+    VulDebugLocs &debug,
+    const vector<string> &reset_lines,
+    const VulDebugLocs &reset_debug
+) {
+    if (reset_lines.empty()) {
+        return;
+    }
+    constexpr const char *anchor = "const bool __vul_register_reset_insert_anchor = false;\n";
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (lines[i] == anchor) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(i));
+            debug.erase(debug.begin() + static_cast<std::ptrdiff_t>(i));
+            lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(i), reset_lines.begin(), reset_lines.end());
+            debug.insert(debug.begin() + static_cast<std::ptrdiff_t>(i), reset_debug.begin(), reset_debug.end());
+            return;
+        }
+    }
+    insertHLSResetInitAfterFunctionOpen(lines, debug, reset_lines, reset_debug);
 }
 
 inline string reqservVldPort(const string &reqserv_name) {
@@ -2502,6 +2699,17 @@ RTLGenResult genModuleRTLImpl(
         if (!ctx.hls_helpers.empty()) {
             hls.push_back("\n");
         }
+        if (ctx.emit_hls_api_helpers) {
+            append_lines(hls, hls_debug, ctx.hls_reset_init, ctx.hls_reset_init_debug);
+            if (!ctx.hls_reset_init.empty()) {
+                hls.push_back("\n");
+            }
+        } else if (!ctx.hls_reset_init.empty()) {
+            hls.push_back("const bool __vul_register_reset_insert_anchor = false;\n");
+            hls_debug.push_back({});
+            hls.push_back("\n");
+            hls_debug.push_back({});
+        }
         append_lines(hls, hls_debug, ctx.hls_blocks, ctx.hls_blocks_debug);
         if (!ctx.hls_blocks.empty()) {
             hls.push_back("\n");
@@ -2561,6 +2769,7 @@ RTLGenResult genModuleRTLImpl(
         auto inlined = apiinline::inlineAPIs(module, local_bundlelib, result.logic_hls_codes, result.logic_hls_debug);
         result.logic_hls_codes = std::move(inlined.lines);
         result.logic_hls_debug = std::move(inlined.debug);
+        replaceHLSResetInitAnchor(result.logic_hls_codes, result.logic_hls_debug, ctx.hls_reset_init, ctx.hls_reset_init_debug);
         vulDebugNormalize(result.logic_hls_codes, result.logic_hls_debug);
     }
     result.logic_hls_debug_lines = vulDebugBuildGeneratedMap(result.logic_hls_debug);
