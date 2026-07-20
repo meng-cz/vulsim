@@ -5,6 +5,7 @@
 #include "apiinline/utils.hpp"
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace apiinline {
 
@@ -399,6 +400,51 @@ InlineCode applyReplacementsWithDebug(
         begin = end + 1;
     }
     return out;
+}
+
+InlineCode normalizeTemplateLambdaCalls(
+    const vector<string> &lines,
+    const VulDebugLocs &debug
+) {
+    const string code = joinLines(lines);
+    const vector<TokenInfo> tokens = tokenizeWithLibclang(code);
+    unordered_set<string> template_lambdas;
+
+    // A generated generic lambda has the token shape
+    //   auto name = [captures]<template-parameters>(...)
+    // Record its name so ordinary functions/templates remain untouched.
+    for (int i = 0; i + 4 < static_cast<int>(tokens.size()); ++i) {
+        if (tokens[i].spelling != "auto" ||
+            tokens[i + 1].kind != CXToken_Identifier ||
+            tokens[i + 2].spelling != "=" ||
+            tokens[i + 3].spelling != "[") {
+            continue;
+        }
+        const int capture_end = findMatching(tokens, i + 3, "[", "]");
+        if (capture_end >= 0 &&
+            capture_end + 1 < static_cast<int>(tokens.size()) &&
+            tokens[capture_end + 1].spelling == "<") {
+            template_lambdas.insert(tokens[i + 1].spelling);
+        }
+    }
+
+    vector<Replacement> repls;
+    for (int i = 0; i + 1 < static_cast<int>(tokens.size()); ++i) {
+        if (tokens[i].kind != CXToken_Identifier ||
+            template_lambdas.find(tokens[i].spelling) == template_lambdas.end() ||
+            tokens[i + 1].spelling != "<") {
+            continue;
+        }
+        repls.push_back(Replacement{
+            tokens[i].end,
+            tokens[i].end,
+            ".template operator()"
+        });
+    }
+    if (repls.empty()) {
+        return {lines, debug};
+    }
+    return applyReplacementsWithDebug(lines, debug, std::move(repls));
 }
 
 } // namespace apiinline

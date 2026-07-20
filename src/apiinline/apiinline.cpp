@@ -29,6 +29,7 @@ InlineCode inlineAPIs(
     codes = inlineQueueAPIs(module, bundlelib, codes.lines, codes.debug);
     codes = inlineMemoryAPIs(module, bundlelib, codes.lines, codes.debug);
     codes = inlineRequestAPIs(module, bundlelib, codes.lines, codes.debug);
+    codes = normalizeTemplateLambdaCalls(codes.lines, codes.debug);
     return codes;
 }
 

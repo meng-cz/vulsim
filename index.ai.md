@@ -5,7 +5,7 @@
 **文件功能**：串联各类 API inline pass，将模块逻辑代码中的 VUL API 调用替换为端口读写代码。
 
 **主要函数**
-- `inlineAPIs(...)`：依次执行 Register、Request、Queue、Memory 等 API inline，并保留调试行号映射。
+- `inlineAPIs(...)`：依次执行 Register、Request、Queue、Memory 等 API inline，保留调试行号映射，并在最后将生成的泛型 lambda 调用规范为 C++20 的显式 `.template operator()<...>` 语法。
 
 ## src/apiinline/apiinline.hpp
 
@@ -109,6 +109,7 @@
 - `splitTopLevelArgs(...)`：按顶层逗号拆分调用参数。
 - `tokenizeWithLibclang(...)`：使用 libclang 对源码进行 token 化。
 - `applyReplacementsWithDebug(...)`：应用文本替换并同步更新 debug 行号映射。
+- `normalizeTemplateLambdaCalls(...)`：识别生成的泛型 lambda，并将其 `name<...>(...)` 调用规范为 C++20 的 `name.template operator()<...>(...)`。
 
 ## src/apiinline/utils.hpp
 
@@ -121,6 +122,7 @@
 - `packFlatFieldValueExpr(...)`：声明字段打包表达式生成函数。
 - `unpackFlatFieldValueExpr(...)`：声明字段解包表达式生成函数。
 - `tokenizeWithLibclang(...)`：声明 libclang token 化入口。
+- `normalizeTemplateLambdaCalls(...)`：声明生成泛型 lambda 调用语法的规范化入口。
 
 ## src/breakpoint.hpp
 

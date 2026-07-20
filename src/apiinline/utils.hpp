@@ -89,4 +89,9 @@ InlineCode applyReplacementsWithDebug(
     vector<Replacement> repls
 );
 
+InlineCode normalizeTemplateLambdaCalls(
+    const vector<string> &lines,
+    const VulDebugLocs &debug
+);
+
 } // namespace apiinline
