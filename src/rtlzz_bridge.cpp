@@ -29,13 +29,15 @@ std::string generateLogicRTLWithRTLzz(
     }
 
     rtlzz::CompileOptions options;
+    std::filesystem::path source_path(source_file);
+    options.source_name = source_path.filename().string();
     options.source_codelines = std::move(source_codelines);
     options.vullib_dir = lib_include_dir;
     options.top_function = top_function;
     options.unroll_limit = unroll_limit;
     options.clang_args.push_back("-std=c++20");
 
-    const auto source_parent = std::filesystem::path(source_file).parent_path();
+    const auto source_parent = source_path.parent_path();
     if (!source_parent.empty()) {
         options.include_dirs.push_back(source_parent.string());
     }
