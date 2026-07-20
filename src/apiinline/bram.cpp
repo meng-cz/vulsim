@@ -19,6 +19,9 @@ struct MemoryInfo {
     string name;
     string data_type_str;
     uint32_t data_width = 0;
+    uint32_t addr_width = 0;
+    uint32_t read_ports = 0;
+    uint32_t write_ports = 0;
     vector<FlatField> fields;
     string helper_name;
     string default_expr;
@@ -36,9 +39,8 @@ string unpackHelper(const MemoryInfo &info) {
         return "";
     }
     std::ostringstream os;
-    os << "auto " << info.helper_name
-       << " = [&](const Int<" << info.data_width
-       << "> &__vul_bram_packed) -> " << info.data_type_str << " {\n";
+    os << info.data_type_str << " " << info.helper_name
+       << "(const Int<" << info.data_width << "> &__vul_bram_packed) {\n";
     os << "  " << info.data_type_str << " value = " << info.default_expr << ";\n";
     for (const auto &field : info.fields) {
         const string extracted = uintExtractExpr("__vul_bram_packed", field.offset + field.width - 1, field.offset);
@@ -46,7 +48,7 @@ string unpackHelper(const MemoryInfo &info) {
            << unpackFlatFieldValueExpr(field.name, extracted, field) << ";\n";
     }
     os << "  return value;\n";
-    os << "};\n";
+    os << "}\n";
     return os.str();
 }
 
@@ -109,7 +111,7 @@ string bram1rwReqBlock(const MemoryInfo &info, const vector<string> &args) {
     const string base = "bram_" + info.name;
     std::ostringstream os;
     os << "{\n";
-    os << "  auto __vul_bram_wdata_value = (" << args[1] << ");\n";
+    os << "  " << info.data_type_str << " __vul_bram_wdata_value = (" << args[1] << ");\n";
     emitPack(os, info, "__vul_bram_packed", "__vul_bram_wdata_value");
     os << "  " << base << "__s1_en = true;\n";
     os << "  " << base << "__s1_we = (" << args[2] << ");\n";
@@ -126,7 +128,7 @@ string bramWriteBlock(const MemoryInfo &info, const string &port_expr, const vec
     const string base = "bram_" + info.name;
     std::ostringstream os;
     os << "{\n";
-    os << "  auto __vul_bram_wdata_value = (" << args[1] << ");\n";
+    os << "  " << info.data_type_str << " __vul_bram_wdata_value = (" << args[1] << ");\n";
     emitPack(os, info, "__vul_bram_packed", "__vul_bram_wdata_value");
     os << "  " << base << "__s1_write[" << port_expr << "] = true;\n";
     os << "  " << base << "__s1_writeaddr[" << port_expr << "] = (" << args[0] << ");\n";
@@ -159,6 +161,61 @@ string readDataExpr(const MemoryInfo &info, const string &port_expr) {
     return unpackExpr(info, "bram_" + info.name + "__s2_readdata[" + port_expr + "]");
 }
 
+string memoryPortHelpers(const MemoryInfo &info) {
+    std::ostringstream os;
+    const string prefix = info.is_rom ? "__vul_rom_" : "__vul_bram_";
+    if (info.is_rom) {
+        os << info.data_type_str << " " << prefix << "readdata_" << info.name
+           << "(uint32_t __vul_port, const std::array<Int<" << info.data_width
+           << ">, " << info.read_ports << "> &rom_" << info.name << "__s2_readdata) {\n";
+        os << "  return rom_" << info.name << "__s2_readdata[__vul_port];\n}\n";
+        os << "void " << prefix << "readreq_" << info.name
+           << "(uint32_t __vul_port, Int<" << info.addr_width
+           << "> __vul_addr, std::array<bool, " << info.read_ports
+           << "> &rom_" << info.name << "__s1_readreq, std::array<Int<"
+           << info.addr_width << ">, " << info.read_ports << "> &rom_"
+           << info.name << "__s1_readaddr) {\n";
+        os << "  rom_" << info.name << "__s1_readreq[__vul_port] = true;\n";
+        os << "  rom_" << info.name << "__s1_readaddr[__vul_port] = __vul_addr;\n}\n";
+        return os.str();
+    }
+    if (info.is_1rw) {
+        os << "void " << prefix << "req_" << info.name
+           << "(Int<" << info.addr_width << "> __vul_addr, "
+           << info.data_type_str << " __vul_value, bool __vul_write, bool &bram_"
+           << info.name << "__s1_en, bool &bram_" << info.name
+           << "__s1_we, Int<" << info.addr_width << "> &bram_" << info.name
+           << "__s1_addr, Int<" << info.data_width << "> &bram_" << info.name
+           << "__s1_wdata) "
+           << bram1rwReqBlock(info, {"__vul_addr", "__vul_value", "__vul_write"}) << "\n";
+        os << info.data_type_str << " " << prefix << "readdata_" << info.name
+           << "(const Int<" << info.data_width << "> &bram_" << info.name
+           << "__s2_rdata) {\n";
+        os << "  return " << readDataExpr(info, "0") << ";\n}\n";
+        return os.str();
+    }
+    os << "void " << prefix << "readreq_" << info.name
+       << "(uint32_t __vul_port, Int<" << info.addr_width
+       << "> __vul_addr, std::array<bool, " << info.read_ports << "> &bram_"
+       << info.name << "__s1_readreq, std::array<Int<" << info.addr_width
+       << ">, " << info.read_ports << "> &bram_" << info.name << "__s1_readaddr) {\n";
+    os << "  bram_" << info.name << "__s1_readreq[__vul_port] = true;\n";
+    os << "  bram_" << info.name << "__s1_readaddr[__vul_port] = __vul_addr;\n}\n";
+    os << info.data_type_str << " " << prefix << "readdata_" << info.name
+       << "(uint32_t __vul_port, const std::array<Int<" << info.data_width
+       << ">, " << info.read_ports << "> &bram_" << info.name << "__s2_readdata) {\n";
+    os << "  return " << unpackExpr(info, "bram_" + info.name + "__s2_readdata[__vul_port]") << ";\n}\n";
+    os << "void " << prefix << "write_" << info.name
+       << "(uint32_t __vul_port, Int<" << info.addr_width << "> __vul_addr, "
+       << info.data_type_str << " __vul_value, std::array<bool, " << info.write_ports
+       << "> &bram_" << info.name << "__s1_write, std::array<Int<"
+       << info.addr_width << ">, " << info.write_ports << "> &bram_" << info.name
+       << "__s1_writeaddr, std::array<Int<" << info.data_width << ">, "
+       << info.write_ports << "> &bram_" << info.name << "__s1_writedata) "
+       << bramWriteBlock(info, "__vul_port", {"__vul_addr", "__vul_value"}) << "\n";
+    return os.str();
+}
+
 } // namespace
 
 InlineCode inlineMemoryAPIs(
@@ -173,6 +230,9 @@ InlineCode inlineMemoryAPIs(
         info.name = bram.name;
         info.is_1rw = (bram.read_ports == 0 || bram.write_ports == 0);
         info.data_type_str = bram.data_type.toString();
+        info.addr_width = static_cast<uint32_t>(bram.addr_width);
+        info.read_ports = static_cast<uint32_t>(bram.read_ports);
+        info.write_ports = static_cast<uint32_t>(bram.write_ports);
         flatten_type_signature(bram.data_type, bundlelib, "value", info.data_width, info.fields);
         info.default_expr = defaultValueExprForType(bram.data_type, bundlelib);
         info.helper_name = "__vul_bram_unpack_" + bram.name;
@@ -184,6 +244,8 @@ InlineCode inlineMemoryAPIs(
         info.is_rom = true;
         info.data_type_str = "Int<" + std::to_string(rom.data_width) + ">";
         info.data_width = static_cast<uint32_t>(rom.data_width);
+        info.addr_width = static_cast<uint32_t>(rom.addr_width);
+        info.read_ports = static_cast<uint32_t>(rom.read_ports);
         info.helper_name = "__vul_rom_unpack_" + rom.name;
         memories[rom.name] = std::move(info);
     }
@@ -201,13 +263,15 @@ InlineCode inlineMemoryAPIs(
             helper_defs += helper;
             helper_defs += "\n";
         }
+        helper_defs += memoryPortHelpers(info);
+        helper_defs += "\n";
     }
     size_t logic_func_pos = findLogicSubmoduleFunctionStart(code);
-    size_t body_pos = findLogicSubmoduleBodyInsertion(code);
-    if (body_pos != string::npos && !helper_defs.empty()) {
+    size_t helper_pos = findLogicSubmoduleFunctionStart(code);
+    if (helper_pos != string::npos && !helper_defs.empty()) {
         repls.push_back(Replacement{
-            static_cast<uint32_t>(body_pos),
-            static_cast<uint32_t>(body_pos),
+            static_cast<uint32_t>(helper_pos),
+            static_cast<uint32_t>(helper_pos),
             helper_defs
         });
     }
@@ -228,25 +292,61 @@ InlineCode inlineMemoryAPIs(
             continue;
         }
         string text;
+        const string prefix = info.is_rom ? "__vul_rom_" : "__vul_bram_";
+        string helper_call = prefix + method + "_" + info.name;
+        helper_call += "(";
+        const bool ported = info.is_rom || !info.is_1rw;
+        if (ported) {
+            helper_call += port_expr;
+            if (!args.empty()) helper_call += ", ";
+        }
+        for (size_t arg = 0; arg < args.size(); ++arg) {
+            if (arg != 0) helper_call += ", ";
+            helper_call += args[arg];
+        }
+        const string base = (info.is_rom ? "rom_" : "bram_") + info.name;
+        if (!args.empty() || ported) helper_call += ", ";
         if (info.is_rom) {
             if (method == "readreq") {
-                text = readReqBlock(info, port_expr, args);
-            } else if (method == "readdata") {
-                text = readDataExpr(info, port_expr);
+                helper_call += base + "__s1_readreq, " + base + "__s1_readaddr";
+            } else {
+                helper_call += base + "__s2_readdata";
             }
         } else if (info.is_1rw) {
             if (method == "req") {
-                text = bram1rwReqBlock(info, args);
+                helper_call += base + "__s1_en, " + base + "__s1_we, " +
+                               base + "__s1_addr, " + base + "__s1_wdata";
+            } else {
+                helper_call += base + "__s2_rdata";
+            }
+        } else if (method == "readreq") {
+            helper_call += base + "__s1_readreq, " + base + "__s1_readaddr";
+        } else if (method == "readdata") {
+            helper_call += base + "__s2_readdata";
+        } else if (method == "write") {
+            helper_call += base + "__s1_write, " + base + "__s1_writeaddr, " +
+                           base + "__s1_writedata";
+        }
+        helper_call += ")";
+        if (info.is_rom) {
+            if (method == "readreq") {
+                text = helper_call;
             } else if (method == "readdata") {
-                text = readDataExpr(info, port_expr);
+                text = helper_call;
+            }
+        } else if (info.is_1rw) {
+            if (method == "req") {
+                text = helper_call;
+            } else if (method == "readdata") {
+                text = helper_call;
             }
         } else {
             if (method == "readreq") {
-                text = readReqBlock(info, port_expr, args);
+                text = helper_call;
             } else if (method == "readdata") {
-                text = readDataExpr(info, port_expr);
+                text = helper_call;
             } else if (method == "write") {
-                text = bramWriteBlock(info, port_expr, args);
+                text = helper_call;
             }
         }
         if (text.empty()) {

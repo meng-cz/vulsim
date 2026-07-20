@@ -26,6 +26,7 @@
 #include "simgen.h"
 
 #include <cctype>
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <sstream>
@@ -116,6 +117,40 @@ inline string flatFieldValueExpr(const string &root, const string &flat_name) {
         return root + "." + flat_name.substr(prefix.size());
     }
     return flat_name;
+}
+
+struct HLSGlobalPortDecl {
+    string direction;
+    string name;
+    string declaration;
+};
+
+HLSGlobalPortDecl globalizeHLSArgument(string argument) {
+    HLSGlobalPortDecl out;
+    size_t begin = argument.find_first_not_of(" \t");
+    argument = begin == string::npos ? "" : argument.substr(begin);
+    const bool is_input = argument.rfind("const ", 0) == 0;
+    if (is_input) {
+        argument.erase(0, 6);
+    }
+    argument.erase(
+        std::remove(argument.begin(), argument.end(), '&'),
+        argument.end());
+    while (!argument.empty() && std::isspace(static_cast<unsigned char>(argument.back()))) {
+        argument.pop_back();
+    }
+    size_t name_begin = argument.size();
+    while (name_begin > 0) {
+        const unsigned char ch = static_cast<unsigned char>(argument[name_begin - 1]);
+        if (!(std::isalnum(ch) || ch == '_')) {
+            break;
+        }
+        --name_begin;
+    }
+    out.direction = is_input ? "input_port" : "output_port";
+    out.name = argument.substr(name_begin);
+    out.declaration = argument + ";";
+    return out;
 }
 
 inline string reqservArraySuffix(uint32_t idx) {
@@ -476,10 +511,12 @@ void _procConstAndBundle(RTLGenContext &ctx){
     for (const auto &cfg_entry : ctx.local_configlib) {
         const string &cfg_name = cfg_entry.first;
         ConfigRealValue real_value = cfg_entry.second;
-        ctx.hls_header.push_back("constexpr int64_t " + cfg_name + " = " + std::to_string(real_value) + ";\n");
+        auto &destination = ctx.emit_hls_api_helpers ? ctx.hls_header : ctx.hls_init;
+        destination.push_back("constexpr int64_t " + cfg_name + " = " + std::to_string(real_value) + ";\n");
     }
     if (!ctx.local_configlib.empty()) {
-        ctx.hls_header.push_back("\n");
+        auto &destination = ctx.emit_hls_api_helpers ? ctx.hls_header : ctx.hls_init;
+        destination.push_back("\n");
     }
 
     for (const auto &bundle : ctx.local_bundlelib) {
@@ -1172,6 +1209,17 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         string argtypes = serv.signatureArgTypeOnly();
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
+        if (!ctx.emit_hls_api_helpers) {
+            arglists.clear();
+            for (const auto &arg : serv.args) {
+                if (!arglists.empty()) arglists += ", ";
+                arglists += arg.type.toString() + " " + arg.name;
+            }
+            for (const auto &ret : serv.rets) {
+                if (!arglists.empty()) arglists += ", ";
+                arglists += ret.type.toString() + " & " + ret.name;
+            }
+        }
         bool has_rdy = serv.has_handshake;
         const bool is_arrayed = serv.is_arrayed;
         const uint32_t array_size = static_cast<uint32_t>(serv.array_size);
@@ -2677,19 +2725,19 @@ RTLGenResult genModuleRTLImpl(
         hls.push_back("using int64 = int64_t;\n");
         hls.push_back("using uint64 = uint64_t;\n");
         hls.push_back("\n");
-        hls.push_back("#define assert(...) ((void)0)\n");
-        hls.push_back("\n");
-
         append_lines(hls, hls_debug, ctx.hls_header, ctx.hls_header_debug);
         if (!ctx.hls_header.empty()) {
             hls.push_back("\n");
         }
 
-        hls.push_back("void " + logic_module_name + "(\n");
-        for (size_t i = 0; i < ctx.hls_arguments.size(); ++i) {
-            hls.push_back("  " + ctx.hls_arguments[i] + (i + 1 == ctx.hls_arguments.size() ? "" : ",") + "\n");
+        for (const auto &argument : ctx.hls_arguments) {
+            const HLSGlobalPortDecl port = globalizeHLSArgument(argument);
+            hls.push_back("#pragma " + port.direction + " " + port.name + "\n");
+            hls.push_back(port.declaration + "\n");
         }
-        hls.push_back(") {\n");
+        hls.push_back("\n");
+
+        hls.push_back("void " + logic_module_name + "() {\n");
 
         append_lines(hls, hls_debug, ctx.hls_init, ctx.hls_init_debug);
         if (!ctx.hls_init.empty()) {

@@ -5,7 +5,7 @@
 **文件功能**：串联各类 API inline pass，将模块逻辑代码中的 VUL API 调用替换为端口读写代码。
 
 **主要函数**
-- `inlineAPIs(...)`：依次执行 Register、Request、Queue、Memory 等 API inline，保留调试行号映射，并在最后将生成的泛型 lambda 调用规范为 C++20 的显式 `.template operator()<...>` 语法。
+- `inlineAPIs(...)`：依次执行 Register、Request、Queue、Memory 等 API inline，生成文件级 helper 函数并仅在用户逻辑中替换 API 调用点，同时保留调试行号映射。
 
 ## src/apiinline/apiinline.hpp
 
@@ -20,7 +20,8 @@
 
 **主要函数**
 - `inlineMemoryAPIs(...)`：扫描逻辑代码中的 BRAM/ROM 对象调用并替换为端口操作。
-- `unpackHelper(...)`：生成将 packed `Int<N>` 还原为内存数据类型的 helper lambda。
+- `unpackHelper(...)`：生成将 packed `Int<N>` 还原为内存数据类型的文件级 helper 函数。
+- `memoryPortHelpers(...)`：生成 BRAM/ROM 请求、读数据和写数据的文件级 helper，端口通过引用或值参数显式传入。
 - `emitPack(...)`：生成将内存写入值打包为 `Int<N>` 的代码。
 - `bram1rwReqBlock(...)`：生成 1RW BRAM 请求端口赋值代码块。
 - `bramWriteBlock(...)`：生成多端口 BRAM 写请求代码块。
@@ -40,12 +41,13 @@
 
 **主要函数**
 - `inlineQueueAPIs(...)`：扫描并替换队列 API 调用。
-- `unpackValueHelper(...)`：生成队列出队 packed 数据到原类型的解包 helper。
+- `unpackValueHelper(...)`：生成队列出队 packed 数据到原类型的文件级解包 helper。
 - `emitPackValue(...)`：生成队列入队值到 packed 数据的打包代码。
 - `enqNextBlock(...)`：生成 `enqnext` 对入队端口的赋值代码。
 - `frontExpr(...)`：生成 `front` 读取表达式。
 - `frontAssignBlock(...)`：将多出队 `front()` 的整数组赋值改写为逐元素赋值。
-- `frontHelper(...)`：生成多出队 `front` 返回数组的 helper。
+- `frontHelper(...)`：生成队列 `front` 返回值的文件级 helper。
+- `queuePortHelpers(...)`：生成 ready/valid、enq/deq 和 clear 的文件级 helper，端口通过参数传入。
 - `deqNextBlock(...)`：生成 `deqnext` 对出队 ready 端口的赋值代码。
 
 ## src/apiinline/queue.hpp
@@ -61,7 +63,9 @@
 
 **主要函数**
 - `inlineRegisterAPIs(...)`：扫描并替换寄存器读写 API。
-- `readRegisterHelper(...)`：生成从寄存器 packed 读端口还原原类型的 helper。
+- `readRegisterHelper(...)`：生成从寄存器 packed 读端口还原原类型的文件级 helper。
+- `registerWriteHelper(...)`：生成寄存器 `setnext` 文件级 helper，并显式接收写数据和写使能端口。
+- `registerControlHelpers(...)`：生成寄存器 `holdnext`/`resetnext` 文件级 helper。
 - `writeRegisterBlock(...)`：生成 `setnext` 写使能和写数据端口赋值代码。
 - `controlRegisterBlock(...)`：生成 `holdnext`/`resetnext` 控制端口赋值代码。
 - `inlineRegisterReadsInExpr(...)`：在表达式内部替换寄存器读操作。
@@ -80,7 +84,7 @@
 **主要函数**
 - `inlineRequestAPIs(...)`：扫描并替换 request/service 调用。
 - `emitRequestBody(...)`：生成一次请求调用的 valid、参数和返回值端口操作。
-- `requestHelperDef(...)`：生成带 ready 返回值的请求 helper lambda。
+- `requestHelperDef(...)`：为握手与非握手请求统一生成文件级 helper，显式接收请求端口。
 - `requestReadyPrelude(...)`：生成直接作为 if 条件的请求调用预处理代码。
 - `requestCallExpr(...)`：生成请求调用表达式或 helper 调用表达式。
 
@@ -291,12 +295,13 @@
 
 ## src/rtlgen.cpp
 
-**文件功能**：生成 RTL skeleton、HLS logic wrapper、API helper 和 Verilator 测试桥接代码。
+**文件功能**：生成 RTL skeleton、HLS logic wrapper、API helper 和 Verilator 测试桥接代码；RTLZZ V2 输入使用带 `#pragma input_port/output_port` 的文件级全局端口 ABI。
 
 **主要函数**
 - `genModuleRTL(...)`：生成旧路径 RTL 代码。
 - `genModuleRTLV2(...)`：生成 V2 RTL skeleton 和 inline 后逻辑代码。
 - `genModuleRTLImpl(...)`：执行 RTL 生成各阶段的共用实现。
+- `globalizeHLSArgument(...)`：将内部积累的旧式主函数参数声明转换为新 ABI 的全局端口声明和方向 pragma。
 - `_procConstAndBundle(...)`：生成常量、类型和 helper 头部。
 - `_procWires(...)`：生成 wire 相关 HLS 初始化和 RTL 声明。
 - `_procRegisters(...)`：生成寄存器端口、代理/helper 和 RTL 实例。

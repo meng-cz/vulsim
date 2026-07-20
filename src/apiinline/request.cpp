@@ -89,7 +89,8 @@ void emitRequestBody(
         if (arg_idx >= call_args.size()) {
             break;
         }
-        os << "  auto __vul_req_arg_" << arg.name << " = (" << call_args[arg_idx] << ");\n";
+        os << "  " << arg.type_str << " __vul_req_arg_" << arg.name
+           << " = (" << call_args[arg_idx] << ");\n";
         for (const auto &field : arg.fields) {
             const string value = packFlatFieldValueExpr(
                 argFieldExpr("__vul_req_arg_" + arg.name, arg.name, field.name),
@@ -120,11 +121,8 @@ void emitRequestBody(
 
 string requestHelperDef(const RequestInfo &info) {
     const auto &req = *info.req;
-    if (!req.has_handshake) {
-        return "";
-    }
     std::ostringstream os;
-    os << "auto " << info.helper_name << " = [&](";
+    os << (req.has_handshake ? "bool " : "void ") << info.helper_name << "(";
     bool need_comma = false;
     if (req.is_arrayed) {
         os << "uint32_t __vul_req_idx";
@@ -132,7 +130,7 @@ string requestHelperDef(const RequestInfo &info) {
     }
     for (const auto &arg : info.args) {
         if (need_comma) os << ", ";
-        os << "const " << arg.type_str << " &" << arg.name;
+        os << arg.type_str << " " << arg.name;
         need_comma = true;
     }
     for (const auto &ret : info.rets) {
@@ -140,7 +138,25 @@ string requestHelperDef(const RequestInfo &info) {
         os << ret.type_str << " &" << ret.name;
         need_comma = true;
     }
-    os << ") -> bool {\n";
+    auto port_type = [&](const string &scalar) {
+        return req.is_arrayed
+            ? "std::array<" + scalar + ", " + std::to_string(req.array_size) + ">"
+            : scalar;
+    };
+    if (need_comma) os << ", ";
+    os << port_type("bool") << " &" << vldPort(req.name);
+    if (req.has_handshake) {
+        os << ", const " << port_type("bool") << " &" << rdyPort(req.name);
+    }
+    for (const auto &arg : info.args) {
+        os << ", " << port_type("Int<" + std::to_string(arg.width) + ">")
+           << " &" << argPort(req.name, arg.name);
+    }
+    for (const auto &ret : info.rets) {
+        os << ", const " << port_type("Int<" + std::to_string(ret.width) + ">")
+           << " &" << argPort(req.name, ret.name);
+    }
+    os << ") {\n";
     vector<string> arg_names;
     for (const auto &arg : info.args) {
         arg_names.push_back(arg.name);
@@ -149,7 +165,7 @@ string requestHelperDef(const RequestInfo &info) {
         arg_names.push_back(ret.name);
     }
     emitRequestBody(os, info, req.is_arrayed ? "__vul_req_idx" : "0", arg_names);
-    os << "};\n";
+    os << "}\n";
     return os.str();
 }
 
@@ -191,26 +207,29 @@ string requestReadyPrelude(
 string requestCallExpr(const RequestInfo &info, const string &idx_expr, const vector<string> &call_args) {
     const auto &req = *info.req;
     std::ostringstream os;
+    os << info.helper_name << "(";
+    bool need_comma = false;
+    if (req.is_arrayed) {
+        os << idx_expr;
+        need_comma = true;
+    }
+    for (const auto &arg : call_args) {
+        if (need_comma) os << ", ";
+        os << arg;
+        need_comma = true;
+    }
+    if (need_comma) os << ", ";
+    os << vldPort(req.name);
     if (req.has_handshake) {
-        os << info.helper_name << "(";
-        bool need_comma = false;
-        if (req.is_arrayed) {
-            os << idx_expr;
-            need_comma = true;
-        }
-        for (const auto &arg : call_args) {
-            if (need_comma) os << ", ";
-            os << arg;
-            need_comma = true;
-        }
-        os << ")";
-        return os.str();
+        os << ", " << rdyPort(req.name);
     }
-    os << "{\n";
-    emitRequestBody(os, info, idx_expr, call_args);
-    if (!req.has_handshake) {
-        os << "}";
+    for (const auto &arg : info.args) {
+        os << ", " << argPort(req.name, arg.name);
     }
+    for (const auto &ret : info.rets) {
+        os << ", " << argPort(req.name, ret.name);
+    }
+    os << ")";
     return os.str();
 }
 
@@ -251,30 +270,36 @@ InlineCode inlineRequestAPIs(
     vector<TokenInfo> tokens = tokenizeWithLibclang(code);
     vector<Replacement> repls;
     string helper_defs;
+    const size_t logic_func_pos = findLogicSubmoduleFunctionStart(code);
     for (const auto &[name, info] : requests) {
-        string helper = requestHelperDef(info);
-        if (!helper.empty()) {
-            helper_defs += helper;
+        bool used = false;
+        for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
+            if (tokens[i].start < logic_func_pos || tokens[i].spelling != name) {
+                continue;
+            }
+            string idx_expr;
+            vector<string> args;
+            int close_idx = -1;
+            if (parseRequestCall(code, tokens, i, idx_expr, args, close_idx)) {
+                used = true;
+                break;
+            }
+        }
+        if (used) {
+            helper_defs += requestHelperDef(info);
             helper_defs += "\n";
         }
     }
     if (!helper_defs.empty()) {
-        size_t logic_func_pos = code.find("\nvoid LogicSubModule_");
-        if (logic_func_pos == string::npos) {
-            logic_func_pos = code.find("void LogicSubModule_");
-        } else {
-            ++logic_func_pos;
-        }
-        size_t body_pos = logic_func_pos == string::npos ? string::npos : code.find(") {\n", logic_func_pos);
-        if (body_pos != string::npos) {
+        size_t helper_pos = findLogicSubmoduleFunctionStart(code);
+        if (helper_pos != string::npos) {
             repls.push_back(Replacement{
-                static_cast<uint32_t>(body_pos + 4),
-                static_cast<uint32_t>(body_pos + 4),
+                static_cast<uint32_t>(helper_pos),
+                static_cast<uint32_t>(helper_pos),
                 helper_defs
             });
         }
     }
-    int ready_counter = 0;
     for (int i = 0; i < static_cast<int>(tokens.size()); ++i) {
         auto it = requests.find(tokens[i].spelling);
         if (it == requests.end() || tokens[i].kind != CXToken_Identifier) {
@@ -290,26 +315,6 @@ InlineCode inlineRequestAPIs(
         int close_idx = -1;
         if (!parseRequestCall(code, tokens, i, idx_expr, args, close_idx)) {
             continue;
-        }
-        if (it->second.req->has_handshake) {
-            int if_idx = -1;
-            if (findDirectIfCondition(tokens, i, close_idx, if_idx)) {
-                string ready_name = "__vul_req_ready_" + it->second.req->name + "_" + std::to_string(ready_counter++);
-                if (!overlapsExisting(repls, tokens[if_idx].start, tokens[if_idx].start) &&
-                    !overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
-                    repls.push_back(Replacement{
-                        tokens[if_idx].start,
-                        tokens[if_idx].start,
-                        requestReadyPrelude(it->second, idx_expr, args, ready_name)
-                    });
-                    repls.push_back(Replacement{
-                        tokens[i].start,
-                        tokens[close_idx].end,
-                        ready_name
-                    });
-                }
-                continue;
-            }
         }
         if (!overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
             repls.push_back(Replacement{
