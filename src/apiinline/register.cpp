@@ -27,25 +27,32 @@ struct RegisterInfo {
     string default_expr;
 };
 
-string nestedArrayType(string element, const RegisterInfo &info, bool include_ports) {
-    if (include_ports && info.reg->ports > 1) {
-        element = "std::array<" + element + ", " + std::to_string(info.reg->ports) + ">";
-    }
-    if (!info.reg->dims.empty()) {
-        element = "std::array<" + element + ", " + std::to_string(info.reg->dims[0]) + ">";
-    }
-    return element;
-}
-
 string readRegisterExpr(const RegisterInfo &info, const string &rdata_expr) {
+    if (info.reg->dims.empty()) {
+        return info.helper_name + "()";
+    }
+    const string prefix = info.rdata_port + "[";
+    if (rdata_expr.rfind(prefix, 0) == 0 && rdata_expr.back() == ']') {
+        return info.helper_name + "(" +
+               rdata_expr.substr(prefix.size(), rdata_expr.size() - prefix.size() - 1) + ")";
+    }
     return info.helper_name + "(" + rdata_expr + ")";
 }
 
 string readRegisterHelper(const RegisterInfo &info) {
     std::ostringstream os;
-    const string rdata_arg = "__vul_rdata_" + info.reg->name;
-    os << info.type_str << " " << info.helper_name
-       << "(const Int<" << info.width << "> &" << rdata_arg << ") {\n";
+    const string rdata_arg = "__vul_rdata";
+    os << info.type_str << " " << info.helper_name << "(";
+    if (!info.reg->dims.empty()) {
+        os << "uint32_t idx";
+    }
+    os << ") {\n";
+    os << "  const Int<" << info.width << "> &" << rdata_arg << " = "
+       << info.rdata_port;
+    if (!info.reg->dims.empty()) {
+        os << "[idx]";
+    }
+    os << ";\n";
     if (info.fields.size() == 1 && info.fields[0].name == "value") {
         os << "  " << info.type_str << " value = " << info.default_expr << ";\n";
     } else {
@@ -64,28 +71,23 @@ string readRegisterHelper(const RegisterInfo &info) {
 string registerWriteHelper(const RegisterInfo &info) {
     const bool is_array = !info.reg->dims.empty();
     std::ostringstream os;
+    os << "template <uint32_t P = 0>\n";
     os << "void __vul_reg_setnext_" << info.reg->name << "(";
     if (is_array) {
         os << "uint32_t __vul_reg_idx, ";
     }
-    if (info.reg->ports > 1) {
-        os << "uint32_t __vul_reg_port, ";
-    }
-    os << info.type_str << " __vul_reg_value, "
-       << nestedArrayType("Int<" + std::to_string(info.width) + ">", info, true)
-       << " &__vul_wdata, "
-       << nestedArrayType("bool", info, true) << " &__vul_wen) {\n";
+    os << info.type_str << " value) {\n";
     os << "  Int<" << info.width << "> __vul_reg_wdata = 0;\n";
     for (const auto &field : info.fields) {
         const string value = packFlatFieldValueExpr(
-            flatFieldValueExpr("__vul_reg_value", field.name), field);
+            flatFieldValueExpr("value", field.name), field);
         os << "  " << uintExtractExpr("__vul_reg_wdata", field.offset + field.width - 1, field.offset)
            << " = " << value << ";\n";
     }
     const string idx = is_array ? "[__vul_reg_idx]" : "";
-    const string port = info.reg->ports > 1 ? "[__vul_reg_port]" : "";
-    os << "  __vul_wdata" << idx << port << " = __vul_reg_wdata;\n";
-    os << "  __vul_wen" << idx << port << " = true;\n";
+    const string port = info.reg->ports > 1 ? "[P]" : "";
+    os << "  " << info.wdata_port << idx << port << " = __vul_reg_wdata;\n";
+    os << "  " << info.wen_port << idx << port << " = true;\n";
     os << "}\n";
     return os.str();
 }
@@ -98,20 +100,18 @@ string registerControlHelpers(const RegisterInfo &info) {
             ? info.holdnext_port : info.resetnext_port;
         const string helper = "__vul_reg_" + string(method) + "_" + info.reg->name;
         if (is_array) {
-            os << "void " << helper << "(uint32_t __vul_reg_idx, "
-               << nestedArrayType("bool", info, false) << " &__vul_control) {\n";
-            os << "  __vul_control[__vul_reg_idx] = true;\n";
+            os << "void " << helper << "(uint32_t __vul_reg_idx) {\n";
+            os << "  " << port << "[__vul_reg_idx] = true;\n";
             os << "}\n";
         }
-        os << "void " << helper << "("
-           << nestedArrayType("bool", info, false) << " &__vul_control) {\n";
+        os << "void " << helper << "() {\n";
         if (is_array) {
             os << "  for (uint32_t __vul_i = 0; __vul_i < " << info.reg->dims[0]
                << "; ++__vul_i) {\n";
-            os << "    __vul_control[__vul_i] = true;\n";
+            os << "    " << port << "[__vul_i] = true;\n";
             os << "  }\n";
         } else {
-            os << "  __vul_control = true;\n";
+            os << "  " << port << " = true;\n";
         }
         os << "}\n";
     }
@@ -350,10 +350,8 @@ InlineCode inlineRegisterAPIs(
                         if (!overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
                             string call = "__vul_reg_" + method_name + "_" + info.reg->name + "(";
                             if (!idx_expr.empty()) {
-                                call += idx_expr + ", ";
+                                call += idx_expr;
                             }
-                            call += method_name == "holdnext"
-                                ? info.holdnext_port : info.resetnext_port;
                             call += ")";
                             repls.push_back(Replacement{
                                 tokens[i].start,
@@ -375,14 +373,12 @@ InlineCode inlineRegisterAPIs(
                     }
                     if (!overlapsExisting(repls, tokens[i].start, tokens[close_idx].end)) {
                         string call = "__vul_reg_setnext_" + info.reg->name;
+                        call += "<" + port_expr + ">";
                         call += "(";
                         if (is_array) {
                             call += idx_expr + ", ";
                         }
-                        if (info.reg->ports > 1) {
-                            call += port_expr + ", ";
-                        }
-                        call += value_expr + ", " + info.wdata_port + ", " + info.wen_port + ")";
+                        call += value_expr + ")";
                         repls.push_back(Replacement{
                             tokens[i].start,
                             tokens[close_idx].end,

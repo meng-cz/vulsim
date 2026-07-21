@@ -19,7 +19,7 @@ build/vulrtlgen -t <TOP> -p <PROJECT> -o <TMP_OUT> --v2
 
 | 项目/顶层 | 结果 | 首个失败阶段 |
 |---|---:|---|
-| `aes1/AES1.hpp` | 失败，非 RTLZZ issue | 输入 C++ 存在未声明标识符 |
+| `aes1/AES1.hpp` | 失败 | S2 validate |
 | `apiinline_proxy/Top.hpp` | 失败 | S3 statementize |
 | `apiinline_register/Top.hpp` | 失败 | S2 validate |
 | `array1d/Top.hpp` | 失败 | S3 statementize |
@@ -110,7 +110,10 @@ tick0__();
 
 ## 3. S2 将本地 `std::array` 声明误判为未知函数调用
 
-受影响项目：`apiinline_register`
+受影响项目：
+
+- `apiinline_register`
+- `aes1`
 
 最小触发形态：
 
@@ -236,19 +239,74 @@ s8opnorm: S8 assign value type does not match target type for
 - 如果两者确实不兼容，诊断需同时打印完整 target/value 类型、
   signedness、hardware kind 和产生 cast 的原始位置。
 
+## 8. 文件级 helper 无法直接访问新 ABI 的全局端口
+
+受影响项目包括：
+
+- `systolic2d`
+- `apiinline_proxy`
+
+新 ABI 将端口声明为带 pragma 的文件级变量，因此普通文件级 helper
+应当能够像标准 C++ 函数一样直接访问这些变量：
+
+```cpp
+#pragma output_port wdata_cycle__
+Int<32> wdata_cycle__;
+#pragma output_port wen_cycle__
+bool wen_cycle__;
+
+void __vul_reg_setnext_cycle(uint32_t value) {
+    wdata_cycle__ = Int<32>(value);
+    wen_cycle__ = true;
+}
+```
+
+当前诊断：
+
+```text
+s2validate: Use of undeclared variable 'wdata_cycle__'
+```
+
+期望：
+
+- S0/S2 在分析文件级 helper 时，将 pragma 全局端口加入可见符号表。
+- helper 对 output port 的写入和对 input port 的读取，在 inline 后应映射到
+  顶层函数对应的 port symbol。
+- API helper 不应为了绕过该限制而把所有端口重复声明为函数参数。
+
+## 9. S2 未识别带非类型模板参数的文件级 helper
+
+API 中的端口编号和 arrayed Request 槽位具有编译期硬件语义，生成代码会
+使用文件级函数模板：
+
+```cpp
+template <uint32_t P = 0>
+void __vul_reg_setnext_cycle(uint32_t value) {
+    wdata_cycle__[P] = Int<32>(value);
+    wen_cycle__[P] = true;
+}
+
+__vul_reg_setnext_cycle<1>(value);
+```
+
+BRAM/ROM helper 和 arrayed Request helper 使用相同形式。当前 S2 会把合法
+调用报告为：
+
+```text
+s2validate: Unknown function call '__vul_reg_setnext_cycle'
+```
+
+期望：
+
+- S0 收集文件级函数模板及其非类型模板参数。
+- S2/S6 能按调用点常量实例化并 inline 对应 helper。
+- 模板参数必须保留为 compile-time constant，不能降级为普通运行期参数，
+  否则会把静态端口选择错误地变成动态硬件 mux。
+
 ## 未列为 RTLZZ issue 的失败
 
 以下问题在进入 RTLZZ 后首先暴露为无效输入或项目配置问题，应先在
 `rtlgen/apiinline` 或示例项目侧修复：
-
-### `aes1`
-
-生成的 register pack helper 参数名为 `__vul_reg_value`，但函数体使用
-了未声明的 `value[index]`：
-
-```text
-s0ast: use of undeclared identifier 'value'
-```
 
 ### `ooo_backend/ALUPipeline` 和 `BackendCore`
 

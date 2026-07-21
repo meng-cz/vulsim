@@ -11,8 +11,16 @@
 
 // Register
 
-REGISTER_MUL(d, AESData, 2) {}
-REGISTER_MUL(k, AESKey, 2) {}
+REGISTER_MUL(d, AESData, 2) {
+    for (uint32_t i = 0; i < 16; i++) {
+        d[i] = 0;
+    }
+}
+REGISTER_MUL(k, AESKey, 2) {
+    for (uint32_t i = 0; i < 16; i++) {
+        k[i] = 0;
+    }
+}
 REGISTER_MUL(state, uint32_t, 2) {
     state = 0;
 }

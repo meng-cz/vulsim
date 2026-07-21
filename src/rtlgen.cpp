@@ -112,6 +112,10 @@ inline string flatFieldValueExpr(const string &root, const string &flat_name) {
     if (flat_name.rfind(value_prefix, 0) == 0) {
         return root + "." + flat_name.substr(std::char_traits<char>::length(value_prefix));
     }
+    constexpr const char *value_index_prefix = "value[";
+    if (flat_name.rfind(value_index_prefix, 0) == 0) {
+        return root + flat_name.substr(std::char_traits<char>::length("value"));
+    }
     const string prefix = root + ".";
     if (flat_name.rfind(prefix, 0) == 0) {
         return root + "." + flat_name.substr(prefix.size());
@@ -2704,7 +2708,13 @@ RTLGenResult genModuleRTLImpl(
 
     auto append_lines = [](vector<string> &dst, VulDebugLocs &dst_debug, vector<string> &src, VulDebugLocs &src_debug) {
         vulDebugNormalize(src, src_debug);
-        vulDebugAppendLines(dst, dst_debug, src, src_debug);
+        for (size_t i = 0; i < src.size(); ++i) {
+            string line = src[i];
+            if (line.empty() || line.back() != '\n') {
+                line.push_back('\n');
+            }
+            vulDebugAppendLine(dst, dst_debug, line, src_debug[i]);
+        }
     };
 
     auto &hls = result.logic_hls_codes;

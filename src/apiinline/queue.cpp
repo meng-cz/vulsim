@@ -96,10 +96,7 @@ string enqNextBlock(const QueueInfo &info, const vector<string> &args) {
 }
 
 string frontExpr(const QueueInfo &info, const vector<string> &args) {
-    if (info.queue->enq_width == 1 && info.queue->deq_width == 1) {
-        return info.front_helper_name + "(" + info.deqdata + ")";
-    }
-    return info.front_helper_name + "(" + info.deqvalid + ", " + info.deqdata + ")";
+    return info.front_helper_name + "()";
 }
 
 string frontAssignBlock(const QueueInfo &info, const string &lhs) {
@@ -192,20 +189,17 @@ string frontHelper(const QueueInfo &info) {
     const bool is_mp = (info.queue->enq_width > 1 || info.queue->deq_width > 1);
     if (!is_mp) {
         return info.type_str + " " + info.front_helper_name +
-               "(const Int<" + std::to_string(info.data_width) +
-               "> &__vul_deqdata) {\n  return " +
-               unpackValueExpr(info, "__vul_deqdata") + ";\n}\n";
+               "() {\n  return " + unpackValueExpr(info, info.deqdata) + ";\n}\n";
     }
     std::ostringstream os;
     os << "std::array<" << info.type_str << ", " << deq_width << "> "
        << info.front_helper_name
-       << "(uint32_t __vul_deqvalid, const std::array<Int<" << info.data_width
-       << ">, " << deq_width << "> &__vul_deqdata) {\n";
+       << "() {\n";
     os << "  std::array<" << info.type_str << ", " << deq_width << "> __vul_queue_values = {};\n";
     for (uint32_t i = 0; i < deq_width; ++i) {
-        os << "  if (__vul_deqvalid > " << i << ") {\n";
+        os << "  if (" << info.deqvalid << " > " << i << ") {\n";
         os << "    __vul_queue_values[" << i << "] = "
-           << unpackValueExpr(info, "__vul_deqdata[" + std::to_string(i) + "]") << ";\n";
+           << unpackValueExpr(info, info.deqdata + "[" + std::to_string(i) + "]") << ";\n";
         os << "  }\n";
     }
     os << "  return __vul_queue_values;\n";
@@ -220,46 +214,29 @@ string queuePortHelpers(const QueueInfo &info) {
     const uint32_t enq_width = static_cast<uint32_t>(info.queue->enq_width);
     const uint32_t deq_width = static_cast<uint32_t>(info.queue->deq_width);
     std::ostringstream os;
-    auto countWidth = [](uint32_t width) {
-        uint32_t bits = 0;
-        while ((1U << bits) < width + 1) ++bits;
-        return bits;
-    };
-    const string count_type_enq = is_mp
-        ? "Int<" + std::to_string(countWidth(enq_width)) + ">" : "bool";
-    const string count_type_deq = is_mp
-        ? "Int<" + std::to_string(countWidth(deq_width)) + ">" : "bool";
     os << (is_mp ? "uint32_t " : "bool ") << "__vul_queue_enqready_"
-       << info.queue->name << "(" << (is_mp ? "uint32_t" : "bool") << " __vul_ready) {\n";
-    os << "  return __vul_ready;\n}\n";
+       << info.queue->name << "() {\n";
+    os << "  return " << info.enqready << ";\n}\n";
     os << (is_mp ? "uint32_t " : "bool ") << "__vul_queue_deqvalid_"
-       << info.queue->name << "(" << (is_mp ? "uint32_t" : "bool") << " __vul_valid) {\n";
-    os << "  return __vul_valid;\n}\n";
-    QueueInfo local = info;
-    local.enqdata = "__vul_enqdata";
-    local.enqvalid = "__vul_enqvalid";
-    local.deqready = "__vul_deqready";
-    local.clrnext = "__vul_clrnext";
+       << info.queue->name << "() {\n";
+    os << "  return " << info.deqvalid << ";\n}\n";
     if (is_mp) {
         os << "void __vul_queue_enqnext_" << info.queue->name
            << "(std::array<" << info.type_str << ", " << enq_width
-           << "> __vul_values, uint32_t __vul_num, std::array<Int<"
-           << info.data_width << ">, " << enq_width << "> &__vul_enqdata, "
-           << count_type_enq << " &__vul_enqvalid) "
-           << enqNextBlock(local, {"__vul_values", "__vul_num"}) << "\n";
+           << "> values, uint32_t num = " << enq_width << ") "
+           << enqNextBlock(info, {"values", "num"}) << "\n";
         os << "void __vul_queue_deqnext_" << info.queue->name
-           << "(uint32_t __vul_num, " << count_type_deq << " &__vul_deqready) "
-           << deqNextBlock(local, {"__vul_num"}) << "\n";
+           << "(uint32_t num = " << deq_width << ") "
+           << deqNextBlock(info, {"num"}) << "\n";
     } else {
         os << "void __vul_queue_enqnext_" << info.queue->name
-           << "(" << info.type_str << " __vul_value, Int<" << info.data_width
-           << "> &__vul_enqdata, bool &__vul_enqvalid) "
-           << enqNextBlock(local, {"__vul_value"}) << "\n";
-        os << "void __vul_queue_deqnext_" << info.queue->name
-           << "(bool &__vul_deqready) " << deqNextBlock(local, {}) << "\n";
+           << "(" << info.type_str << " value) "
+           << enqNextBlock(info, {"value"}) << "\n";
+        os << "void __vul_queue_deqnext_" << info.queue->name << "() "
+           << deqNextBlock(info, {}) << "\n";
     }
-    os << "void __vul_queue_clrnext_" << info.queue->name << "(bool &__vul_clrnext) {\n";
-    os << "  __vul_clrnext = true;\n}\n";
+    os << "void __vul_queue_clrnext_" << info.queue->name << "() {\n";
+    os << "  " << info.clrnext << " = true;\n}\n";
     return os.str();
 }
 
@@ -374,9 +351,9 @@ InlineCode inlineQueueAPIs(
         uint32_t replace_begin = tokens[i].start;
         uint32_t replace_end = tokens[close_idx].end;
         if (method == "enqready" || method == "enqreqdy") {
-            text = "__vul_queue_enqready_" + info.queue->name + "(" + info.enqready + ")";
+            text = "__vul_queue_enqready_" + info.queue->name + "()";
         } else if (method == "deqvalid") {
-            text = "__vul_queue_deqvalid_" + info.queue->name + "(" + info.deqvalid + ")";
+            text = "__vul_queue_deqvalid_" + info.queue->name + "()";
         } else if (method == "front") {
             text = frontExpr(info, args);
         } else if (method == "enqnext") {
@@ -385,24 +362,13 @@ InlineCode inlineQueueAPIs(
                 if (arg != 0) text += ", ";
                 text += args[arg];
             }
-            if ((info.queue->enq_width > 1 || info.queue->deq_width > 1) && args.size() < 2) {
-                if (!args.empty()) text += ", ";
-                text += std::to_string(info.queue->enq_width);
-            }
-            if (!args.empty() || info.queue->enq_width > 1 || info.queue->deq_width > 1) text += ", ";
-            text += info.enqdata + ", " + info.enqvalid;
             text += ")";
         } else if (method == "deqnext") {
             text = "__vul_queue_deqnext_" + info.queue->name + "(";
-            if (!args.empty()) {
-                text += args[0] + ", ";
-            } else if (info.queue->enq_width > 1 || info.queue->deq_width > 1) {
-                text += std::to_string(info.queue->deq_width) + ", ";
-            }
-            text += info.deqready;
+            if (!args.empty()) text += args[0];
             text += ")";
         } else if (method == "clrnext") {
-            text = "__vul_queue_clrnext_" + info.queue->name + "(" + info.clrnext + ")";
+            text = "__vul_queue_clrnext_" + info.queue->name + "()";
         } else {
             continue;
         }

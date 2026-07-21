@@ -122,12 +122,11 @@ void emitRequestBody(
 string requestHelperDef(const RequestInfo &info) {
     const auto &req = *info.req;
     std::ostringstream os;
+    if (req.is_arrayed) {
+        os << "template <uint32_t IDX = 0>\n";
+    }
     os << (req.has_handshake ? "bool " : "void ") << info.helper_name << "(";
     bool need_comma = false;
-    if (req.is_arrayed) {
-        os << "uint32_t __vul_req_idx";
-        need_comma = true;
-    }
     for (const auto &arg : info.args) {
         if (need_comma) os << ", ";
         os << arg.type_str << " " << arg.name;
@@ -138,24 +137,6 @@ string requestHelperDef(const RequestInfo &info) {
         os << ret.type_str << " &" << ret.name;
         need_comma = true;
     }
-    auto port_type = [&](const string &scalar) {
-        return req.is_arrayed
-            ? "std::array<" + scalar + ", " + std::to_string(req.array_size) + ">"
-            : scalar;
-    };
-    if (need_comma) os << ", ";
-    os << port_type("bool") << " &" << vldPort(req.name);
-    if (req.has_handshake) {
-        os << ", const " << port_type("bool") << " &" << rdyPort(req.name);
-    }
-    for (const auto &arg : info.args) {
-        os << ", " << port_type("Int<" + std::to_string(arg.width) + ">")
-           << " &" << argPort(req.name, arg.name);
-    }
-    for (const auto &ret : info.rets) {
-        os << ", const " << port_type("Int<" + std::to_string(ret.width) + ">")
-           << " &" << argPort(req.name, ret.name);
-    }
     os << ") {\n";
     vector<string> arg_names;
     for (const auto &arg : info.args) {
@@ -164,7 +145,7 @@ string requestHelperDef(const RequestInfo &info) {
     for (const auto &ret : info.rets) {
         arg_names.push_back(ret.name);
     }
-    emitRequestBody(os, info, req.is_arrayed ? "__vul_req_idx" : "0", arg_names);
+    emitRequestBody(os, info, req.is_arrayed ? "IDX" : "0", arg_names);
     os << "}\n";
     return os.str();
 }
@@ -207,27 +188,16 @@ string requestReadyPrelude(
 string requestCallExpr(const RequestInfo &info, const string &idx_expr, const vector<string> &call_args) {
     const auto &req = *info.req;
     std::ostringstream os;
-    os << info.helper_name << "(";
-    bool need_comma = false;
+    os << info.helper_name;
     if (req.is_arrayed) {
-        os << idx_expr;
-        need_comma = true;
+        os << "<" << idx_expr << ">";
     }
+    os << "(";
+    bool need_comma = false;
     for (const auto &arg : call_args) {
         if (need_comma) os << ", ";
         os << arg;
         need_comma = true;
-    }
-    if (need_comma) os << ", ";
-    os << vldPort(req.name);
-    if (req.has_handshake) {
-        os << ", " << rdyPort(req.name);
-    }
-    for (const auto &arg : info.args) {
-        os << ", " << argPort(req.name, arg.name);
-    }
-    for (const auto &ret : info.rets) {
-        os << ", " << argPort(req.name, ret.name);
     }
     os << ")";
     return os.str();
