@@ -1,15 +1,19 @@
 # 泺源微架构建模与模拟平台
 
-泺源（LuoYuan）微架构建模与模拟平台，是一套用于处理器微架构建模、探索与调试的软件平台。基于新型微架构描述模型：可视化统一中间层模型（Visualized Unified Layer，VUL）构建。
+泺源（LuoYuan）微架构建模与模拟平台，是一套用于处理器微架构建模、探索与调试的软件平台。基于新型高层芯片描述语言：可视化微架构语言（Visualized μarch Language，VUL）构建。
 
-基于VUL模型，泺源平台为新型微架构设计者提供了：
+基于VUL，泺源平台为新型微架构设计者提供了：
 
-1. 统一化的、结构化的通用微架构设计层描述
+1. 统一化的、结构化的通用微架构行为级设计描述
 2. 周期精确的并行模拟，周期行为对齐到最终的RTL实现
 3. 内置调试工具和性能统计工具
-4. 自动化生成RTL代码框架
+4. 自动化生成 RTL 代码
 
-本项目为Vul的命令行工具和Vul GUI的后端命令行程序。
+本项目为 Vul 的核心命令行工具链。相关项目目录如下：
+
+- [前端GUI（Demo）](https://github.com/meng-cz/VulSimGUI)
+- [案例项目：RISC-V TPU](https://github.com/meng-cz/oootpu-sim)：基于 VUL 原生设计实现的使用 RISC-V 指令扩展的可编程 TPU 计算核心
+- [案例项目：TCA-ADK](https://gitee.com/wei-yanxuan/TCA-ADK)：张量计算适配评价框架，为后续张量加速器微架构探索与性能模拟提供算子分析和架构需求输入
 
 ## User Guide
 
