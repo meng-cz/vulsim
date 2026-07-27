@@ -14,6 +14,7 @@
 - [前端GUI（Demo）](https://github.com/meng-cz/VulSimGUI)
 - [案例项目：RISC-V TPU](https://github.com/meng-cz/oootpu-sim)：基于 VUL 原生设计实现的使用 RISC-V 指令扩展的可编程 TPU 计算核心
 - [案例项目：TCA-ADK](https://gitee.com/wei-yanxuan/TCA-ADK)：张量计算适配评价框架，为后续张量加速器微架构探索与性能模拟提供算子分析和架构需求输入
+- [案例项目：3DCacheSim](https://gitee.com/x1jia/large-cache-sched-sim)：面向 Chiplet 多核处理器与 3D 堆叠缓存架构的系统级周期精确模拟框架
 
 ## User Guide
 
