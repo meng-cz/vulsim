@@ -7,9 +7,30 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
-std::string generateLogicRTLWithRTLzz(
+namespace {
+
+std::vector<std::string> collectErrorSignalNames(
+    const std::vector<rtlzz::RtlSignalDebugInfo> &signals
+) {
+    std::vector<std::string> names;
+    std::unordered_set<std::string> seen;
+    for (const auto &signal : signals) {
+        if (signal.signal_name.empty()) {
+            continue;
+        }
+        if (seen.insert(signal.signal_name).second) {
+            names.push_back(signal.signal_name);
+        }
+    }
+    return names;
+}
+
+} // namespace
+
+RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::string &source_file,
     const std::string &top_function,
     const std::string &lib_include_dir,
@@ -17,7 +38,9 @@ std::string generateLogicRTLWithRTLzz(
 ) {
     std::ifstream input(source_file);
     if (!input) {
-        throw VulException("RTLzz failed to open logic source '" + source_file + "'");
+        RTLzzLogicRTLResult out;
+        out.error = "RTLzz failed to open logic source '" + source_file + "'";
+        return out;
     }
     std::vector<std::string> source_codelines;
     std::string line;
@@ -25,17 +48,20 @@ std::string generateLogicRTLWithRTLzz(
         source_codelines.push_back(line + "\n");
     }
     if (!input.eof()) {
-        throw VulException("RTLzz failed to read logic source '" + source_file + "'");
+        RTLzzLogicRTLResult out;
+        out.error = "RTLzz failed to read logic source '" + source_file + "'";
+        return out;
     }
 
     rtlzz::CompileOptions options;
     std::filesystem::path source_path(source_file);
-    options.source_name = source_path.filename().string();
+    options.source_name = source_file;
     options.source_codelines = std::move(source_codelines);
     options.vullib_dir = lib_include_dir;
     options.top_function = top_function;
     options.unroll_limit = unroll_limit;
     options.clang_args.push_back("-std=c++20");
+    options.rtl_debug = rtlzz::RtlDebugMode::Text;
 
     const auto source_parent = source_path.parent_path();
     if (!source_parent.empty()) {
@@ -43,8 +69,13 @@ std::string generateLogicRTLWithRTLzz(
     }
 
     auto result = rtlzz::compileToRtl(std::move(options));
+    RTLzzLogicRTLResult out;
     if (!result.ok()) {
-        throw VulException("RTLzz compile failed for '" + top_function + "' in '" + source_file + "': " + result.error);
+        out.error = result.error;
+        out.error_debug_codelines = std::move(result.error_debug_codelines);
+        out.error_signal_debug_text = std::move(result.error_signal_debug_text);
+        out.error_signal_names = collectErrorSignalNames(result.error_signal_debug_signals);
+        return out;
     }
 
     std::ostringstream output;
@@ -54,5 +85,8 @@ std::string generateLogicRTLWithRTLzz(
             output << '\n';
         }
     }
-    return output.str();
+    out.ok = true;
+    out.rtl_text = output.str();
+    out.debug_codelines = std::move(result.debug_codelines);
+    return out;
 }

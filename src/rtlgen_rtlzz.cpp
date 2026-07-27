@@ -22,7 +22,7 @@ void appendTextAsLines(vector<string> &lines, const string &text) {
 
 } // namespace
 
-void appendRTLV2LogicRTL(
+RTLV2LogicRTLResult appendRTLV2LogicRTL(
     RTLGenResult &result,
     const VulStaticModuleInstance &module,
     const string &logic_hls_filepath,
@@ -30,21 +30,34 @@ void appendRTLV2LogicRTL(
     int unroll_limit
 ) {
     if (!result.has_logic_submodule || result.logic_hls_codes.empty()) {
-        return;
+        return {};
     }
 
     VulErrorContextGuard rtlzz_err("running RTLzz for logic submodule: " + module.simClassName());
     const auto logic_module_name = LogicSubModuleName(module.simClassName());
-    std::string logic_sv = generateLogicRTLWithRTLzz(
+    RTLzzLogicRTLResult logic_rtl = generateLogicRTLWithRTLzz(
         logic_hls_filepath,
         logic_module_name,
         lib_include_dir,
         unroll_limit
     );
+    if (!logic_rtl.ok) {
+        RTLV2LogicRTLResult out;
+        out.ok = false;
+        out.error = "RTLzz compile failed for '" + logic_module_name + "' in '" + logic_hls_filepath + "': " + logic_rtl.error;
+        out.error_debug_codelines = std::move(logic_rtl.error_debug_codelines);
+        out.error_signal_debug_text = std::move(logic_rtl.error_signal_debug_text);
+        out.error_signal_names = std::move(logic_rtl.error_signal_names);
+        return out;
+    }
+
     result.rtl_skeleten_codes.push_back("\n");
-    appendTextAsLines(result.rtl_skeleten_codes, logic_sv);
+    appendTextAsLines(result.rtl_skeleten_codes, logic_rtl.rtl_text);
     vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
     result.rtl_skeleten_debug_lines = vulDebugBuildGeneratedMap(result.rtl_skeleten_debug);
+    RTLV2LogicRTLResult out;
+    out.debug_codelines = std::move(logic_rtl.debug_codelines);
+    return out;
 }
 
 } // namespace rtlgen

@@ -38,6 +38,20 @@ inline static void writeLinesToFile(const std::vector<std::string> &lines, const
     file.close();
 }
 
+inline static std::string joinNames(const std::vector<std::string> &names) {
+    if (names.empty()) {
+        return "<not provided by RTLzz>";
+    }
+    std::string out;
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (i > 0) {
+            out += ", ";
+        }
+        out += names[i];
+    }
+    return out;
+}
+
 int main(int argc, char * argv[]) {
 
     argparse::ArgumentParser parser("vulsimgen", "VulSim Verilog Generator V1.0");
@@ -165,11 +179,41 @@ int main(int argc, char * argv[]) {
         writeLinesToFile(codes.logic_hls_codes, hls_out_path.string());
         vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
         const auto sv_path = mod_instance->rtlSvPath();
+        std::vector<std::string> rtlzz_debug_codelines;
         if (use_v2) {
-            rtlgen::appendRTLV2LogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir);
+            rtlgen::RTLV2LogicRTLResult rtlzz_result =
+                rtlgen::appendRTLV2LogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir);
+            if (!rtlzz_result.ok) {
+                const std::filesystem::path sv_out_path = out_path / sv_path;
+                const std::filesystem::path error_dbg_path =
+                    (sv_out_path.has_parent_path() ? sv_out_path.parent_path() : out_path) / "error.dbg";
+                if (rtlzz_result.error_debug_codelines.empty()) {
+                    rtlzz_result.error_debug_codelines.push_back(
+                        "RTLzz did not provide an error debug snapshot for this failure.\n"
+                    );
+                }
+                writeLinesToFile(rtlzz_result.error_debug_codelines, error_dbg_path.string());
+                std::cerr << "RTLzz error signal(s): " << joinNames(rtlzz_result.error_signal_names) << std::endl;
+                std::cerr << "RTLzz error debug file: " << error_dbg_path.string() << std::endl;
+                if (!rtlzz_result.error_signal_debug_text.empty()) {
+                    std::cerr << "RTLzz error signal debug:" << std::endl;
+                    std::cerr << rtlzz_result.error_signal_debug_text;
+                    if (rtlzz_result.error_signal_debug_text.back() != '\n') {
+                        std::cerr << std::endl;
+                    }
+                } else {
+                    std::cerr << "RTLzz error signal debug: <not provided by RTLzz>" << std::endl;
+                }
+                std::cerr << "Error: " << rtlzz_result.error << std::endl;
+                return 1;
+            }
+            rtlzz_debug_codelines = std::move(rtlzz_result.debug_codelines);
         }
         writeLinesToFile(codes.rtl_skeleten_codes, (out_path / sv_path).string());
         vulDebugWriteMapToFile(codes.rtl_skeleten_debug_lines, (out_path / (sv_path + ".dbgmap")).string());
+        if (use_v2 && !rtlzz_debug_codelines.empty()) {
+            writeLinesToFile(rtlzz_debug_codelines, (out_path / (sv_path + ".dbg")).string());
+        }
         for (const auto &res_file : codes.resource_files) {
             std::filesystem::path src_file = std::filesystem::path(proj_dir) / res_file;
             if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {

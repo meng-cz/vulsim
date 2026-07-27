@@ -47,6 +47,15 @@ struct RTLGenResult {
     vector<string> resource_files; // additional resource files needed by ROM
 };
 
+struct RTLV2LogicRTLResult {
+    bool ok = true;
+    vector<string> debug_codelines;
+    string error;
+    vector<string> error_debug_codelines;
+    string error_signal_debug_text;
+    vector<string> error_signal_names;
+};
+
 RTLGenResult genModuleRTL(
     const VulStaticModuleInstance &module,
     const VulStaticConfigLib &configlib,
@@ -61,7 +70,7 @@ RTLGenResult genModuleRTLV2(
     const vector<string> &global_helper_codes
 );
 
-void appendRTLV2LogicRTL(
+RTLV2LogicRTLResult appendRTLV2LogicRTL(
     RTLGenResult &result,
     const VulStaticModuleInstance &module,
     const string &logic_hls_filepath,

@@ -2723,6 +2723,7 @@ RTLGenResult genModuleRTLImpl(
         hls.push_back("#include <array>\n");
         hls.push_back("#include <cstdint>\n");
         hls.push_back("#include <type_traits>\n");
+        hls.push_back("#include <fixint.hpp>\n");
         hls.push_back("\n");
         hls.push_back("using std::array;\n");
         hls.push_back("\n");
