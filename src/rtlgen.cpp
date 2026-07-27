@@ -507,12 +507,17 @@ void _procConstAndBundle(RTLGenContext &ctx){
     for (const auto &cfg_entry : ctx.local_configlib) {
         const string &cfg_name = cfg_entry.first;
         ConfigRealValue real_value = cfg_entry.second;
-        auto &destination = ctx.emit_hls_api_helpers ? ctx.hls_header : ctx.hls_init;
-        destination.push_back("constexpr int64_t " + cfg_name + " = " + std::to_string(real_value) + ";\n");
+        const string definition = ctx.emit_hls_api_helpers
+            ? "constexpr int64_t " + cfg_name + " = " + std::to_string(real_value) + ";\n"
+            : "#define " + cfg_name + " (" + std::to_string(real_value) + ")\n";
+        vulDebugAppendLine(
+            ctx.hls_header,
+            ctx.hls_header_debug,
+            definition
+        );
     }
     if (!ctx.local_configlib.empty()) {
-        auto &destination = ctx.emit_hls_api_helpers ? ctx.hls_header : ctx.hls_init;
-        destination.push_back("\n");
+        vulDebugAppendLine(ctx.hls_header, ctx.hls_header_debug, "\n");
     }
 
     for (const auto &bundle : ctx.local_bundlelib) {
