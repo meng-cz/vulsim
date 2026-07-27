@@ -300,24 +300,24 @@ void tick_impl()
 
 参数列表是可选的，如果子模块没有实例化参数或者使用默认值构造，可以省略参数列表。
 
-## USE_CHILD_SERVICE_PORT(instance, serv, ret, ARG(type1) arg, ..., RESP(type2) resp, ...)
+## USE_CHILD_SERVICE_PORT(instance, serv, alias, ARG(type1) arg, ..., RESP(type2) resp, ...)
 
 声明使用了子实例中的服务事务端口定义，以便在父模块的行为代码中直接调用这个服务事务接口：
 - `instance`：子实例的名称
 - `serv`：子实例中服务事务端口的名称，必须与子实例模块中定义的 SERVICE_PORT 的 name 相同
-- `ret`：void 或 bool，表示这个服务事务接口是否包含 valid-ready 握手行为
+- `alias`：父模块中使用的别名
 - `ARG(type) arg`：同 SERVICE 定义中的 ARG 参数列表
 - `RESP(type) resp`：同 SERVICE 定义中的 RESP 参数列表
 
 展开后提供以下等价声明供行为代码调用：
 ```cpp
-void instance_serv(const type1& arg1, ..., type2& resp1, ...);
+void/bool alias(const type1& arg1, ..., type2& resp1, ...);
 ```
 
 示例：
 ```cpp
 CHILD_INSTANCE(Consumer, cons);
-USE_CHILD_SERVICE_PORT(cons, get, bool, ARG(uint8_t) d, RESP(uint8_t) s);
+USE_CHILD_SERVICE_PORT(cons, get, get, ARG(uint8_t) d, RESP(uint8_t) s);
 
 TICK_IMPL() {
     uint8_t data = 42;
