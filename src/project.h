@@ -29,10 +29,13 @@
 #include "configlib.h"
 #include "bundlelib.h"
 
+#include <unordered_map>
+
 struct VulStaticProject {
     VulStaticConfigLib          global_configlib;
     VulStaticBundleLib          global_bundlelib;
     vector<string>              global_helper_codes;
+    std::unordered_map<string, string> global_names;
 
     VulStaticTestHarnessModule  test_harness;
     shared_ptr<VulStaticModuleInstance> top_module_instance;

@@ -28,6 +28,7 @@
 #include "stringop.hpp"
 #include "toposort.hpp"
 #include "vullib.hpp"
+#include "validate.hpp"
 
 using namespace cppparse;
 using namespace stringop;
@@ -45,6 +46,9 @@ using namespace stringop;
 
 struct VCPPModuleContext {
     VulTempModule temp;
+    unordered_map<string, string> local_names;
+    unordered_map<string, string> *global_names = nullptr;
+    bool is_global_header = false;
     std::vector<uint32_t> line_mapping; // new line number -> original line number (1-based)
     inline string getOriginalPosition(const LinePosition &pos) const {
         if (pos.line < 0 || pos.line >= line_mapping.size()) {
@@ -74,6 +78,55 @@ struct VCPPModuleContext {
             }
         }
         return locs;
+    }
+    inline string macroPosition(const MacroEntry &entry) const {
+        return getOriginalPosition(entry.pos);
+    }
+    void declareName(const string &raw_name, const string &kind, const MacroEntry &entry) {
+        const string declared_name = trim(raw_name);
+        const string position = macroPosition(entry);
+        VulErrorContextGuard _err{
+            "declaring " + kind + " name '" +
+            (declared_name.empty() ? string("<empty>") : declared_name) +
+            "' at " + position
+        };
+        if (declared_name.empty()) {
+            throw VulException(kind + " name cannot be empty at " + position);
+        }
+        if (is_global_header) {
+            if (global_names == nullptr) {
+                throw VulException("Internal error: global header scope is not available");
+            }
+            auto iter = global_names->find(declared_name);
+            if (iter != global_names->end()) {
+                throw VulException(
+                    "Global header name redefinition: '" + declared_name +
+                    "' was already defined as " + iter->second +
+                    ", cannot redefine as " + kind + " at " + position
+                );
+            }
+            (*global_names)[declared_name] = kind;
+            return;
+        }
+        auto local_iter = local_names.find(declared_name);
+        if (local_iter != local_names.end()) {
+            throw VulException(
+                "Module scope name redefinition: '" + declared_name +
+                "' was already defined as " + local_iter->second +
+                ", cannot redefine as " + kind + " at " + position
+            );
+        }
+        if (global_names != nullptr) {
+            auto global_iter = global_names->find(declared_name);
+            if (global_iter != global_names->end()) {
+                throw VulException(
+                    "Module scope name conflicts with global header name: '" + declared_name +
+                    "' was already defined globally as " + global_iter->second +
+                    ", cannot define as " + kind + " at " + position
+                );
+            }
+        }
+        local_names[declared_name] = kind;
     }
 };
 
@@ -132,6 +185,7 @@ public:
         VulTempConfig config;
         config.name = entry.args[0];
         config.value = entry.args[1];
+        context.declareName(config.name, "CONFIG", entry);
         context.temp.configs.push_back(std::move(config));
     }
 };
@@ -147,6 +201,7 @@ public:
         VulTempConfig param;
         param.name = entry.args[0];
         param.value = entry.args[1];
+        context.declareName(param.name, "PARAMETER", entry);
         context.temp.params.push_back(std::move(param));
     }
 };
@@ -162,6 +217,7 @@ public:
         VulTempBundle bundle;
         bundle.name = entry.args[0];
         bundle.is_alias = true;
+        context.declareName(bundle.name, "ALIAS", entry);
         VulTempBundleMember alias_member;
         alias_member.name = "target";
         alias_member.type = entry.args[1];
@@ -183,6 +239,7 @@ public:
         VulTempBundle bundle;
         bundle.name = entry.args[0];
         bundle.is_alias = true;
+        context.declareName(bundle.name, "ALIAS_ARRAY1", entry);
         VulTempBundleMember alias_member;
         alias_member.name = "target";
         alias_member.type = entry.args[1];
@@ -204,6 +261,7 @@ public:
         VulTempBundle bundle;
         bundle.name = entry.args[0];
         bundle.is_alias = true;
+        context.declareName(bundle.name, "ALIAS_ARRAY2", entry);
         VulTempBundleMember alias_member;
         alias_member.name = "target";
         alias_member.type = entry.args[1];
@@ -230,6 +288,7 @@ public:
         VulTempBundle bundle;
         bundle.name = entry.args[0];
         bundle.is_alias = false;
+        context.declareName(bundle.name, "STRUCT", entry);
         string body;
         for (const auto line : entry.body) {
             body += trim(line);
@@ -256,6 +315,7 @@ public:
         VulTempBundle bundle;
         bundle.name = entry.args[0];
         bundle.is_alias = false;
+        context.declareName(bundle.name, "ENUM", entry);
 
         string body;
         for (const auto &line : entry.body) {
@@ -294,6 +354,7 @@ public:
         VulTempRegister reg;
         reg.name = entry.args[0];
         reg.type = entry.args[1];
+        context.declareName(reg.name, "REGISTER", entry);
         if (entry.args.size() >= 3) {
             reg.portnum = entry.args[2];
         }
@@ -315,6 +376,7 @@ public:
         VulTempRegister reg;
         reg.name = entry.args[0];
         reg.type = entry.args[1];
+        context.declareName(reg.name, "REGISTER_MUL", entry);
         if (entry.args.size() >= 3) {
             reg.portnum = entry.args[2];
         }
@@ -336,6 +398,7 @@ public:
         VulTempRegister reg;
         reg.name = entry.args[0];
         reg.type = entry.args[1];
+        context.declareName(reg.name, "REGISTER_ARRAY1", entry);
         reg.portnum = entry.args[3];
         reg.dims.push_back(entry.args[2]);
         reg.reset_codelines = entry.body;
@@ -357,6 +420,7 @@ public:
         VulTempWire wire;
         wire.name = entry.args[0];
         wire.type = entry.args[1];
+        context.declareName(wire.name, "WIRE", entry);
         wire.reset_codelines = entry.body;
         wire.reset_codelines_debug = context.bodyDebugLocs(entry);
         context.temp.wires.push_back(std::move(wire));
@@ -427,6 +491,7 @@ public:
         VulTempReq req;
         req.name = entry.args[0];
         req.has_handshake = false;
+        context.declareName(req.name, "REQUEST", entry);
         VulErrorContextGuard _err{"Processing REQUEST '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 1, req);
         context.temp.requests.push_back(std::move(req));
@@ -443,6 +508,7 @@ public:
         VulTempReq req;
         req.name = entry.args[0];
         req.has_handshake = true;
+        context.declareName(req.name, "REQUEST_READY", entry);
         VulErrorContextGuard _err{"Processing REQUEST_READY '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
         parseReqArgsAndRets(entry.args, 1, req);
         context.temp.requests.push_back(std::move(req));
@@ -461,6 +527,7 @@ public:
         VulTempServ serv;
         serv.name = entry.args[0];
         serv.has_handshake = false;
+        context.declareName(serv.name, "SERVICE", entry);
         serv.cond = "";
         serv.priority = "";
         serv.codelines = entry.body;
@@ -482,6 +549,7 @@ public:
         VulTempServ serv;
         serv.name = entry.args[0];
         serv.has_handshake = true;
+        context.declareName(serv.name, "SERVICE_READY", entry);
         serv.cond = entry.args[1];
         serv.cond_debug = context.toDebugLoc(entry.pos);
         serv.priority = "";
@@ -503,6 +571,7 @@ public:
         VulTempServ serv;
         serv.name = entry.args[0];
         serv.has_handshake = false;
+        context.declareName(serv.name, "SERVICE_PRIO", entry);
         serv.cond = "";
         serv.priority = entry.args[1];
         serv.codelines = entry.body;
@@ -523,6 +592,7 @@ public:
         VulTempServ serv;
         serv.name = entry.args[0];
         serv.has_handshake = true;
+        context.declareName(serv.name, "SERVICE_PRIO_READY", entry);
         serv.priority = entry.args[1];
         serv.cond = entry.args[2];
         serv.cond_debug = context.toDebugLoc(entry.pos);
@@ -548,6 +618,7 @@ public:
         VulTempQuery query;
         query.name = entry.args[0];
         query.ret_type = entry.args[1];
+        context.declareName(query.name, "QUERY", entry);
         query.codelines = entry.body;
         query.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing QUERY '" + query.name + "' at " + context.getOriginalPosition(entry.pos)};
@@ -579,6 +650,7 @@ public:
         VulTempInstance inst;
         inst.name = entry.args[1];
         inst.module_name = entry.args[0];
+        context.declareName(inst.name, "CHILD_INSTANCE", entry);
         for (size_t i = 2; i < entry.args.size(); ++i) {
             const string &param_override_raw = entry.args[i];
             const size_t split_pos = param_override_raw.find('=');
@@ -607,6 +679,7 @@ public:
         VulTempInstance inst;
         inst.name = entry.args[1];
         inst.module_name = entry.args[0];
+        context.declareName(inst.name, "CHILD_INSTANCE_ARRAY1", entry);
         inst.array_dims.push_back(entry.args[2]);
         for (size_t i = 3; i < entry.args.size(); ++i) {
             const string &param_override_raw = entry.args[i];
@@ -636,6 +709,7 @@ public:
         VulTempInstance inst;
         inst.name = entry.args[1];
         inst.module_name = entry.args[0];
+        context.declareName(inst.name, "CHILD_INSTANCE_ARRAY2", entry);
         inst.array_dims.push_back(entry.args[2]);
         inst.array_dims.push_back(entry.args[3]);
         for (size_t i = 4; i < entry.args.size(); ++i) {
@@ -667,6 +741,7 @@ public:
         use.instance_expr = entry.args[0];
         use.service_name = entry.args[1];
         use.alias_name = entry.args[2];
+        context.declareName(use.alias_name, "USE_CHILD_SERVICE_PORT", entry);
         context.temp.child_service_uses.push_back(std::move(use));
     }
 };
@@ -684,6 +759,7 @@ public:
         use.query_name = entry.args[1];
         use.alias_name = entry.args[2];
         use.ret_type = entry.args[3];
+        context.declareName(use.alias_name, "USE_CHILD_QUERY", entry);
         context.temp.child_query_uses.push_back(std::move(use));
     }
 };
@@ -768,6 +844,7 @@ public:
         VulTempBRAM bram;
         bram.name = entry.args[0];
         bram.data_type = entry.args[1];
+        context.declareName(bram.name, "BRAM", entry);
         bram.addr_size = entry.args[2];
         bram.read_ports = entry.args[3];
         bram.write_ports = entry.args[4];
@@ -785,6 +862,7 @@ public:
         VulTempBRAM bram;
         bram.name = entry.args[0];
         bram.data_type = entry.args[1];
+        context.declareName(bram.name, "BRAM_1RW", entry);
         bram.addr_size = entry.args[2];
         bram.read_ports = "";
         bram.write_ports = "";
@@ -802,6 +880,7 @@ public:
         VulTempDigitalROM rom;
         rom.name = entry.args[0];
         rom.data_width = entry.args[1];
+        context.declareName(rom.name, "ROM", entry);
         rom.addr_size = entry.args[2];
         rom.read_ports = entry.args[3];
         rom.init_path = entry.args[4];
@@ -819,6 +898,7 @@ public:
         VulTempQueue queue;
         queue.name = entry.args[0];
         queue.type = entry.args[1];
+        context.declareName(queue.name, "QUEUE", entry);
         queue.depth = entry.args[2];
         queue.enq_width = "1";
         queue.deq_width = "1";
@@ -836,6 +916,7 @@ public:
         VulTempQueue queue;
         queue.name = entry.args[0];
         queue.type = entry.args[1];
+        context.declareName(queue.name, "QUEUE_MP", entry);
         queue.depth = entry.args[2];
         queue.enq_width = entry.args[3];
         queue.deq_width = entry.args[4];
@@ -864,13 +945,17 @@ static VCPPModuleAutoRegisterHandler<VCPPModuleHELPER> _auto_register_HELPER_han
 
 VulTempModule _parseTempModule(
     const string &module_name,
-    const string &module_filepath
+    const string &module_filepath,
+    unordered_map<string, string> *global_names = nullptr,
+    bool is_global_header = false
 ) {
     VulErrorContextGuard _err{"Parsing module '" + module_name + "' from file '" + module_filepath + "'"};
 
     VCPPModuleContext context;
     context.temp.name = module_name;
     context.temp.filepath = module_filepath;
+    context.global_names = global_names;
+    context.is_global_header = is_global_header;
 
     vector<string> code_lines = readFileLines(module_filepath);
     auto trim_res = stripComments(code_lines);
@@ -1356,36 +1441,17 @@ static vector<std::filesystem::path> collectHeaderParseOrder(const std::filesyst
 
 static void importGlobalHeaderModule(
     VulStaticProject &project,
-    const VulTempModule &header_module,
-    unordered_map<string, string> &global_names
+    const VulTempModule &header_module
 ) {
     for (const auto& item : header_module.configs) {
         VulErrorContextGuard _err{"evaluating global header constant " + item.name};
-        auto name_iter = global_names.find(item.name);
-        if (name_iter != global_names.end()) {
-            throw VulException(
-                "Global header name redefinition: '" + item.name +
-                "' was already defined as " + name_iter->second +
-                ", cannot redefine as CONFIG"
-            );
-        }
         ConfigRealValue value = calculateConstexprValue(item.value, project.global_configlib);
         project.global_configlib[item.name] = value;
-        global_names[item.name] = "CONFIG";
     }
     for (const auto& item : header_module.bundles) {
         VulErrorContextGuard _err{"staticalizing global header bundle " + item.name};
-        auto name_iter = global_names.find(item.name);
-        if (name_iter != global_names.end()) {
-            throw VulException(
-                "Global header name redefinition: '" + item.name +
-                "' was already defined as " + name_iter->second +
-                ", cannot redefine as bundle"
-            );
-        }
         VulStaticBundle static_bundle = staticalizeBundle(item, project.global_configlib);
         project.global_bundlelib.push_back(std::move(static_bundle));
-        global_names[item.name] = item.is_alias ? "ALIAS" : (item.enum_members.empty() ? "STRUCT" : "ENUM");
     }
     project.global_helper_codes.insert(
         project.global_helper_codes.end(),
@@ -1424,11 +1490,15 @@ static void parseProjectHeaders(
         header_files.push_back(has_header_hpp ? header_hpp : header_h);
     }
 
-    unordered_map<string, string> global_names;
     for (const auto &header_path : header_files) {
         VulErrorContextGuard _err{"parsing global header file " + header_path.string()};
-        VulTempModule fake_module = _parseTempModule(header_path.stem().string(), header_path.string());
-        importGlobalHeaderModule(project, fake_module, global_names);
+        VulTempModule fake_module = _parseTempModule(
+            header_path.stem().string(),
+            header_path.string(),
+            &project.global_names,
+            true
+        );
+        importGlobalHeaderModule(project, fake_module);
     }
 }
 
@@ -1579,7 +1649,12 @@ VulStaticProject parseVcppStaticProject(
 
             VulErrorContextGuard _err_file{"entering module file " + mod_file_str};
 
-            temp_module_cache[mod_name] = _parseTempModule(mod_name, mod_file_str);
+            temp_module_cache[mod_name] = _parseTempModule(
+                mod_name,
+                mod_file_str,
+                &project.global_names,
+                false
+            );
             temp_mod_ptr = &temp_module_cache[mod_name];
         }
 
@@ -1611,6 +1686,7 @@ VulStaticProject parseVcppStaticProject(
     }
     project.top_module_instance = top_instance;
 
+    validateStaticProject(project);
 
     printf("Successfully parsed project. Summary:\n");
     printf("Parse %ld modules:\n", module_file_path_cache.size());
