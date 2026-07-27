@@ -62,7 +62,7 @@ SERVICE(refill_s0, ARG(Int<ADDR_WIDTH>) addr, ARG(Int<DATA_WIDTH>) data) {
 
 TICK_IMPL() {
     bool hit = false;
-    Int<DATA_WIDTH> read_data;
+    Int<DATA_WIDTH> read_data = 0;
     if (read_stage.get().valid) {
         Int<TAG_WIDTH> tag = read_stage.get().addr.at<ADDR_WIDTH - 1, INDEX_WIDTH>();
         TagEntry tag_entry = tag_array.readdata<0>();
@@ -76,6 +76,7 @@ TICK_IMPL() {
     }
     if (!read_inputed) {
         ReadStageReg s0;
+        s0.addr = 0;
         s0.valid = false;
         read_stage.setnext(s0);
     }
