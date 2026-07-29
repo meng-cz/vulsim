@@ -678,6 +678,31 @@ void instantiateModule(
     }
 
     // child service uses
+    auto check_child_alias_array_size = [&](const string &macro_name,
+                                            const string &alias_name,
+                                            const string &array_expr,
+                                            ConfigRealValue expected_size) {
+        if (array_expr.empty()) {
+            return;
+        }
+        ConfigRealValue explicit_size = calculateConstexprValue(array_expr, local_config_lib);
+        if (explicit_size <= 0) {
+            throw VulException(macro_name + " array size for alias '" + alias_name + "' must be positive");
+        }
+        if (explicit_size != expected_size) {
+            throw VulException(macro_name + " array size for alias '" + alias_name +
+                               "' does not match wildcard instance dimension");
+        }
+    };
+    auto reject_child_alias_array_size = [&](const string &macro_name,
+                                             const string &alias_name,
+                                             const string &array_expr) {
+        if (!array_expr.empty()) {
+            throw VulException(macro_name + " array=<N> for alias '" + alias_name +
+                               "' requires exactly one '*' wildcard in instance expression");
+        }
+    };
+
     instance.child_service_uses.clear();
     for (const auto &temp_use : temp.child_service_uses) {
         const ParsedInstanceExpr child_expr = parseInstanceExpr(temp_use.instance_expr);
@@ -686,6 +711,7 @@ void instantiateModule(
             if (child_decl.isArrayed()) {
                 throw VulException("Array child instance '" + child_expr.base_name + "' requires explicit indices in USE_CHILD_SERVICE_PORT");
             }
+            reject_child_alias_array_size("USE_CHILD_SERVICE", temp_use.alias_name, temp_use.array_size);
             VulStaticChildServiceUse use;
             use.alias_name = temp_use.alias_name;
             use.instance_name = child_expr.base_name;
@@ -705,6 +731,7 @@ void instantiateModule(
             if (!tryResolveConcreteInstance(child_expr, child_decl, local_config_lib, {}, concrete_name)) {
                 throw VulException("Indexed child instance out of range in USE_CHILD_SERVICE_PORT");
             }
+            reject_child_alias_array_size("USE_CHILD_SERVICE", temp_use.alias_name, temp_use.array_size);
             VulStaticChildServiceUse use;
             use.alias_name = temp_use.alias_name;
             use.instance_name = concrete_name;
@@ -714,6 +741,8 @@ void instantiateModule(
         }
 
         const size_t wildcard_dim = wildcard_dims[0];
+        check_child_alias_array_size("USE_CHILD_SERVICE", temp_use.alias_name,
+                                     temp_use.array_size, child_decl.array_dims[wildcard_dim]);
         for (ConfigRealValue wildcard_idx = 0; wildcard_idx < child_decl.array_dims[wildcard_dim]; ++wildcard_idx) {
             vector<ConfigRealValue> concrete_indices;
             concrete_indices.reserve(child_expr.index_exprs.size());
@@ -764,6 +793,7 @@ void instantiateModule(
             if (child_decl.isArrayed()) {
                 throw VulException("Array child instance '" + child_expr.base_name + "' requires explicit indices in USE_CHILD_QUERY");
             }
+            reject_child_alias_array_size("USE_CHILD_QUERY", temp_use.alias_name, temp_use.array_size);
             materialize_use(child_expr.base_name, 0, false);
             continue;
         }
@@ -779,11 +809,14 @@ void instantiateModule(
             if (!tryResolveConcreteInstance(child_expr, child_decl, local_config_lib, {}, concrete_name)) {
                 throw VulException("Indexed child instance out of range in USE_CHILD_QUERY");
             }
+            reject_child_alias_array_size("USE_CHILD_QUERY", temp_use.alias_name, temp_use.array_size);
             materialize_use(concrete_name, 0, false);
             continue;
         }
 
         const size_t wildcard_dim = wildcard_dims[0];
+        check_child_alias_array_size("USE_CHILD_QUERY", temp_use.alias_name,
+                                     temp_use.array_size, child_decl.array_dims[wildcard_dim]);
         for (ConfigRealValue wildcard_idx = 0; wildcard_idx < child_decl.array_dims[wildcard_dim]; ++wildcard_idx) {
             vector<ConfigRealValue> concrete_indices;
             concrete_indices.reserve(child_expr.index_exprs.size());

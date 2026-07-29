@@ -230,6 +230,7 @@ struct VulTempChildServiceUse {
     string instance_expr;
     string service_name;
     string alias_name;
+    string array_size;
 };
 
 struct VulTempChildQueryUse {
@@ -237,6 +238,7 @@ struct VulTempChildQueryUse {
     string query_name;
     string alias_name;
     string ret_type;
+    string array_size;
 };
 
 struct VulTempBRAM {

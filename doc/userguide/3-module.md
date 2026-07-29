@@ -1,405 +1,463 @@
 # 3. VulCPP 模块定义
 
-在 VulCPP 中，模块是构建硬件设计的基本单元。每个模块都由一个同名 C++ 头文件定义，包含了模块的接口、行为和内部实现细节。
+在 VulCPP 中，模块是构建硬件设计的基本单元。每个模块通常由一个同名 C++ 头文件定义，文件中包含模块参数、接口、状态组件、子实例、连接关系和行为代码。
 
-下面列举了所有能用在模块头文件中的宏定义：
+本章优先介绍新的统一 API 写法。旧版本中通过宏名区分的写法仍然兼容，例如 `REQUEST_READY`、`SERVICE_PRIO_READY`、`REGISTER_ARRAY1` 等；这些兼容语法糖集中列在本文末尾。
 
-## 所有在 header.hpp 中可以使用的宏
+## 3.1 通用参数约定
 
-包括：
-- `CONFIG(name, value)`
-- `STRUCT(name) { ... }`
-- `ENUM(name) { ... }`
-- `ALIAS(name, type)`
-- `ALIAS_ARRAY1(name, type, N)`
-- `ALIAS_ARRAY2(name, type, N1, N2)`
+统一定义风格：
 
-但不同与 `header.hpp` 中，这些宏定义在模块头文件中只能用来定义模块内部使用的常量、结构体和类型别名，不能定义全局可见的常量和类型。
-
-## PARAMETER(name, value)
-
-定义一个模块实例化参数：
-- `name`：参数的名称
-- `value`：参数的默认值表达式
-
-类型固定为 `int64_t`。类似于 systemverilog 中的 parameter 或 C++ 中的模板参数，模块实例化时可以覆盖这个默认值。
-
-## HELPER() { ... }
-
-定义一个模块内部使用的辅助函数或代码块：
-- `{ ... }`：辅助函数或代码块的定义，可以包含任意合法的 C++ 函数实现、常量定义、类型定义等
-
-**HELPER 域中禁止包含任何运行期变量，所有变量必须通过 REGISTER 或 WIRE 定义**
-
-## REGISTER(name, type) { ... }
-
-定义一个模块寄存器：
-- `name`：寄存器的名称
-- `type`：寄存器的数据类型，可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
-- `{ ... }`：寄存器的复位赋值代码块
-
-使用示例：
 ```cpp
-REGISTER(counter, uint8_t) {
-    counter = 0; // 寄存器的复位赋值逻辑，在模块复位时执行
+MACRO(required_arg0, required_arg1, key=value, key2=value2, ...)
+```
+
+必要位置参数写在最前面，可选属性使用 `key=value`。事务端口的业务参数使用 `ARG(type) name` 和 `RESP(type) name`。参数间允许换行：
+
+```cpp
+REQUEST(send, handshake=1, ARG(uint8_t) data);
+SERVICE(recv, ready=q.deqvalid(), RESP(uint32_t) data) {
+    ...
 }
 ```
 
-对于Struct类型的寄存器，复位赋值代码块必须包含对寄存器所有字段的赋值逻辑，以保证寄存器在复位时被完全初始化：
+布尔属性支持 `0/1` 和 `true/false`。维度列表使用方括号 `[...]`：
+
 ```cpp
-STRUCT(MyStruct) {
-    uint8_t a;
-    bool b;
+REGISTER(pipe, PipeStage, dims=[PIPE_DEPTH], ports=1) { ... }
+CHILD_INSTANCE(DiagNode, mesh, dims=[HEI, WID]);
+ALIAS(U32x4, uint32_t, dims=[4]);
+```
+
+没有逗号的单个维度也可以直接写：
+
+```cpp
+REGISTER(pipe, PipeStage, dims=PIPE_DEPTH, ports=1) { ... }
+```
+
+## 3.2 Header / 类型定义
+
+以下宏既可以出现在项目 `header.hpp` / `header.h` / `header/` 中，也可以出现在模块头文件中。不同之处是：项目 header 中定义的是全局可见名字，模块头文件中定义的是模块局部名字。
+
+### CONFIG(name, value)
+
+定义一个常量：
+
+```cpp
+CONFIG(WIDTH, 32);
+CONFIG(LEN, WIDTH / 8);
+```
+
+`value` 是常量表达式，类型按 `int64_t` 处理。全局 header 中的 `CONFIG` 会对所有模块可见；模块内 `CONFIG` 只在当前模块内可见。
+
+### PARAMETER(name, value)
+
+定义一个可由子实例化处覆盖的模块参数：
+
+```cpp
+PARAMETER(WIDTH, 32);
+```
+
+实例化模块时可以通过 `CHILD_INSTANCE(..., PARAM(WIDTH)=64)` 覆盖默认值。`PARAMETER` 的值同样按常量表达式处理。
+
+### ALIAS(name, type, dims=[...])
+
+定义类型别名。无 `dims` 时是普通别名，有 `dims` 时是数组别名：
+
+```cpp
+ALIAS(Word, uint32_t);
+ALIAS(U32x4, uint32_t, dims=[4]);
+ALIAS(Matrix, uint8_t, dims=[2, 3]);
+```
+
+语法意义上等价于：
+
+```cpp
+using Word = uint32_t;
+using U32x4 = std::array<uint32_t, 4>;
+using Matrix = std::array<std::array<uint8_t, 3>, 2>;
+```
+
+### ENUM(name) { ... }
+
+定义枚举类型：
+
+```cpp
+ENUM(Op) {
+    Add = 0,
+    Sub = 1,
+};
+```
+### STRUCT(name) { ... }
+
+定义结构体类型：
+
+```cpp
+STRUCT(Packet) {
+    uint32_t data;
+    bool valid;
+};
+```
+
+结构体字段可以使用标准整数类型、`bool`、`Int<N>`、`ALIAS`、`ENUM`、或其他 `STRUCT` 类型。
+
+
+### HELPER() { ... }
+
+定义模块内部使用的辅助函数或纯编译期代码：
+
+```cpp
+HELPER() {
+inline constexpr uint32_t inc(uint32_t x) {
+    return x + 1;
 }
-REGISTER(myreg, MyStruct) {
-    myreg.a = 0;
-    myreg.b = false;
 }
 ```
 
-Register 提供下列 API 供行为代码调用：
+在可综合语法子集下，`HELPER` 中禁止定义运行期变量。需要跨周期保存的状态必须使用 `REGISTER`，需要周期内临时状态必须使用 `WIRE`。
+
+## 3.3 状态组件
+
+### REGISTER(name, type, ports=1, dims=[...]) { ... }
+
+定义寄存器或寄存器数组：
+
 ```cpp
-REGISTER(counter, uint8_t) {
+REGISTER(counter, uint32_t) {
     counter = 0;
 }
-REGISTER(myreg, MyStruct) {
-    myreg.a = 0;
-    myreg.b = false;
-}
-TICK_IMPL() {
-    uint8_t val = counter; // 读取寄存器当前值
-    counter.setnext(val + 1); // 在下个周期将寄存器值更新为 val + 1
-    counter.setnext(val.get() + 1); // 等价于上面一行，get() 用于显式获取寄存器当前值
-    
-    MyStruct s = myreg; // 读取寄存器当前值
-    uint8_t a = myreg.get().a; // !!! 对于非基础类型的寄存器，必须显式使用 get() 来获取寄存器当前值
-    // a = myreg.a; // !!! 错误（C++语法错误，源于隐式类型转换不适用于.或[]运算符
-}
-```
 
-约束：
-- 同一个寄存器写端口在同一个周期内只允许调用一次 `setnext()`。
-- 非 `release` 编译下，重复调用会触发 `assert` 退出。
-- `release` 编译下属于未定义行为。
-
-
-## REGISTER_MUL(name, type, portnum) { ... }
-
-带有多个写端口和优先级仲裁器的寄存器定义:
-- `name`：寄存器的名称
-- `type`：寄存器的数据类型，可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
-- `portnum`：寄存器的写端口数量，整数类型，必须大于0
-- `{ ... }`：寄存器的复位赋值代码块
-
-API 定义同 REGISTER，但每个写端口的 setnext 函数都需要指定一个 priority，用于仲裁多个写端口在同一周期写入时的优先级。
-
-当多个写端口在同一周期写入时，具有更低 priority 值的写入会覆盖具有更高 priority 值的写入。priority 的默认值为0，表示最高优先级。例如：
-
-```cpp
-REGISTER_MUL(myreg, uint8_t, 2) {
-    myreg = 0;
-}
-
-SERVICE(serv1, ARG(uint8_t) a) {
-    myreg.setnext<0>(a); // serv1 的写端口优先级为 0，优先级高于 tick
-}
-
-TICK_IMPL() {
-    myreg.setnext<1>(myreg + 1); // tick 的写端口优先级为 1
-}
-```
-
-这个硬件模块中，如果一个周期内，serv1 和 tick 都对 myreg 进行写入，那么 serv1 中对 myreg 的写入会覆盖 tick 中对 myreg 的写入。
-
-注意：
-- 这里允许不同写端口在同一周期写同一个寄存器，并按端口优先级仲裁。
-- 但同一个写端口自身在同一周期内重复调用 `setnext<P>()` 仍然是未定义行为；非 `release` 编译下会触发 `assert`。
-
-## REGISTER_ARRAY1(name, type, size, portnum) { ... }
-
-定义一个一维寄存器数组：
-- `name`：寄存器数组的名称
-- `type`：寄存器的数据类型
-- `size`：数组的大小
-- `portnum`：每个寄存器单元的写端口数量
-- `{ ... }`：寄存器数组的复位赋值代码块
-
-初始化代码中需要包含对数组中每个寄存器单元的赋值逻辑，可以使用循环等结构，以保证寄存器数组在复位时被完全初始化：
-```cpp
-REGISTER_ARRAY1(myarray, uint8_t, 10, 1) {
-    for (int i = 0; i < 10; i++) {
-        myarray[i] = 0;
+REGISTER(scoreboard, bool, dims=[32], ports=2) {
+    for (uint32_t i = 0; i < 32; ++i) {
+        scoreboard[i] = false;
     }
 }
 ```
 
-Register Array 提供下列 API 供行为代码调用：
+参数说明：
+
+- `name`：寄存器名称。
+- `type`：寄存器元素类型。
+- `ports`：写端口数量，默认 `1`。多端口寄存器通过 `setnext<P>(...)` 指定写端口优先级。
+- `dims`：数组维度。省略时是标量寄存器；`dims=[N]` 是一维寄存器数组。
+- `{ ... }`：复位赋值代码块。
+
+标量寄存器使用示例：
+
 ```cpp
-REGISTER_ARRAY1(myarray, uint8_t, 10, 1) {
-    for (int i = 0; i < 10; i++) {
-        myarray[i] = 0;
+REGISTER(counter, uint32_t, ports=2) {
+    counter = 0;
+}
+
+TICK_IMPL() {
+    uint32_t now = counter;
+    counter.setnext<0>(now + 1);
+    counter.setnext<1>(counter.get() + 2); // 等价显式读取
+}
+```
+
+结构体寄存器建议显式使用 `.get()` 读取字段：
+
+```cpp
+STRUCT(Status) {
+    uint8_t code;
+    bool valid;
+};
+
+REGISTER(status, Status) {
+    status.code = 0;
+    status.valid = false;
+}
+
+TICK_IMPL() {
+    Status s = status;
+    uint8_t code = status.get().code; // status.code 在 C++ 中不能合法重载
+}
+```
+
+多端口写入示例：
+
+```cpp
+REGISTER(value, uint8_t, ports=2) {
+    value = 0;
+}
+
+SERVICE(write, ARG(uint8_t) data) {
+    value.setnext<0>(data);
+}
+
+TICK_IMPL() {
+    value.setnext<1>(value + 1);
+}
+```
+
+同一周期中，较小端口编号具有更高优先级。上例中端口 `0` 的写入会覆盖端口 `1`。同一个写端口在同一周期内重复 `setnext` 属于非法用法；非 release 编译通常会触发断言。
+
+数组寄存器示例：
+
+```cpp
+REGISTER(pipe, uint32_t, dims=[4], ports=1) {
+    for (uint32_t i = 0; i < 4; ++i) {
+        pipe[i] = 0;
     }
 }
+
 TICK_IMPL() {
-    uint8_t val = myarray[3]; // 读取寄存器数组中索引为 3 的寄存器单元的当前值
-    myarray.setnext<0>(4, val + 1); // 在下个周期将寄存器数组中索引为 4 的寄存器单元的值更新为 val + 1
+    uint32_t v = pipe[0];
+    pipe.setnext<0>(1, v + 1);
 }
 ```
 
-约束：
-- 对于数组中的同一个寄存器单元，同一个写端口在同一周期内只允许调用一次 `setnext<P>(index, ...)`。
-- 非 `release` 编译下，重复调用会触发 `assert` 退出。
-- `release` 编译下属于未定义行为。
+### WIRE(name, type) { ... }
 
-## WIRE(name, type) { ... }
+定义周期内临时变量：
 
-临时变量定义，类似于 verilog 中的 wire，仅在当前周期内生效：
-- `name`：变量的名称
-- `type`：变量的数据类型，可以是标准整数类型、bool 类型
-- `{ ... }`：变量的赋值表达式，在每个周期开始时被重置回这个值
-
-展开后提供以下等价声明供行为代码调用：
 ```cpp
-type name; // 临时变量的值，可以读写
-```
+WIRE(hit, bool) {
+    hit = false;
+}
 
-## REQUEST(name, ARG(type1) arg, ..., RESP(type2) resp, ...)
-
-定义一个请求事务接口：
-- `name`：事务接口的名称
-- `ARG(type) arg`：事务接口的参数列表，每个参数由 `ARG(type) argname` 定义，**参数只读**，type 可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
-- `RESP(type) resp`：事务接口的响应参数列表，每个响应参数由 `RESP(type) respname` 定义，**参数只写**，type 可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
-
-展开后提供以下等价声明供行为代码调用：
-```cpp
-void name(const type1& arg1, ..., type2& resp1, ...); // 事务接口的函数声明
-```
-
-## REQUEST_READY(name, ARG(type1) arg, ..., RESP(type2) resp, ...)
-
-同 REQUEST，但定义了一个包含 valid-ready 握手行为的请求事务接口。
-
-展开后提供以下等价声明供行为代码调用：
-```cpp
-bool name(const type1& arg1, ..., type2& resp1, ...); // 事务接口的函数声明，返回值为 bool 表示事务包含 valid-ready 握手行为
-```
-
-## SERVICE(name, ARG(type1) arg, ..., RESP(type2) resp, ...) { ... }
-
-定义一个服务事务接口：
-- `name`：事务接口的名称
-- `ARG(type) arg`：事务接口的参数列表，每个参数由 `ARG(type) argname` 定义，**参数只读**，type 可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
-- `RESP(type) resp`：事务接口的响应参数列表，每个响应参数由 `RESP(type) respname` 定义，**参数只写**，type 可以是标准整数类型、已定义的结构体类型、bool 类型，或者其他已定义的别名类型
-- `{ ... }`：事务接口的实现代码块，包含了当事务被成功触发时应该执行的行为逻辑
-
-例如：
-```cpp
-SERVICE(recv, ARG(uint8_t) a, RESP(uint8_t) b) {
-    b = a + 1;
+TICK_IMPL() {
+    hit = true;
 }
 ```
 
-**实现代码中对 RESP 定义的参数的读取是非法的，RESP 参数在进入逻辑函数时其值是未定义的**
+`WIRE` 在每个周期开始时按代码块恢复默认值，之后可在当前周期内读写。
 
+## 3.4 事务端口
 
-## SERVICE_READY(name, condition, ARG(type1) arg, ..., RESP(type2) resp, ...) { ... }
+事务端口分为请求端口 `REQUEST` 和服务端口 `SERVICE`。二者通过 `CONNECT` 建立连接，或者在模块行为代码中直接调用已引入的端口函数。
 
-同 SERVICE，但定义了一个包含 valid-ready 握手行为的服务事务接口:
-- `condition`：握手条件表达式，只有当这个表达式的值为 true 时，事务才会被成功触发
+端口业务参数使用：
 
-condition 是一个标准的 C++ 表达式，结果为 bool 类型，可以包含对模块寄存器的读取以及对事务接口参数的读取，但不允许包含任何 I/O 操作（如打印语句）或对寄存器的写入。
+- `ARG(type) name`：只读输入参数，调用方驱动被调用方。
+- `RESP(type) name`：只写响应参数，被调用方驱动调用方。
 
-等价于：
+### REQUEST(name, handshake=0, array=N, ARG(...), RESP(...))
+
+定义请求事务端口：
+
 ```cpp
-bool _condition(const type1& arg1, ..., type2& resp1, ...) const {
-    return (condition); // condition 表达式的计算结果
-}
-void _implementation(const type1& arg1, ..., type2& resp1, ...) {
-    ... // 事务被成功触发时执行的行为逻辑
-}
-bool service_name(const type1& arg1, ..., type2& resp1, ...) {
-    bool rdy = _condition(arg1, ..., resp1, ...); // 计算握手条件
-    if (rdy) _implementation(arg1, ..., resp1, ...); // 如果握手条件满足，则执行事务逻辑
-    return rdy; // 返回握手条件的计算结果，表示事务是否被成功触发
+REQUEST(output, ARG(Int<25>) data, ARG(Int<7>) tag);
+REQUEST(fetch, handshake=1, RESP(uint32_t) data);
+REQUEST(lane_out, array=LANES, ARG(uint32_t) data);
+```
+
+参数说明：
+
+- `handshake`：是否包含 valid-ready 握手返回值，默认 `0`。`handshake=1` 时事务函数调用返回 `bool`。
+- `array`：阵列化事务端口数量。省略时为普通端口。
+- `ARG/RESP`：端口参数列表。
+
+等价行为：
+
+```cpp
+REQUEST(send, ARG(uint8_t) data);              // void send(const uint8_t &data);
+REQUEST(send, handshake=1, ARG(uint8_t) data); // bool send(const uint8_t &data);
+```
+
+阵列化请求端口调用时使用模板参数：
+
+```cpp
+REQUEST(out, array=2, ARG(uint32_t) data);
+
+TICK_IMPL() {
+    out<0>(1);
+    out<1>(2);
 }
 ```
 
+### SERVICE(name, handshake=0, ready=cond, priority=prio, array=N, ARG(...), RESP(...)) { ... }
 
-## SERVICE_PRIO(name, priority, ARG(type1) arg, ..., RESP(type2) resp, ...) { ... }
+定义服务事务端口：
 
-同 SERVICE，但定义了一个带有优先级的服务事务接口:
-- `priority`：相对于Tick和其他服务的优先级整数值，值越小表示越靠后被执行（即后执行的会覆盖先执行的），负值表示优先级低于 Tick，正值表示优先级高于 Tick
+```cpp
+SERVICE(recv, ARG(uint8_t) data) {
+    ...
+}
+
+SERVICE(deq, ready=q.deqvalid(), RESP(uint32_t) data) {
+    data = q.front();
+    q.deqnext();
+}
+
+SERVICE(write, priority=1, ARG(uint8_t) data) {
+    ...
+}
+```
+
+参数说明：
+
+- `handshake`：是否包含 valid-ready 握手，默认 `0`。
+- `ready`：握手 ready 条件。提供 `ready` 时等价于 `handshake=1`；如果显式写 `handshake=1`，必须提供 `ready`。
+- `priority`：服务逻辑块优先级。较小值优先级更高。
+- `array`：阵列化服务端口数量。
+- `ARG/RESP`：端口参数列表。
+- `{ ... }`：事务成功触发时执行的逻辑。
+
+带 ready 条件的服务：
+
+```cpp
+SERVICE(recv, handshake=1, ready=((cycle & 1) == 0), ARG(uint8_t) data) {
+    sum.setnext(sum + data);
+}
+```
+
+实现代码中读取 `RESP` 参数是非法的，`RESP` 参数进入逻辑函数时值未定义，只能由服务逻辑写出。
+
+### 带有优先级的服务事务接口
+
+- `priority`：相对于Tick和其他服务的优先级整数值，值越小表示越靠后被执行（即后执行的会覆盖先执行的），负值表示执行顺序后于 Tick，正值表示执行顺序先于 Tick
 
 服务优先级指定了一个周期内服务被触发时的顺序约束。但尽量通过寄存器优先级赋值和合理的模块划分来避免依赖优先级保证行为正确性，因为顺序约束会随着潜在的事务调用被传递，很容易导致循环依赖。
 
-## SERVICE_PRIO_READY(name, priority, condition, ARG(type1) arg, ..., RESP(type2) resp, ...) { ... }
+## 3.5 QUERY 与周期行为
 
-SERVICE_READY 和 SERVICE_PRIO 的组合，定义了一个带有优先级的服务事务接口，并且包含 valid-ready 握手行为。
+### QUERY(name, rettype) { ... }
 
-## QUERY(name, rettype) { ... }
+定义只读查询接口：
 
-定义一个只读查询接口：
-- `name`：查询接口名称
-- `rettype`：返回值类型，可以是普通整数类型、`bool`、别名类型，或者 `STRUCT` 定义出的结构体类型
-- `{ ... }`：查询实现代码，必须通过 `return` 返回一个 `rettype` 类型的值
-
-`QUERY` 的语义与 `SERVICE` 不同：
-- `QUERY` 不参与 `CONNECT_*` 连接
-- `QUERY` 没有 `ARG(...)` / `RESP(...)` 参数
-- `QUERY` 代表对当前周期稳定状态的一次无副作用观测
-
-典型用法：
 ```cpp
 STRUCT(Status) {
     uint32_t sum;
-    bool ready;
+    bool valid;
 };
-
-REGISTER(sum, uint32_t) {
-    sum = 0;
-}
-QUEUE(q, uint32_t, 4);
 
 QUERY(status, Status) {
-    Status value;
-    value.sum = sum;
-    value.ready = q.enqready();
-    return value;
+    Status s;
+    s.sum = sum;
+    s.valid = true;
+    return s;
 }
 ```
 
-当前版本中，`QUERY` 的访问权限由用户自行保证。约定上，`QUERY` 中只应访问：
-- 本模块寄存器的当前值
-- 子实例声明并引入的 `QUERY`
-- 内置组件提供的 query 接口，例如 `q.enqready()`、`q.deqvalid()`
+`QUERY` 不参与 `CONNECT` 连接，没有 `ARG/RESP` 参数，代表当前周期稳定状态下的一次无副作用观测。`QUERY` 中只应读取本模块状态、组合线网、内置组件 query 或已引入的子实例 query。
 
+### TICK_IMPL() { ... }
 
-## TICK_IMPL()
+定义模块每周期执行的行为：
 
-定义模块的时钟行为实现：
-- 无参数
-
-函数体中的逻辑代码可以包含任意合法的**无I/O的** C++ 代码，表示模块在每个时钟周期应该执行的行为逻辑。
-
-等价于：
 ```cpp
-void tick_impl()
+TICK_IMPL() {
+    counter.setnext(counter + 1);
+}
 ```
 
-**TICK_IMPL() 在模块里是唯一的，多个定义中仅第一个有效**
+一个模块可以有多个 `TICK_IMPL` 代码块，生成器会把它们都纳入周期行为。
 
+## 3.6 子实例与子接口引入
 
-## CHILD_INSTANCE(module, name, param1=value1, param2=value2, ...)
+### CHILD_INSTANCE(module, name, dims=[...], PARAM(param)=value, ...)
 
-定义一个子模块实例：
-- `module`：子模块的名称
-- `name`：实例的名称
-- `param1=value1, param2=value2, ...`：实例化参数列表，每个参数由 `paramname=value` 定义
+定义子模块实例：
 
-会以 `name_xxx` 的形式暴露出子实例所属模块中定义的 CONST、STRUCT、ALIAS、ALIAS_ARRAY1、ALIAS_ARRAY2，以及 REQUEST_PORT 和 SERVICE_PORT 接口供父模块的行为代码调用。
-
-参数列表是可选的，如果子模块没有实例化参数或者使用默认值构造，可以省略参数列表。
-
-## USE_CHILD_SERVICE_PORT(instance, serv, alias, ARG(type1) arg, ..., RESP(type2) resp, ...)
-
-声明使用了子实例中的服务事务端口定义，以便在父模块的行为代码中直接调用这个服务事务接口：
-- `instance`：子实例的名称
-- `serv`：子实例中服务事务端口的名称，必须与子实例模块中定义的 SERVICE_PORT 的 name 相同
-- `alias`：父模块中使用的别名
-- `ARG(type) arg`：同 SERVICE 定义中的 ARG 参数列表
-- `RESP(type) resp`：同 SERVICE 定义中的 RESP 参数列表
-
-展开后提供以下等价声明供行为代码调用：
 ```cpp
-void/bool alias(const type1& arg1, ..., type2& resp1, ...);
+CHILD_INSTANCE(Producer, prod);
+CHILD_INSTANCE(LineNode, lane, dims=[LEN]);
+CHILD_INSTANCE(DiagNode, mesh, dims=[HEI, WID], PARAM(WIDTH)=32);
 ```
 
-示例：
+参数说明：
+
+- `module`：子模块类型名称，对应项目中的 `module.hpp` / `module.h` 等文件。
+- `name`：子实例名称。
+- `dims`：子实例数组维度。省略时为标量子实例。
+- `PARAM(param)=value`：覆盖子模块中的 `PARAMETER`。
+
+### USE_CHILD_SERVICE(instance, service, alias, array=N, ARG(...), RESP(...))
+
+把子实例服务端口引入当前模块行为代码：
+
 ```cpp
 CHILD_INSTANCE(Consumer, cons);
-USE_CHILD_SERVICE_PORT(cons, get, get, ARG(uint8_t) d, RESP(uint8_t) s);
+USE_CHILD_SERVICE(cons, recv, cons_recv, ARG(uint8_t) data);
 
 TICK_IMPL() {
-    uint8_t data = 42;
-    uint8_t resp;
-    if (cons_get(data, resp)) { // 调用子实例 cons 的 get 服务事务接口，传入参数 data，并获取响应参数 resp
-        count_setnext(count + resp);
-    }
+    cons_recv(1);
 }
 ```
 
-## USE_CHILD_QUERY(instance, query, alias, rettype)
+阵列化子实例可以使用具体索引或一个 `*` 通配维度：
 
-声明使用子实例中的 `QUERY`，以便在父模块的行为代码或父模块自身的 `QUERY` 中直接调用：
-- `instance`：子实例名称
-- `query`：子实例中 `QUERY` 的名称
-- `alias`：父模块中使用的别名
-- `rettype`：返回值类型，必须与子实例中该 `QUERY` 的返回类型一致
-
-展开后提供以下等价声明供行为代码调用：
 ```cpp
-rettype alias() const;
+CHILD_INSTANCE(DiagNode, mesh, dims=[HEI, WID]);
+USE_CHILD_SERVICE(mesh[*][0], left_in, mesh_in, array=HEI, ARG(uint32_t) data);
+
+TICK_IMPL() {
+    mesh_in<0>(1); // call mesh[0][0].left_in(1)
+    mesh_in<1>(10); // call mesh[1][0].left_in(10)
+}
 ```
 
-示例：
+其中 `array=N` 用于将阵列化子实例的同名端口作为阵列化事务端口引出；如果能直接从 `instance` 表达式的 `*` 维度推断，也可以省略 `array`。无 `*` 通配时不应写 `array=`。
+
+### USE_CHILD_QUERY(instance, query, alias, rettype, array=N)
+
+把子实例 query 引入当前模块：
+
 ```cpp
-STRUCT(ChildStatus) {
-    uint32_t sum;
-    bool can_pop;
-};
-
 CHILD_INSTANCE(Node, node);
-USE_CHILD_QUERY(node, status, node_status, ChildStatus);
+USE_CHILD_QUERY(node, status, node_status, Status);
 
-QUERY(snapshot, ChildStatus) {
+QUERY(snapshot, Status) {
     return node_status();
 }
 ```
 
-如果子实例是阵列，也可以显式写出索引，或者使用 `*` 引出模板风格别名：
+阵列化子实例同样可以使用具体索引或一个 `*` 通配维度。通配维度引出的 alias 使用模板参数调用；`array=N` 的含义和 `USE_CHILD_SERVICE` 相同。
+
+QUERY 不像 SERVICE 一样有阵列化选项。如需批量透传阵列化子实例的 QUERY，推荐实现为让 QUERY 返回一个数组或结构体类型，在 QUERY 内部循环调用子实例 query。
+
+## 3.7 连接声明
+
+连接 API 有四个宏名，差异来自连接两端是否属于子实例或当前模块边界。命名与参数顺序一一对应：
+
+- **C**: Child，子实例名
+- **R**: Request，请求端口名
+- **S**: Service，服务端口名
+
+### CONNECT_CR_CS(srcchild, srcreq, dstchild, dstserv)
+
+连接子实例 request 到另一个子实例 service：
+
 ```cpp
-USE_CHILD_QUERY(lane[0], status, lane0_status, ChildStatus);
-USE_CHILD_QUERY(mesh[*][0], status, edge_status, ChildStatus);
-
-QUERY(read_lane0, ChildStatus) {
-    return lane0_status();
-}
-
-QUERY(read_edge1, ChildStatus) {
-    return edge_status<1>();
-}
+CONNECT_CR_CS(prod, send, cons, recv);
 ```
 
-## CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv)
+### CONNECT_CR_S(srcchild, srcreq, dstserv)
 
-连接一个子实例请求事务端口到一个子实例服务事务端口：
-- `srcmod`：请求事务端口所属的子实例名称
-- `srcreq`：请求事务端口的名称，必须与子实例模块中定义的 REQUEST_PORT 的 name 相同
-- `dstmod`：服务事务端口所属的子实例名称
-- `dstserv`：服务事务端口的名称，必须与子实例模块中定义的 SERVICE_PORT 的 name 相同
+连接子实例 request 到当前模块 service：
 
-## CONNECT_CR_S(srcmod, srcreq, dstserv)
+```cpp
+CONNECT_CR_S(prod, send, recv);
+```
 
-连接一个子实例请求事务端口到父模块的一个服务事务端口：
-- `srcmod`：请求事务端口所属的子实例名称
-- `srcreq`：请求事务端口的名称，必须与子实例模块中定义的 REQUEST_PORT 的 name 相同
-- `dstserv`：服务事务端口的名称，必须与父模块中定义的 SERVICE_PORT 的 name 相同
+### CONNECT_CR_R(srcchild, srcreq, dstreq)
 
-## CONNECT_CR_R(srcmod, srcreq, dstreq)
+连接子实例 request 到当前模块 request，用于把子实例请求暴露到模块边界：
 
-连接一个子实例请求事务端口到父模块的一个请求事务端口：
-- `srcmod`：请求事务端口所属的子实例名称
-- `srcreq`：请求事务端口的名称，必须与子实例模块中定义的 REQUEST_PORT 的 name 相同
-- `dstreq`：请求事务端口的名称，必须与父模块中定义的 REQUEST_PORT 的 name 相同
+```cpp
+CONNECT_CR_R(cons, output, output);
+```
 
-## CONNECT_S_CS(srcserv, dstmod, dstserv)
+### CONNECT_S_CS(srcserv, dstchild, dstserv)
 
-连接一个父模块服务事务端口到一个子实例服务事务端口：
-- `srcserv`：服务事务端口的名称，必须与父模块中定义的 SERVICE_PORT 的 name 相同
-- `dstmod`：服务事务端口所属的子实例名称
-- `dstserv`：服务事务端口的名称，必须与子实例模块中定义的 SERVICE_PORT 的 name 相同
+连接当前模块 service 到子实例 service：
 
-## 连接约束
+```cpp
+CONNECT_S_CS(input, cons, recv);
+```
+
+连接两端的事务端口必须存在，`ARG/RESP` 类型和数量必须匹配，握手属性也必须一致。
+
+阵列化内部连接示例：
+
+```cpp
+CHILD_INSTANCE(DiagNode, mesh, dims=[HEI, WID]);
+CONNECT_CR_CS(mesh[$][?], right_out, mesh[$+1][?+1], left_in);
+```
+
+### 连接约束
 
 对于父模块中定义的服务，则必须进行以下处理之一：
 1. 被连接到某个子模块的某个服务，且必须具有相同的参数与返回值定义。
@@ -413,3 +471,179 @@ QUERY(read_edge1, ChildStatus) {
 如果一个请求包含返回值或包含握手信号（`has_handshake` 为 `true`），则其仅能被连接到一个服务或代码实现，不允许一对多连接。
 反之，如果一个请求不包含返回值且不包含握手信号，则允许一对多连接（广播连接）。
 
+## 3.8 存储组件
+
+### BRAM(name, type, size, read_ports=1, write_ports=1, mode=generic)
+
+定义块 RAM：
+
+```cpp
+BRAM(data_array, uint32_t, 1024);
+BRAM(data_array, uint32_t, 1024, read_ports=2, write_ports=1);
+BRAM(data_array, uint32_t, 1024, mode=1rw);
+```
+
+`mode=generic` 使用显式读写端口数；`mode=1rw` 使用单读写口 BRAM 语义。
+
+### ROM(name, data_width, size, read_ports=1, init=path)
+
+定义只读存储器：
+
+```cpp
+ROM(inst_rom, 32, 1024, init="program.hex");
+ROM(inst_rom, 32, 1024, read_ports=2, init="program.hex");
+```
+
+### QUEUE(name, type, depth, enq_width=1, deq_width=1)
+
+定义队列：
+
+```cpp
+QUEUE(q, uint32_t, 8);
+QUEUE(q, uint32_t, 8, enq_width=3, deq_width=2);
+```
+
+普通队列默认单 enq / 单 deq。显式设置 `enq_width` 或 `deq_width` 大于 1 时表示多端口队列。
+
+## 3.9 旧版兼容语法糖
+
+以下旧写法仍然兼容，推荐新代码优先使用前文的新 API。
+
+### 类型别名数组
+
+```cpp
+ALIAS_ARRAY1(name, type, N);
+ALIAS_ARRAY2(name, type, N1, N2);
+```
+
+等价于：
+
+```cpp
+ALIAS(name, type, dims=[N]);
+ALIAS(name, type, dims=[N1, N2]);
+```
+
+当前 `ALIAS(name, type, N...)` 的位置参数维度写法也仍然兼容。
+
+### 多端口和数组寄存器
+
+```cpp
+REGISTER_MUL(name, type, portnum) { ... }
+REGISTER_ARRAY1(name, type, size, portnum) { ... }
+```
+
+等价于：
+
+```cpp
+REGISTER(name, type, ports=portnum) { ... }
+REGISTER(name, type, dims=[size], ports=portnum) { ... }
+```
+
+旧的 `REGISTER(name, type, portnum, dim...)` 位置参数形式仍然兼容，但新代码建议显式写 `ports=` 和 `dims=`。
+
+### 握手请求端口
+
+```cpp
+REQUEST_READY(name, ARG(type) arg, RESP(type) ret);
+```
+
+等价于：
+
+```cpp
+REQUEST(name, handshake=1, ARG(type) arg, RESP(type) ret);
+```
+
+旧的 `ARRAY(N)` 端口阵列写法仍然兼容：
+
+```cpp
+REQUEST(name, ARRAY(N), ARG(type) arg);
+```
+
+建议新代码写：
+
+```cpp
+REQUEST(name, array=N, ARG(type) arg);
+```
+
+### 握手和优先级服务端口
+
+```cpp
+SERVICE_READY(name, condition, ARG(type) arg) { ... }
+SERVICE_PRIO(name, priority, ARG(type) arg) { ... }
+SERVICE_PRIO_READY(name, priority, condition, ARG(type) arg) { ... }
+```
+
+等价于：
+
+```cpp
+SERVICE(name, handshake=1, ready=condition, ARG(type) arg) { ... }
+SERVICE(name, priority=priority, ARG(type) arg) { ... }
+SERVICE(name, handshake=1, priority=priority, ready=condition, ARG(type) arg) { ... }
+```
+
+`SERVICE(..., ARRAY(N), ...)` 的旧阵列写法也仍然兼容，推荐改为 `array=N`。
+
+### 子实例数组
+
+```cpp
+CHILD_INSTANCE_ARRAY1(module, name, N0, PARAM(param)=value);
+CHILD_INSTANCE_ARRAY2(module, name, N0, N1, PARAM(param)=value);
+```
+
+等价于：
+
+```cpp
+CHILD_INSTANCE(module, name, dims=[N0], PARAM(param)=value);
+CHILD_INSTANCE(module, name, dims=[N0, N1], PARAM(param)=value);
+```
+
+### 子服务端口引入
+
+```cpp
+USE_CHILD_SERVICE_PORT(instance, serv, alias, ARG(type) arg, RESP(type) ret);
+```
+
+等价于：
+
+```cpp
+USE_CHILD_SERVICE(instance, serv, alias, ARG(type) arg, RESP(type) ret);
+```
+
+### 连接宏
+
+```cpp
+CONNECT_CR_CS(srcmod, srcreq, dstmod, dstserv);
+CONNECT_CR_S(srcmod, srcreq, dstserv);
+CONNECT_CR_R(srcmod, srcreq, dstreq);
+CONNECT_S_CS(srcserv, dstmod, dstserv);
+```
+
+连接宏当前保持旧版四宏名形式，不提供合并后的 `CONNECT(...)` 写法。
+
+### 旧存储组件变体
+
+```cpp
+BRAM_1RW(name, datatype, size);
+QUEUE_MP(name, type, depth, enqwidth, deqwidth);
+```
+
+等价于：
+
+```cpp
+BRAM(name, datatype, size, mode=1rw);
+QUEUE(name, type, depth, enq_width=enqwidth, deq_width=deqwidth);
+```
+
+旧的通用 BRAM 和 ROM 位置参数仍然兼容：
+
+```cpp
+BRAM(name, datatype, size, readports, writeports);
+ROM(name, datawidth, size, readports, init_path);
+```
+
+推荐新代码写：
+
+```cpp
+BRAM(name, datatype, size, read_ports=readports, write_ports=writeports);
+ROM(name, datawidth, size, read_ports=readports, init=init_path);
+```

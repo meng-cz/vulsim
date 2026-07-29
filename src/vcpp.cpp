@@ -165,6 +165,198 @@ public:
     }
 };
 
+static inline std::optional<pair<string, string>> parseKeyValueArg(const string &raw_arg) {
+    const size_t split_pos = raw_arg.find('=');
+    if (split_pos == string::npos) {
+        return std::nullopt;
+    }
+    string key = trim(raw_arg.substr(0, split_pos));
+    string value = trim(raw_arg.substr(split_pos + 1));
+    if (key.empty()) {
+        return std::nullopt;
+    }
+    return pair<string, string>{std::move(key), std::move(value)};
+}
+
+static vector<string> splitTopLevelCsv(const string &raw) {
+    string text = trim(raw);
+    if (text.size() >= 2 &&
+        ((text.front() == '(' && text.back() == ')') ||
+         (text.front() == '[' && text.back() == ']'))) {
+        text = trim(text.substr(1, text.size() - 2));
+    }
+
+    vector<string> out;
+    size_t begin = 0;
+    int paren_depth = 0;
+    int bracket_depth = 0;
+    int brace_depth = 0;
+    int angle_depth = 0;
+    bool in_string = false;
+    bool in_char = false;
+    bool escape = false;
+
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (in_string || in_char) {
+            if (escape) {
+                escape = false;
+            } else if (c == '\\') {
+                escape = true;
+            } else if (in_string && c == '"') {
+                in_string = false;
+            } else if (in_char && c == '\'') {
+                in_char = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+            continue;
+        }
+        if (c == '\'') {
+            in_char = true;
+            continue;
+        }
+        if (c == '(') ++paren_depth;
+        else if (c == ')' && paren_depth > 0) --paren_depth;
+        else if (c == '[') ++bracket_depth;
+        else if (c == ']' && bracket_depth > 0) --bracket_depth;
+        else if (c == '{') ++brace_depth;
+        else if (c == '}' && brace_depth > 0) --brace_depth;
+        else if (c == '<') ++angle_depth;
+        else if (c == '>' && angle_depth > 0) --angle_depth;
+        else if (c == ',' && paren_depth == 0 && bracket_depth == 0 &&
+                 brace_depth == 0 && angle_depth == 0) {
+            string item = trim(text.substr(begin, i - begin));
+            if (!item.empty()) out.push_back(std::move(item));
+            begin = i + 1;
+        }
+    }
+    string last = trim(text.substr(begin));
+    if (!last.empty()) out.push_back(std::move(last));
+    return out;
+}
+
+static inline void appendDimList(vector<string> &dims, const string &raw_value) {
+    for (auto &dim : splitTopLevelCsv(raw_value)) {
+        dim = trim(dim);
+        if (dim.empty()) {
+            throw VulException("empty dimension expression");
+        }
+        dims.push_back(std::move(dim));
+    }
+}
+
+static inline bool parseBoolAttribute(const string &key, const string &value) {
+    const string v = trim(value);
+    if (v == "1" || v == "true" || v == "TRUE") return true;
+    if (v == "0" || v == "false" || v == "FALSE") return false;
+    throw VulException("attribute '" + key + "' expects 0/1 or true/false, got '" + value + "'");
+}
+
+static inline void ensureAttrValue(const string &macro_name, const string &key, const string &value) {
+    if (trim(value).empty()) {
+        throw VulException(macro_name + " attribute '" + key + "' cannot be empty");
+    }
+}
+
+static inline bool isAttrKey(const std::optional<pair<string, string>> &attr, const string &key) {
+    return attr && attr->first == key;
+}
+
+static inline pair<string, string> parseParameterOverrideArg(
+    const string &raw_arg,
+    const string &macro_name
+) {
+    auto attr = parseKeyValueArg(raw_arg);
+    if (!attr) {
+        throw VulException(macro_name + " parameter override expects name=value or PARAM(name)=value, got '" + raw_arg + "'");
+    }
+    string param_name = trim(attr->first);
+    string param_value = trim(attr->second);
+    if (param_name.size() > 7 && param_name.rfind("PARAM(", 0) == 0 && param_name.back() == ')') {
+        param_name = trim(param_name.substr(6, param_name.size() - 7));
+    }
+    if (param_name.empty() || param_value.empty()) {
+        throw VulException(macro_name + " has invalid parameter override '" + raw_arg + "'");
+    }
+    return {std::move(param_name), std::move(param_value)};
+}
+
+struct ReqServParseOptions {
+    bool allow_handshake = false;
+    bool allow_ready = false;
+    bool allow_priority = false;
+    bool allow_array = true;
+    std::optional<bool> handshake;
+    std::optional<string> ready;
+    std::optional<string> priority;
+};
+
+static inline void setUniqueStringAttr(
+    std::optional<string> &target,
+    const string &macro_name,
+    const string &key,
+    const string &value
+) {
+    ensureAttrValue(macro_name, key, value);
+    if (target.has_value()) {
+        throw VulException(macro_name + " attribute '" + key + "' is specified more than once");
+    }
+    target = trim(value);
+}
+
+static inline bool parseReqServAttribute(
+    VulTempReqServBase &reqserv,
+    ReqServParseOptions &options,
+    const string &macro_name,
+    const string &raw_arg
+) {
+    auto attr = parseKeyValueArg(raw_arg);
+    if (!attr) return false;
+    const string &key = attr->first;
+    const string &value = attr->second;
+
+    if (key == "array") {
+        if (!options.allow_array) {
+            throw VulException(macro_name + " does not support attribute 'array'");
+        }
+        ensureAttrValue(macro_name, key, value);
+        if (!reqserv.array_size.empty()) {
+            throw VulException(macro_name + " array size is specified more than once");
+        }
+        reqserv.array_size = trim(value);
+        return true;
+    }
+    if (key == "handshake") {
+        if (!options.allow_handshake) {
+            throw VulException(macro_name + " does not support attribute 'handshake'");
+        }
+        if (options.handshake.has_value()) {
+            throw VulException(macro_name + " attribute 'handshake' is specified more than once");
+        }
+        options.handshake = parseBoolAttribute(key, value);
+        return true;
+    }
+    if (key == "ready") {
+        if (!options.allow_ready) {
+            throw VulException(macro_name + " does not support attribute 'ready'");
+        }
+        setUniqueStringAttr(options.ready, macro_name, key, value);
+        return true;
+    }
+    if (key == "priority") {
+        if (!options.allow_priority) {
+            throw VulException(macro_name + " does not support attribute 'priority'");
+        }
+        setUniqueStringAttr(options.priority, macro_name, key, value);
+        return true;
+    }
+
+    throw VulException(macro_name + " has unknown attribute '" + key + "'");
+}
+
 
 class VCPPModuleCONFIG : public VCPPModuleHandler {
 public:
@@ -213,7 +405,16 @@ public:
         alias_member.name = "target";
         alias_member.type = entry.args[1];
         for (size_t i = 2; i < entry.args.size(); ++i) {
-            alias_member.dims.push_back(entry.args[i]);
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (isAttrKey(attr, "dims")) {
+                appendDimList(alias_member.dims, attr->second);
+            } else if (isAttrKey(attr, "dim")) {
+                appendDimList(alias_member.dims, attr->second);
+            } else if (attr) {
+                throw VulException("ALIAS has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+            } else {
+                alias_member.dims.push_back(entry.args[i]);
+            }
         }
         bundle.members.push_back(std::move(alias_member));
         context.temp.bundles.push_back(std::move(bundle));
@@ -346,11 +547,27 @@ public:
         reg.name = entry.args[0];
         reg.type = entry.args[1];
         context.declareName(reg.name, "REGISTER", entry);
+        bool saw_positional_port = false;
         if (entry.args.size() >= 3) {
-            reg.portnum = entry.args[2];
-        }
-        for (size_t i = 3; i < entry.args.size(); ++i) {
-            reg.dims.push_back(entry.args[i]);
+            for (size_t i = 2; i < entry.args.size(); ++i) {
+                auto attr = parseKeyValueArg(entry.args[i]);
+                if (isAttrKey(attr, "ports") || isAttrKey(attr, "portnum")) {
+                    if (!reg.portnum.empty()) {
+                        throw VulException("REGISTER port count is specified more than once at " + context.getOriginalPosition(entry.pos));
+                    }
+                    ensureAttrValue("REGISTER", attr->first, attr->second);
+                    reg.portnum = trim(attr->second);
+                } else if (isAttrKey(attr, "dims") || isAttrKey(attr, "dim")) {
+                    appendDimList(reg.dims, attr->second);
+                } else if (attr) {
+                    throw VulException("REGISTER has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+                } else if (!saw_positional_port && reg.portnum.empty()) {
+                    reg.portnum = entry.args[i];
+                    saw_positional_port = true;
+                } else {
+                    reg.dims.push_back(entry.args[i]);
+                }
+            }
         }
         reg.reset_codelines = entry.body;
         reg.reset_codelines_debug = context.bodyDebugLocs(entry);
@@ -368,11 +585,27 @@ public:
         reg.name = entry.args[0];
         reg.type = entry.args[1];
         context.declareName(reg.name, "REGISTER_MUL", entry);
-        if (entry.args.size() >= 3) {
-            reg.portnum = entry.args[2];
-        }
+        bool saw_port = false;
         for (size_t i = 3; i < entry.args.size(); ++i) {
-            reg.dims.push_back(entry.args[i]);
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (isAttrKey(attr, "dims") || isAttrKey(attr, "dim")) {
+                appendDimList(reg.dims, attr->second);
+            } else if (attr) {
+                throw VulException("REGISTER_MUL has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+            } else {
+                reg.dims.push_back(entry.args[i]);
+            }
+        }
+        auto port_attr = parseKeyValueArg(entry.args[2]);
+        if (isAttrKey(port_attr, "ports") || isAttrKey(port_attr, "portnum")) {
+            ensureAttrValue("REGISTER_MUL", port_attr->first, port_attr->second);
+            reg.portnum = trim(port_attr->second);
+            saw_port = true;
+        } else if (port_attr) {
+            throw VulException("REGISTER_MUL has unknown attribute '" + port_attr->first + "' at " + context.getOriginalPosition(entry.pos));
+        }
+        if (!saw_port) {
+            reg.portnum = entry.args[2];
         }
         reg.reset_codelines = entry.body;
         reg.reset_codelines_debug = context.bodyDebugLocs(entry);
@@ -422,23 +655,27 @@ static VCPPModuleAutoRegisterHandler<VCPPModuleWIRE> _auto_register_WIRE_handler
 static inline void parseReqArgsAndRets(
     const vector<string> &macro_args,
     size_t begin_idx,
-    VulTempReqServBase &reqserv
+    VulTempReqServBase &reqserv,
+    ReqServParseOptions *options = nullptr,
+    const string &macro_name = "REQUEST/SERVICE"
 ) {
     size_t i = begin_idx;
-    if (i < macro_args.size()) {
-        const string first_tag = trim(macro_args[i]);
-        if (first_tag.size() > 7 && first_tag.rfind("ARRAY(", 0) == 0 && first_tag.back() == ')') {
-            reqserv.array_size = trim(first_tag.substr(6, first_tag.size() - 7));
-            if (reqserv.array_size.empty()) {
-                throw VulException("empty ARRAY() expression");
-            }
-            ++i;
-        }
-    }
-
     for (; i < macro_args.size(); ++i) {
         const string &arg_decl_raw = macro_args[i];
         const string arg_decl = trim(arg_decl_raw);
+        if (arg_decl.size() > 7 && arg_decl.rfind("ARRAY(", 0) == 0 && arg_decl.back() == ')') {
+            if (!reqserv.array_size.empty()) {
+                throw VulException(macro_name + " array size is specified more than once");
+            }
+            reqserv.array_size = trim(arg_decl.substr(6, arg_decl.size() - 7));
+            if (reqserv.array_size.empty()) {
+                throw VulException("empty ARRAY() expression");
+            }
+            continue;
+        }
+        if (options != nullptr && parseReqServAttribute(reqserv, *options, macro_name, arg_decl)) {
+            continue;
+        }
         const size_t split_pos = arg_decl.find_last_of(" \t\r\n");
         if (split_pos == string::npos) {
             throw VulException("invalid argument declaration '" + arg_decl_raw + "'");
@@ -484,7 +721,13 @@ public:
         req.has_handshake = false;
         context.declareName(req.name, "REQUEST", entry);
         VulErrorContextGuard _err{"Processing REQUEST '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 1, req);
+        ReqServParseOptions options;
+        options.allow_handshake = true;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 1, req, &options, "REQUEST");
+        if (options.handshake.has_value()) {
+            req.has_handshake = *options.handshake;
+        }
         context.temp.requests.push_back(std::move(req));
     }
 };
@@ -501,7 +744,9 @@ public:
         req.has_handshake = true;
         context.declareName(req.name, "REQUEST_READY", entry);
         VulErrorContextGuard _err{"Processing REQUEST_READY '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 1, req);
+        ReqServParseOptions options;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 1, req, &options, "REQUEST_READY");
         context.temp.requests.push_back(std::move(req));
     }
 };
@@ -523,9 +768,30 @@ public:
         serv.priority = "";
         serv.codelines = entry.body;
         serv.codelines_debug = context.bodyDebugLocs(entry);
-        serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 1, serv);
+        ReqServParseOptions options;
+        options.allow_handshake = true;
+        options.allow_ready = true;
+        options.allow_priority = true;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 1, serv, &options, "SERVICE");
+        if (options.handshake.has_value()) {
+            serv.has_handshake = *options.handshake;
+        }
+        if (options.ready.has_value()) {
+            if (options.handshake.has_value() && !*options.handshake) {
+                throw VulException("SERVICE ready=<condition> conflicts with handshake=0 at " + context.getOriginalPosition(entry.pos));
+            }
+            serv.cond = *options.ready;
+            serv.cond_debug = context.toDebugLoc(entry.pos);
+            serv.has_handshake = true;
+        }
+        if (serv.has_handshake && serv.cond.empty()) {
+            throw VulException("SERVICE with handshake=1 requires ready=<condition> at " + context.getOriginalPosition(entry.pos));
+        }
+        if (options.priority.has_value()) {
+            serv.priority = *options.priority;
+        }
         context.temp.services.push_back(std::move(serv));
     }
 };
@@ -547,7 +813,9 @@ public:
         serv.codelines = entry.body;
         serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 2, serv);
+        ReqServParseOptions options;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 2, serv, &options, "SERVICE_READY");
         context.temp.services.push_back(std::move(serv));
     }
 };
@@ -568,7 +836,9 @@ public:
         serv.codelines = entry.body;
         serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_PRIO '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 2, serv);
+        ReqServParseOptions options;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 2, serv, &options, "SERVICE_PRIO");
         context.temp.services.push_back(std::move(serv));
     }
 };
@@ -590,7 +860,9 @@ public:
         serv.codelines = entry.body;
         serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_PRIO_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 3, serv);
+        ReqServParseOptions options;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 3, serv, &options, "SERVICE_PRIO_READY");
         context.temp.services.push_back(std::move(serv));
     }
 };
@@ -644,16 +916,15 @@ public:
         context.declareName(inst.name, "CHILD_INSTANCE", entry);
         for (size_t i = 2; i < entry.args.size(); ++i) {
             const string &param_override_raw = entry.args[i];
-            const size_t split_pos = param_override_raw.find('=');
-            if (split_pos == string::npos) {
+            auto attr = parseKeyValueArg(param_override_raw);
+            if (!attr) {
                 throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
             }
-            const string param_name = trim(param_override_raw.substr(0, split_pos));
-            const string param_value = trim(param_override_raw.substr(split_pos + 1));
-            if (param_name.empty() || param_value.empty()) {
-                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
+            if (attr->first == "dims" || attr->first == "dim") {
+                appendDimList(inst.array_dims, attr->second);
+                continue;
             }
-            inst.parameter_overrides.emplace_back(param_name, param_value);
+            inst.parameter_overrides.push_back(parseParameterOverrideArg(param_override_raw, "CHILD_INSTANCE"));
         }
         context.temp.instances.push_back(std::move(inst));
     }
@@ -678,12 +949,7 @@ public:
             if (split_pos == string::npos) {
                 throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
             }
-            const string param_name = trim(param_override_raw.substr(0, split_pos));
-            const string param_value = trim(param_override_raw.substr(split_pos + 1));
-            if (param_name.empty() || param_value.empty()) {
-                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
-            }
-            inst.parameter_overrides.emplace_back(param_name, param_value);
+            inst.parameter_overrides.push_back(parseParameterOverrideArg(param_override_raw, "CHILD_INSTANCE_ARRAY1"));
         }
         context.temp.instances.push_back(std::move(inst));
     }
@@ -709,12 +975,7 @@ public:
             if (split_pos == string::npos) {
                 throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
             }
-            const string param_name = trim(param_override_raw.substr(0, split_pos));
-            const string param_value = trim(param_override_raw.substr(split_pos + 1));
-            if (param_name.empty() || param_value.empty()) {
-                throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
-            }
-            inst.parameter_overrides.emplace_back(param_name, param_value);
+            inst.parameter_overrides.push_back(parseParameterOverrideArg(param_override_raw, "CHILD_INSTANCE_ARRAY2"));
         }
         context.temp.instances.push_back(std::move(inst));
     }
@@ -738,18 +999,64 @@ public:
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleUSE_CHILD_SERVICE_PORT> _auto_register_USE_CHILD_SERVICE_PORT_handler;
 
+class VCPPModuleUSE_CHILD_SERVICE : public VCPPModuleHandler {
+public:
+    virtual string name() const { return "USE_CHILD_SERVICE"; }
+    virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
+        if (entry.args.size() < 3) {
+            throw VulException("USE_CHILD_SERVICE requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        string array_size;
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (!attr) {
+                continue;
+            }
+            if (attr->first != "array") {
+                throw VulException("USE_CHILD_SERVICE has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+            }
+            ensureAttrValue("USE_CHILD_SERVICE", attr->first, attr->second);
+            if (!array_size.empty()) {
+                throw VulException("USE_CHILD_SERVICE array size is specified more than once at " + context.getOriginalPosition(entry.pos));
+            }
+            array_size = trim(attr->second);
+        }
+        VulTempChildServiceUse use;
+        use.instance_expr = entry.args[0];
+        use.service_name = entry.args[1];
+        use.alias_name = entry.args[2];
+        use.array_size = std::move(array_size);
+        context.declareName(use.alias_name, "USE_CHILD_SERVICE", entry);
+        context.temp.child_service_uses.push_back(std::move(use));
+    }
+};
+static VCPPModuleAutoRegisterHandler<VCPPModuleUSE_CHILD_SERVICE> _auto_register_USE_CHILD_SERVICE_handler;
+
 class VCPPModuleUSE_CHILD_QUERY : public VCPPModuleHandler {
 public:
     virtual string name() const { return "USE_CHILD_QUERY"; }
     virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
-        if (entry.args.size() != 4) {
-            throw VulException("USE_CHILD_QUERY requires exactly 4 arguments at " + context.getOriginalPosition(entry.pos));
+        if (entry.args.size() < 4) {
+            throw VulException("USE_CHILD_QUERY requires at least 4 arguments at " + context.getOriginalPosition(entry.pos));
+        }
+        string array_size;
+        for (size_t i = 4; i < entry.args.size(); ++i) {
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (!attr || attr->first != "array") {
+                throw VulException("USE_CHILD_QUERY only supports optional array=<N> after rettype at " + context.getOriginalPosition(entry.pos));
+            }
+            ensureAttrValue("USE_CHILD_QUERY", attr->first, attr->second);
+            if (!array_size.empty()) {
+                throw VulException("USE_CHILD_QUERY array size is specified more than once at " + context.getOriginalPosition(entry.pos));
+            }
+            array_size = trim(attr->second);
         }
         VulTempChildQueryUse use;
         use.instance_expr = entry.args[0];
         use.query_name = entry.args[1];
         use.alias_name = entry.args[2];
         use.ret_type = entry.args[3];
+        use.array_size = std::move(array_size);
         context.declareName(use.alias_name, "USE_CHILD_QUERY", entry);
         context.temp.child_query_uses.push_back(std::move(use));
     }
@@ -829,16 +1136,52 @@ class VCPPModuleBRAM : public VCPPModuleHandler {
 public:
     virtual string name() const { return "BRAM"; }
     virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
-        if (entry.args.size() != 5) {
-            throw VulException("BRAM requires exactly 5 arguments at " + context.getOriginalPosition(entry.pos));
+        if (entry.args.size() < 3) {
+            throw VulException("BRAM requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
         }
         VulTempBRAM bram;
         bram.name = entry.args[0];
         bram.data_type = entry.args[1];
         context.declareName(bram.name, "BRAM", entry);
         bram.addr_size = entry.args[2];
-        bram.read_ports = entry.args[3];
-        bram.write_ports = entry.args[4];
+        bram.read_ports = "1";
+        bram.write_ports = "1";
+        bool mode_1rw = false;
+        size_t positional_idx = 0;
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (isAttrKey(attr, "read_ports") || isAttrKey(attr, "readports")) {
+                ensureAttrValue("BRAM", attr->first, attr->second);
+                bram.read_ports = trim(attr->second);
+            } else if (isAttrKey(attr, "write_ports") || isAttrKey(attr, "writeports")) {
+                ensureAttrValue("BRAM", attr->first, attr->second);
+                bram.write_ports = trim(attr->second);
+            } else if (isAttrKey(attr, "mode")) {
+                ensureAttrValue("BRAM", attr->first, attr->second);
+                const string mode = trim(attr->second);
+                if (mode == "1rw") {
+                    mode_1rw = true;
+                } else if (mode == "generic") {
+                    mode_1rw = false;
+                } else {
+                    throw VulException("BRAM mode must be 'generic' or '1rw' at " + context.getOriginalPosition(entry.pos));
+                }
+            } else if (attr) {
+                throw VulException("BRAM has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+            } else if (positional_idx == 0) {
+                bram.read_ports = entry.args[i];
+                ++positional_idx;
+            } else if (positional_idx == 1) {
+                bram.write_ports = entry.args[i];
+                ++positional_idx;
+            } else {
+                throw VulException("BRAM has too many positional arguments at " + context.getOriginalPosition(entry.pos));
+            }
+        }
+        if (mode_1rw) {
+            bram.read_ports = "";
+            bram.write_ports = "";
+        }
         context.temp.brams.push_back(std::move(bram));
     }
 };
@@ -865,16 +1208,39 @@ class VCPPModuleROM : public VCPPModuleHandler {
 public:
     virtual string name() const { return "ROM"; }
     virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
-        if (entry.args.size() != 5) {
-            throw VulException("ROM requires exactly 5 arguments at " + context.getOriginalPosition(entry.pos));
+        if (entry.args.size() < 3) {
+            throw VulException("ROM requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
         }
         VulTempDigitalROM rom;
         rom.name = entry.args[0];
         rom.data_width = entry.args[1];
         context.declareName(rom.name, "ROM", entry);
         rom.addr_size = entry.args[2];
-        rom.read_ports = entry.args[3];
-        rom.init_path = entry.args[4];
+        rom.read_ports = "1";
+        size_t positional_idx = 0;
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (isAttrKey(attr, "read_ports") || isAttrKey(attr, "readports")) {
+                ensureAttrValue("ROM", attr->first, attr->second);
+                rom.read_ports = trim(attr->second);
+            } else if (isAttrKey(attr, "init") || isAttrKey(attr, "init_path")) {
+                ensureAttrValue("ROM", attr->first, attr->second);
+                rom.init_path = trim(attr->second);
+            } else if (attr) {
+                throw VulException("ROM has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+            } else if (positional_idx == 0) {
+                rom.read_ports = entry.args[i];
+                ++positional_idx;
+            } else if (positional_idx == 1) {
+                rom.init_path = entry.args[i];
+                ++positional_idx;
+            } else {
+                throw VulException("ROM has too many positional arguments at " + context.getOriginalPosition(entry.pos));
+            }
+        }
+        if (rom.init_path.empty()) {
+            throw VulException("ROM requires init=<path> or a positional init_path at " + context.getOriginalPosition(entry.pos));
+        }
         context.temp.roms.push_back(std::move(rom));
     }
 };
@@ -883,8 +1249,8 @@ class VCPPModuleQUEUE : public VCPPModuleHandler {
 public:
     virtual string name() const { return "QUEUE"; }
     virtual void run(VCPPModuleContext &context, const MacroEntry &entry) {
-        if (entry.args.size() != 3) {
-            throw VulException("QUEUE requires exactly 3 arguments at " + context.getOriginalPosition(entry.pos));
+        if (entry.args.size() < 3) {
+            throw VulException("QUEUE requires at least 3 arguments at " + context.getOriginalPosition(entry.pos));
         }
         VulTempQueue queue;
         queue.name = entry.args[0];
@@ -893,6 +1259,27 @@ public:
         queue.depth = entry.args[2];
         queue.enq_width = "1";
         queue.deq_width = "1";
+        size_t positional_idx = 0;
+        for (size_t i = 3; i < entry.args.size(); ++i) {
+            auto attr = parseKeyValueArg(entry.args[i]);
+            if (isAttrKey(attr, "enq_width") || isAttrKey(attr, "enqwidth")) {
+                ensureAttrValue("QUEUE", attr->first, attr->second);
+                queue.enq_width = trim(attr->second);
+            } else if (isAttrKey(attr, "deq_width") || isAttrKey(attr, "deqwidth")) {
+                ensureAttrValue("QUEUE", attr->first, attr->second);
+                queue.deq_width = trim(attr->second);
+            } else if (attr) {
+                throw VulException("QUEUE has unknown attribute '" + attr->first + "' at " + context.getOriginalPosition(entry.pos));
+            } else if (positional_idx == 0) {
+                queue.enq_width = entry.args[i];
+                ++positional_idx;
+            } else if (positional_idx == 1) {
+                queue.deq_width = entry.args[i];
+                ++positional_idx;
+            } else {
+                throw VulException("QUEUE has too many positional arguments at " + context.getOriginalPosition(entry.pos));
+            }
+        }
         context.temp.queues.push_back(std::move(queue));
     }
 };
@@ -1075,7 +1462,13 @@ public:
         req.name = entry.args[0];
         req.has_handshake = false;
         VulErrorContextGuard _err{"Processing REQUEST '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 1, req);
+        ReqServParseOptions options;
+        options.allow_handshake = true;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 1, req, &options, "REQUEST");
+        if (options.handshake.has_value()) {
+            req.has_handshake = *options.handshake;
+        }
         context.test.requests[req.name] = std::move(req);
     }
 };
@@ -1091,7 +1484,9 @@ public:
         req.name = entry.args[0];
         req.has_handshake = true;
         VulErrorContextGuard _err{"Processing REQUEST_READY '" + req.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 1, req);
+        ReqServParseOptions options;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 1, req, &options, "REQUEST_READY");
         context.test.requests[req.name] = std::move(req);
     }
 };
@@ -1112,7 +1507,29 @@ public:
         serv.priority = "";
         serv.codelines = entry.body;
         VulErrorContextGuard _err{"Processing SERVICE '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 1, serv);
+        ReqServParseOptions options;
+        options.allow_handshake = true;
+        options.allow_ready = true;
+        options.allow_priority = true;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 1, serv, &options, "SERVICE");
+        if (options.handshake.has_value()) {
+            serv.has_handshake = *options.handshake;
+        }
+        if (options.ready.has_value()) {
+            if (options.handshake.has_value() && !*options.handshake) {
+                throw VulException("SERVICE ready=<condition> conflicts with handshake=0 at " + context.getOriginalPosition(entry.pos));
+            }
+            serv.cond = *options.ready;
+            serv.cond_debug = context.toDebugLoc(entry.pos);
+            serv.has_handshake = true;
+        }
+        if (serv.has_handshake && serv.cond.empty()) {
+            throw VulException("SERVICE with handshake=1 requires ready=<condition> at " + context.getOriginalPosition(entry.pos));
+        }
+        if (options.priority.has_value()) {
+            serv.priority = *options.priority;
+        }
         context.test.services[serv.name] = std::move(serv);
     }
 };
@@ -1133,7 +1550,9 @@ public:
         serv.codelines = entry.body;
         serv.codelines_debug = context.bodyDebugLocs(entry);
         VulErrorContextGuard _err{"Processing SERVICE_READY '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
-        parseReqArgsAndRets(entry.args, 2, serv);
+        ReqServParseOptions options;
+        options.allow_array = true;
+        parseReqArgsAndRets(entry.args, 2, serv, &options, "SERVICE_READY");
         context.test.services[serv.name] = std::move(serv);
     }
 };
