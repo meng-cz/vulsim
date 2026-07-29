@@ -530,6 +530,36 @@ FlatCode flattenCodeWithoutPreprocessorLines(const std::vector<std::string>& cod
     return out;
 }
 
+FlatCode flattenCodeWithoutPreprocessorLines(
+    const std::vector<std::string>& code,
+    const std::vector<LinePosition>& line_positions
+) {
+    FlatCode out;
+
+    for (int32_t line = 0; line < static_cast<int32_t>(code.size()); ++line) {
+        const std::string& s = code[line];
+
+        if (!ltrim(s).empty() && ltrim(s)[0] == '#') {
+            continue;
+        }
+
+        LinePosition base_pos{line, 0};
+        if (line < static_cast<int32_t>(line_positions.size())) {
+            base_pos = line_positions[line];
+        }
+
+        for (int32_t col = 0; col < static_cast<int32_t>(s.size()); ++col) {
+            out.text.push_back(s[col]);
+            out.pos.push_back({base_pos.line, base_pos.column + col});
+        }
+
+        out.text.push_back('\n');
+        out.pos.push_back({base_pos.line, base_pos.column + static_cast<int32_t>(s.size())});
+    }
+
+    return out;
+}
+
 size_t skipInterEntryTokens(const std::string& s, size_t p) {
     while (p < s.size()) {
         if (isSpace(s[p]) || s[p] == ';') {
@@ -815,8 +845,7 @@ SplitBodyLinesWithPosResult splitBodyLinesWithPos(
 
 } // namespace
 
-std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code) {
-    FlatCode flat = flattenCodeWithoutPreprocessorLines(code);
+std::vector<MacroEntry> findAllMacroEntriesFromFlatCode(const FlatCode &flat) {
 
     const std::string& s = flat.text;
     const std::vector<LinePosition>& pos = flat.pos;
@@ -899,6 +928,17 @@ std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code
     }
 
     return entries;
+}
+
+std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code) {
+    return findAllMacroEntriesFromFlatCode(flattenCodeWithoutPreprocessorLines(code));
+}
+
+std::vector<MacroEntry> findAllMacroEntriesPreservingLinePositions(
+    const std::vector<std::string>& code,
+    const std::vector<LinePosition>& line_positions
+) {
+    return findAllMacroEntriesFromFlatCode(flattenCodeWithoutPreprocessorLines(code, line_positions));
 }
 
 

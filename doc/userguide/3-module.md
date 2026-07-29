@@ -35,7 +35,79 @@ ALIAS(U32x4, uint32_t, dims=[4]);
 REGISTER(pipe, PipeStage, dims=PIPE_DEPTH, ports=1) { ... }
 ```
 
-## 3.2 Header / 类型定义
+## 3.2 模块实现版本选择
+
+模块可以使用 `INTERFACE` / `USE_VERSION` / `VERSION` 将对外接口和具体实现分开。只要模块文件中没有 `USE_VERSION(...)`，解析器就按旧流程处理整个模块文件；一旦出现 `USE_VERSION(...)`，该模块必须使用版本化组织方式。
+
+版本化模块的顶层宏顺序必须是：
+
+```cpp
+INTERFACE() {
+    PARAMETER(...);
+    REQUEST(...);
+    SERVICE(...);
+}
+
+USE_VERSION(version_name);
+
+VERSION(version_name) {
+    ...
+}
+
+VERSION(other_version) {
+    ...
+}
+```
+
+`INTERFACE()` 必须位于所有 `VERSION(...)` 之前，并且必须是模块中的第一个顶层宏。`USE_VERSION(name);` 必须紧跟在 `INTERFACE()` 之后，用于选择当前实际使用的实现版本。后面可以定义一个或多个 `VERSION(name) { ... }`，被 `USE_VERSION` 选中的版本必须存在。
+
+`INTERFACE()` 中只允许出现 `PARAMETER`、`REQUEST` 和不带代码块的 `SERVICE` 声明：
+
+```cpp
+INTERFACE() {
+    PARAMETER(WIDTH, 32);
+    REQUEST(out, ARG(uint32_t) data);
+    SERVICE(in, handshake=1, ARG(uint32_t) data);
+}
+```
+
+`INTERFACE` 中的 `SERVICE` 仅为前置声明（参考后续 SERVICE 定义），不提供实现代码块。
+
+`VERSION(name)` 中包含具体实现，例如 `CONFIG`、`STRUCT`、`REGISTER`、`WIRE`、`BRAM`、`QUEUE`、`CHILD_INSTANCE`、`CONNECT_*`、`SERVICE(...) { ... }` 和 `TICK_IMPL() { ... }`。`VERSION` 中不能重新声明 `PARAMETER` 或 `REQUEST`；`SERVICE` 必须提供代码块，并且必须对应 `INTERFACE` 中已经声明过的同名服务。
+
+示例：
+
+```cpp
+INTERFACE() {
+    PARAMETER(WIDTH, 32);
+    REQUEST(done);
+    SERVICE(start, handshake=1);
+}
+
+USE_VERSION(selected);
+
+VERSION(simple) {
+    SERVICE(start, handshake=1, ready=true) {
+        done();
+    }
+}
+
+VERSION(selected) {
+    REGISTER(count, uint32_t) {
+        count = 0;
+    }
+
+    SERVICE(start, handshake=1, ready=((count & 1) == 0)) {
+        done();
+    }
+
+    TICK_IMPL() {
+        count.setnext(count + 1);
+    }
+}
+```
+
+## 3.3 Header / 类型定义
 
 以下宏既可以出现在项目 `header.hpp` / `header.h` / `header/` 中，也可以出现在模块头文件中。不同之处是：项目 header 中定义的是全局可见名字，模块头文件中定义的是模块局部名字。
 
@@ -116,7 +188,7 @@ inline constexpr uint32_t inc(uint32_t x) {
 
 在可综合语法子集下，`HELPER` 中禁止定义运行期变量。需要跨周期保存的状态必须使用 `REGISTER`，需要周期内临时状态必须使用 `WIRE`。
 
-## 3.3 状态组件
+## 3.4 状态组件
 
 ### REGISTER(name, type, ports=1, dims=[...]) { ... }
 
@@ -224,7 +296,7 @@ TICK_IMPL() {
 
 `WIRE` 在每个周期开始时按代码块恢复默认值，之后可在当前周期内读写。
 
-## 3.4 事务端口
+## 3.5 事务端口
 
 事务端口分为请求端口 `REQUEST` 和服务端口 `SERVICE`。二者通过 `CONNECT` 建立连接，或者在模块行为代码中直接调用已引入的端口函数。
 
@@ -325,7 +397,7 @@ SERVICE(recv, handshake=1, ready=q.deqvalid(), ARG(uint8_t) data) {
 
 服务优先级指定了一个周期内服务被触发时的顺序约束。但尽量通过寄存器优先级赋值和合理的模块划分来避免依赖优先级保证行为正确性，因为顺序约束会随着潜在的事务调用被传递，很容易导致循环依赖。
 
-## 3.5 QUERY 与周期行为
+## 3.6 QUERY 与周期行为
 
 ### QUERY(name, rettype) { ... }
 
@@ -359,7 +431,7 @@ TICK_IMPL() {
 
 一个模块可以有多个 `TICK_IMPL` 代码块，生成器会把它们都纳入周期行为。
 
-## 3.6 子实例与子接口引入
+## 3.7 子实例与子接口引入
 
 ### CHILD_INSTANCE(module, name, dims=[...], PARAM(param)=value, ...)
 
@@ -422,7 +494,7 @@ QUERY(snapshot, Status) {
 
 QUERY 不像 SERVICE 一样有阵列化选项。如需批量透传阵列化子实例的 QUERY，推荐实现为让 QUERY 返回一个数组或结构体类型，在 QUERY 内部循环调用子实例 query。
 
-## 3.7 连接声明
+## 3.8 连接声明
 
 连接 API 有四个宏名，差异来自连接两端是否属于子实例或当前模块边界。命名与参数顺序一一对应：
 
@@ -485,7 +557,7 @@ CONNECT_CR_CS(mesh[$][?], right_out, mesh[$+1][?+1], left_in);
 如果一个请求包含返回值或包含握手信号（`has_handshake` 为 `true`），则其仅能被连接到一个服务或代码实现，不允许一对多连接。
 反之，如果一个请求不包含返回值且不包含握手信号，则允许一对多连接（广播连接）。
 
-## 3.8 存储组件
+## 3.9 存储组件
 
 ### BRAM(name, type, size, read_ports=1, write_ports=1, mode=generic)
 
@@ -519,7 +591,7 @@ QUEUE(q, uint32_t, 8, enq_width=3, deq_width=2);
 
 普通队列默认单 enq / 单 deq。显式设置 `enq_width` 或 `deq_width` 大于 1 时表示多端口队列。
 
-## 3.9 旧版兼容语法糖
+## 3.10 旧版兼容语法糖
 
 以下旧写法仍然兼容，推荐新代码优先使用前文的新 API。
 

@@ -67,5 +67,9 @@ struct MacroEntry {
 };
 
 std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code);
+std::vector<MacroEntry> findAllMacroEntriesPreservingLinePositions(
+    const std::vector<std::string>& code,
+    const std::vector<LinePosition>& line_positions
+);
 
 } // namespace cppparse

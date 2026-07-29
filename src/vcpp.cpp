@@ -1384,6 +1384,158 @@ public:
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleHELPER> _auto_register_HELPER_handler;
 
+static bool macroHasReadyAttribute(const MacroEntry &entry) {
+    for (size_t i = 1; i < entry.args.size(); ++i) {
+        auto attr = parseKeyValueArg(entry.args[i]);
+        if (isAttrKey(attr, "ready")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static vector<MacroEntry> parseNestedMacroEntriesPreservingPositions(const MacroEntry &entry) {
+    return findAllMacroEntriesPreservingLinePositions(entry.body, entry.body_pos);
+}
+
+static vector<MacroEntry> selectVersionedModuleEntries(
+    const vector<MacroEntry> &top_entries,
+    const VCPPModuleContext &context
+) {
+    size_t use_version_count = 0;
+    size_t use_version_index = 0;
+    string selected_version;
+    for (size_t i = 0; i < top_entries.size(); ++i) {
+        const auto &entry = top_entries[i];
+        if (entry.name != "USE_VERSION") {
+            continue;
+        }
+        ++use_version_count;
+        use_version_index = i;
+        if (entry.args.size() != 1) {
+            throw VulException("USE_VERSION requires exactly 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        if (entry.has_body) {
+            throw VulException("USE_VERSION must be a declaration without code block at " + context.getOriginalPosition(entry.pos));
+        }
+        selected_version = trim(entry.args[0]);
+        if (selected_version.empty()) {
+            throw VulException("USE_VERSION version name cannot be empty at " + context.getOriginalPosition(entry.pos));
+        }
+    }
+    if (use_version_count == 0) {
+        return top_entries;
+    }
+    if (use_version_count > 1) {
+        throw VulException("Only one USE_VERSION declaration is allowed in a module");
+    }
+    if (top_entries.empty() || top_entries[0].name != "INTERFACE") {
+        throw VulException("A versioned module must start with INTERFACE() before USE_VERSION/VERSION");
+    }
+    if (use_version_index != 1) {
+        throw VulException("USE_VERSION must appear immediately after INTERFACE() at " +
+                           context.getOriginalPosition(top_entries[use_version_index].pos));
+    }
+
+    const MacroEntry &interface_entry = top_entries[0];
+    if (!interface_entry.args.empty()) {
+        throw VulException("INTERFACE does not take any arguments at " + context.getOriginalPosition(interface_entry.pos));
+    }
+    if (!interface_entry.has_body) {
+        throw VulException("INTERFACE must use a code block at " + context.getOriginalPosition(interface_entry.pos));
+    }
+
+    vector<MacroEntry> interface_entries = parseNestedMacroEntriesPreservingPositions(interface_entry);
+    unordered_set<string> declared_services;
+    for (const auto &entry : interface_entries) {
+        if (entry.name != "PARAMETER" && entry.name != "REQUEST" && entry.name != "SERVICE") {
+            throw VulException(
+                "INTERFACE may only contain PARAMETER, REQUEST, and SERVICE declarations; got '" +
+                entry.name + "' at " + context.getOriginalPosition(entry.pos)
+            );
+        }
+        if (entry.has_body) {
+            throw VulException(
+                "INTERFACE entry '" + entry.name + "' must be a declaration without code block at " +
+                context.getOriginalPosition(entry.pos)
+            );
+        }
+        if (entry.name == "SERVICE") {
+            if (entry.args.empty()) {
+                throw VulException("SERVICE requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+            }
+            if (macroHasReadyAttribute(entry)) {
+                throw VulException("SERVICE declaration in INTERFACE cannot specify ready=<condition> at " +
+                                   context.getOriginalPosition(entry.pos));
+            }
+            declared_services.insert(trim(entry.args[0]));
+        }
+    }
+
+    const MacroEntry *selected_version_entry = nullptr;
+    unordered_set<string> version_names;
+    for (size_t i = 2; i < top_entries.size(); ++i) {
+        const auto &entry = top_entries[i];
+        if (entry.name != "VERSION") {
+            throw VulException(
+                "A versioned module may only contain VERSION blocks after USE_VERSION; got '" +
+                entry.name + "' at " + context.getOriginalPosition(entry.pos)
+            );
+        }
+        if (entry.args.size() != 1) {
+            throw VulException("VERSION requires exactly 1 argument at " + context.getOriginalPosition(entry.pos));
+        }
+        if (!entry.has_body) {
+            throw VulException("VERSION must use a code block at " + context.getOriginalPosition(entry.pos));
+        }
+        string version_name = trim(entry.args[0]);
+        if (version_name.empty()) {
+            throw VulException("VERSION name cannot be empty at " + context.getOriginalPosition(entry.pos));
+        }
+        if (!version_names.insert(version_name).second) {
+            throw VulException("Duplicate VERSION '" + version_name + "' at " + context.getOriginalPosition(entry.pos));
+        }
+        if (version_name == selected_version) {
+            selected_version_entry = &entry;
+        }
+    }
+    if (selected_version_entry == nullptr) {
+        throw VulException("USE_VERSION selects VERSION '" + selected_version + "', but no such VERSION block exists");
+    }
+
+    vector<MacroEntry> version_entries = parseNestedMacroEntriesPreservingPositions(*selected_version_entry);
+    for (const auto &entry : version_entries) {
+        if (entry.name == "PARAMETER" || entry.name == "REQUEST") {
+            throw VulException(
+                "VERSION block cannot contain '" + entry.name +
+                "'; declare module interface ports and parameters in INTERFACE at " +
+                context.getOriginalPosition(entry.pos)
+            );
+        }
+        if (entry.name == "SERVICE") {
+            if (!entry.has_body) {
+                throw VulException("SERVICE in VERSION must provide an implementation block at " +
+                                   context.getOriginalPosition(entry.pos));
+            }
+            if (entry.args.empty()) {
+                throw VulException("SERVICE requires at least 1 argument at " + context.getOriginalPosition(entry.pos));
+            }
+            string serv_name = trim(entry.args[0]);
+            if (declared_services.find(serv_name) == declared_services.end()) {
+                throw VulException("SERVICE implementation '" + serv_name +
+                                   "' in VERSION has no declaration in INTERFACE at " +
+                                   context.getOriginalPosition(entry.pos));
+            }
+        }
+    }
+
+    vector<MacroEntry> selected_entries;
+    selected_entries.reserve(interface_entries.size() + version_entries.size());
+    selected_entries.insert(selected_entries.end(), interface_entries.begin(), interface_entries.end());
+    selected_entries.insert(selected_entries.end(), version_entries.begin(), version_entries.end());
+    return selected_entries;
+}
+
 VulTempModule _parseTempModule(
     const string &module_name,
     const string &module_filepath,
@@ -1404,6 +1556,9 @@ VulTempModule _parseTempModule(
     code_lines = std::move(trim_res.lines);
 
     vector<MacroEntry> macro_entries = findAllMacroEntries(code_lines);
+    if (!is_global_header) {
+        macro_entries = selectVersionedModuleEntries(macro_entries, context);
+    }
     // printf("Found %zu macro entries in module '%s'\n", macro_entries.size(), module_name.c_str());
     for (const auto &entry : macro_entries) {
         // printf("Found macro: %s at %s: ", entry.name.c_str(), context.getOriginalPosition(entry.pos).c_str());
