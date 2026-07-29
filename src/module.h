@@ -202,6 +202,7 @@ struct VulTempReq : public VulTempReqServBase {
 };
 
 struct VulTempServ : public VulTempReqServBase {
+    bool is_declaration = false;
     string priority;
     string cond;
     vector<string> codelines;

@@ -61,6 +61,7 @@ struct MacroEntry {
     LinePosition pos;
     std::string name;
     std::vector<std::string> args;
+    bool has_body = false;
     std::vector<std::string> body;
     std::vector<LinePosition> body_pos;
 };

@@ -38,6 +38,11 @@ using namespace stringop;
 struct VCPPModuleContext {
     VulTempModule temp;
     unordered_map<string, string> local_names;
+    struct ServiceNameState {
+        bool has_declaration = false;
+        bool has_implementation = false;
+    };
+    unordered_map<string, ServiceNameState> service_names;
     unordered_map<string, string> *global_names = nullptr;
     bool is_global_header = false;
     std::vector<uint32_t> line_mapping; // new line number -> original line number (1-based)
@@ -118,6 +123,57 @@ struct VCPPModuleContext {
             }
         }
         local_names[declared_name] = kind;
+    }
+    void declareServiceName(const string &raw_name, bool is_declaration, const MacroEntry &entry) {
+        const string declared_name = trim(raw_name);
+        const string position = macroPosition(entry);
+        const string kind = is_declaration ? "SERVICE declaration" : "SERVICE implementation";
+        VulErrorContextGuard _err{
+            "declaring " + kind + " name '" +
+            (declared_name.empty() ? string("<empty>") : declared_name) +
+            "' at " + position
+        };
+        if (declared_name.empty()) {
+            throw VulException(kind + " name cannot be empty at " + position);
+        }
+        if (is_global_header) {
+            throw VulException("SERVICE is not allowed in global header scope at " + position);
+        }
+        auto local_iter = local_names.find(declared_name);
+        if (local_iter != local_names.end() && local_iter->second != "SERVICE") {
+            throw VulException(
+                "Module scope name redefinition: '" + declared_name +
+                "' was already defined as " + local_iter->second +
+                ", cannot redefine as " + kind + " at " + position
+            );
+        }
+        if (local_iter == local_names.end() && global_names != nullptr) {
+            auto global_iter = global_names->find(declared_name);
+            if (global_iter != global_names->end()) {
+                throw VulException(
+                    "Module scope name conflicts with global header name: '" + declared_name +
+                    "' was already defined globally as " + global_iter->second +
+                    ", cannot define as " + kind + " at " + position
+                );
+            }
+        }
+
+        ServiceNameState &state = service_names[declared_name];
+        if (is_declaration) {
+            if (state.has_declaration) {
+                throw VulException("Duplicate SERVICE declaration for '" + declared_name + "' at " + position);
+            }
+            if (state.has_implementation) {
+                throw VulException("SERVICE declaration for '" + declared_name + "' must appear before its implementation at " + position);
+            }
+            state.has_declaration = true;
+        } else {
+            if (state.has_implementation) {
+                throw VulException("Duplicate SERVICE implementation for '" + declared_name + "' at " + position);
+            }
+            state.has_implementation = true;
+        }
+        local_names[declared_name] = "SERVICE";
     }
 };
 
@@ -762,13 +818,17 @@ public:
         }
         VulTempServ serv;
         serv.name = entry.args[0];
+        serv.is_declaration = !entry.has_body;
         serv.has_handshake = false;
-        context.declareName(serv.name, "SERVICE", entry);
+        context.declareServiceName(serv.name, serv.is_declaration, entry);
         serv.cond = "";
         serv.priority = "";
         serv.codelines = entry.body;
         serv.codelines_debug = context.bodyDebugLocs(entry);
-        VulErrorContextGuard _err{"Processing SERVICE '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)};
+        VulErrorContextGuard _err{
+            string("Processing SERVICE ") + (serv.is_declaration ? "declaration" : "implementation") +
+            " '" + serv.name + "' at " + context.getOriginalPosition(entry.pos)
+        };
         ReqServParseOptions options;
         options.allow_handshake = true;
         options.allow_ready = true;
@@ -779,6 +839,9 @@ public:
             serv.has_handshake = *options.handshake;
         }
         if (options.ready.has_value()) {
+            if (serv.is_declaration) {
+                throw VulException("SERVICE declaration cannot specify ready=<condition> at " + context.getOriginalPosition(entry.pos));
+            }
             if (options.handshake.has_value() && !*options.handshake) {
                 throw VulException("SERVICE ready=<condition> conflicts with handshake=0 at " + context.getOriginalPosition(entry.pos));
             }
@@ -786,7 +849,7 @@ public:
             serv.cond_debug = context.toDebugLoc(entry.pos);
             serv.has_handshake = true;
         }
-        if (serv.has_handshake && serv.cond.empty()) {
+        if (!serv.is_declaration && serv.has_handshake && serv.cond.empty()) {
             throw VulException("SERVICE with handshake=1 requires ready=<condition> at " + context.getOriginalPosition(entry.pos));
         }
         if (options.priority.has_value()) {

@@ -878,11 +878,13 @@ std::vector<MacroEntry> findAllMacroEntries(const std::vector<std::string>& code
             size_t bodyOpen = p;
             size_t bodyClose = findMatchingByCounter(s, pos, bodyOpen, '{', '}');
 
+            entry.has_body = true;
             auto split_body = splitBodyLinesWithPos(s, pos, bodyOpen + 1, bodyClose);
             entry.body = std::move(split_body.lines);
             entry.body_pos = std::move(split_body.positions);
             p = bodyClose + 1;
         } else if (p < s.size() && s[p] == ';') {
+            entry.has_body = false;
             entry.body.clear();
             entry.body_pos.clear();
             ++p;

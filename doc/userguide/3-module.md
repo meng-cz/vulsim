@@ -305,6 +305,20 @@ SERVICE(recv, handshake=1, ready=((cycle & 1) == 0), ARG(uint8_t) data) {
 
 实现代码中读取 `RESP` 参数是非法的，`RESP` 参数进入逻辑函数时值未定义，只能由服务逻辑写出。
 
+SERVICE 也支持前置声明。前置声明使用不带 `{ ... }` 代码块的 `SERVICE(...);`，用于先声明端口签名，之后必须由同名 `SERVICE(...) { ... }` 实现：
+
+```cpp
+SERVICE(recv, handshake=1, ARG(uint8_t) data);
+
+SERVICE(recv, handshake=1, ready=q.deqvalid(), ARG(uint8_t) data) {
+    ...
+}
+```
+
+如果写了前置声明，则之后的同名实现必须与声明保持一致：`ARG/RESP` 的数量、类型和名字、`array`、`handshake` 都必须匹配。
+
+前置声明中不写 `ready=`，因为 ready 条件属于实现逻辑；`handshake=1` 的声明是合法的，对应实现仍必须提供 `ready=`。`priority` 是服务实现语义，声明中可以省略；如果声明中显式写了 `priority=`，则实现必须写出同样的 priority 值。
+
 ### 带有优先级的服务事务接口
 
 - `priority`：相对于Tick和其他服务的优先级整数值，值越小表示越靠后被执行（即后执行的会覆盖先执行的），负值表示执行顺序后于 Tick，正值表示执行顺序先于 Tick

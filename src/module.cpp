@@ -295,6 +295,54 @@ static vector<size_t> collectWildcardDims(const ParsedInstanceExpr &parsed) {
     return dims;
 }
 
+static bool sameServiceDeclarationSignature(
+    const VulStaticReqServ &decl,
+    const VulStaticReqServ &impl,
+    string &reason
+) {
+    if (decl.has_handshake != impl.has_handshake) {
+        reason = "handshake attribute differs";
+        return false;
+    }
+    if (decl.is_arrayed != impl.is_arrayed) {
+        reason = "array attribute presence differs";
+        return false;
+    }
+    if (decl.array_size != impl.array_size) {
+        reason = "array size differs";
+        return false;
+    }
+    if (decl.args.size() != impl.args.size()) {
+        reason = "ARG count differs";
+        return false;
+    }
+    if (decl.rets.size() != impl.rets.size()) {
+        reason = "RESP count differs";
+        return false;
+    }
+    for (size_t i = 0; i < decl.args.size(); ++i) {
+        if (decl.args[i].name != impl.args[i].name) {
+            reason = "ARG #" + std::to_string(i) + " name differs";
+            return false;
+        }
+        if (decl.args[i].type != impl.args[i].type) {
+            reason = "ARG '" + decl.args[i].name + "' type differs";
+            return false;
+        }
+    }
+    for (size_t i = 0; i < decl.rets.size(); ++i) {
+        if (decl.rets[i].name != impl.rets[i].name) {
+            reason = "RESP #" + std::to_string(i) + " name differs";
+            return false;
+        }
+        if (decl.rets[i].type != impl.rets[i].type) {
+            reason = "RESP '" + decl.rets[i].name + "' type differs";
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulStaticConfigLib &config_lib) {
@@ -378,17 +426,61 @@ void instantiateModule(
     }
 
     // services
+    struct ServiceDeclarationInfo {
+        VulStaticReqServ signature;
+        std::optional<ConfigRealValue> priority;
+        bool implemented = false;
+    };
+    unordered_map<string, ServiceDeclarationInfo> service_declarations;
     VulLogicBlockID next_logic_block_id = 1;
     for (const auto &serv : temp.services) {
         const string &serv_name = serv.name;
-        VulErrorContextGuard _err{"Processing service '" + serv_name + "'"};
-        instance.services[serv_name] = staticalizeReqServ(serv, local_config_lib);
+        VulErrorContextGuard _err{
+            string("Processing service ") + (serv.is_declaration ? "declaration" : "implementation") +
+            " '" + serv_name + "'"
+        };
+        VulStaticReqServ static_serv = staticalizeReqServ(serv, local_config_lib);
+        std::optional<ConfigRealValue> priority_value;
+        if (!serv.priority.empty()) {
+            priority_value = calculateConstexprValue(serv.priority, local_config_lib);
+        }
+        if (serv.is_declaration) {
+            if (service_declarations.find(serv_name) != service_declarations.end()) {
+                throw VulException("Duplicate SERVICE declaration for '" + serv_name + "'");
+            }
+            ServiceDeclarationInfo info;
+            info.signature = std::move(static_serv);
+            info.priority = priority_value;
+            service_declarations[serv_name] = std::move(info);
+            continue;
+        }
+
+        auto decl_iter = service_declarations.find(serv_name);
+        if (decl_iter != service_declarations.end()) {
+            string reason;
+            if (!sameServiceDeclarationSignature(decl_iter->second.signature, static_serv, reason)) {
+                throw VulException("SERVICE implementation for '" + serv_name +
+                                   "' does not match its forward declaration: " + reason);
+            }
+            if (decl_iter->second.priority.has_value()) {
+                if (!priority_value.has_value()) {
+                    throw VulException("SERVICE implementation for '" + serv_name +
+                                       "' does not match its forward declaration: priority attribute is missing");
+                }
+                if (*decl_iter->second.priority != *priority_value) {
+                    throw VulException("SERVICE implementation for '" + serv_name +
+                                       "' does not match its forward declaration: priority value differs");
+                }
+            }
+            decl_iter->second.implemented = true;
+        }
+
+        instance.services[serv_name] = static_serv;
         VulLogicBlock lb;
         lb.block_id = next_logic_block_id++;
         lb.with_priority = !serv.priority.empty();
-        if (lb.with_priority) {
-            ConfigRealValue priority_value = calculateConstexprValue(serv.priority, local_config_lib);
-            lb.priority = priority_value;
+        if (priority_value.has_value()) {
+            lb.priority = *priority_value;
         } else {
             lb.priority = 0;
         }
@@ -399,6 +491,11 @@ void instantiateModule(
             lb.cond_codelines_debug.push_back(serv.cond_debug);
         }
         instance.serv_logic_blocks[serv_name] = lb;
+    }
+    for (const auto &entry : service_declarations) {
+        if (!entry.second.implemented) {
+            throw VulException("SERVICE forward declaration for '" + entry.first + "' has no matching implementation");
+        }
     }
 
     // queries
