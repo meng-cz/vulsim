@@ -11,13 +11,95 @@ endif()
 
 include_directories( ./src )
 
+set(REQUIRED_LLVM_MAJOR_VERSION 18)
+
+find_program(LLVM_CONFIG_EXECUTABLE
+    NAMES llvm-config-${REQUIRED_LLVM_MAJOR_VERSION}
+    PATHS
+        "$ENV{LLVM_ROOT}/bin"
+        "${LLVM_ROOT}/bin"
+        "/usr/lib/llvm-${REQUIRED_LLVM_MAJOR_VERSION}/bin"
+    NO_DEFAULT_PATH
+)
+find_program(LLVM_CONFIG_EXECUTABLE
+    NAMES llvm-config-${REQUIRED_LLVM_MAJOR_VERSION}
+)
+
+set(_LLVM18_ROOT_HINTS
+    "$ENV{LLVM_ROOT}"
+    "${LLVM_ROOT}"
+    "/usr/lib/llvm-${REQUIRED_LLVM_MAJOR_VERSION}"
+)
+
+set(_LLVM18_INCLUDE_HINTS "")
+set(_LLVM18_LIBRARY_HINTS "")
+if (LLVM_CONFIG_EXECUTABLE)
+    execute_process(
+        COMMAND ${LLVM_CONFIG_EXECUTABLE} --includedir
+        OUTPUT_VARIABLE _LLVM18_CONFIG_INCLUDE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND ${LLVM_CONFIG_EXECUTABLE} --libdir
+        OUTPUT_VARIABLE _LLVM18_CONFIG_LIBRARY_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND ${LLVM_CONFIG_EXECUTABLE} --version
+        OUTPUT_VARIABLE _LLVM18_CONFIG_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if (NOT _LLVM18_CONFIG_VERSION MATCHES "^${REQUIRED_LLVM_MAJOR_VERSION}\\.")
+        message(FATAL_ERROR
+            "llvm-config executable '${LLVM_CONFIG_EXECUTABLE}' reports version "
+            "'${_LLVM18_CONFIG_VERSION}', but LLVM ${REQUIRED_LLVM_MAJOR_VERSION}.x is required."
+        )
+    endif()
+    list(APPEND _LLVM18_INCLUDE_HINTS "${_LLVM18_CONFIG_INCLUDE_DIR}")
+    list(APPEND _LLVM18_LIBRARY_HINTS "${_LLVM18_CONFIG_LIBRARY_DIR}")
+endif()
+
 find_path(LIBCLANG_INCLUDE_DIR clang-c/Index.h
-    PATHS /usr/lib/llvm-14/include
+    HINTS ${_LLVM18_INCLUDE_HINTS}
+    PATHS ${_LLVM18_ROOT_HINTS}
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
 )
 find_library(LIBCLANG_LIBRARY
-    NAMES clang-14 libclang-14 clang
-    PATHS /usr/lib/llvm-14/lib /lib/x86_64-linux-gnu
+    NAMES clang-${REQUIRED_LLVM_MAJOR_VERSION} libclang-${REQUIRED_LLVM_MAJOR_VERSION} clang libclang
+    HINTS ${_LLVM18_LIBRARY_HINTS}
+    PATHS
+        ${_LLVM18_ROOT_HINTS}
+        /usr/lib/x86_64-linux-gnu
+        /lib/x86_64-linux-gnu
+    PATH_SUFFIXES lib lib64
+    NO_DEFAULT_PATH
 )
+if (NOT LIBCLANG_INCLUDE_DIR OR NOT LIBCLANG_LIBRARY)
+    message(FATAL_ERROR
+        "LLVM/Clang ${REQUIRED_LLVM_MAJOR_VERSION} development files were not found. "
+        "Install llvm-${REQUIRED_LLVM_MAJOR_VERSION}-dev, clang-${REQUIRED_LLVM_MAJOR_VERSION}, "
+        "and libclang-${REQUIRED_LLVM_MAJOR_VERSION}-dev, or pass LLVM_ROOT=/path/to/llvm-${REQUIRED_LLVM_MAJOR_VERSION} "
+        "or -DLIBCLANG_INCLUDE_DIR=/path/to/include -DLIBCLANG_LIBRARY=/path/to/libclang."
+    )
+endif()
+set(_CLANG_VERSION_INC "${LIBCLANG_INCLUDE_DIR}/clang/Basic/Version.inc")
+if (NOT EXISTS "${_CLANG_VERSION_INC}")
+    message(FATAL_ERROR
+        "Clang version file was not found at '${_CLANG_VERSION_INC}'. "
+        "LLVM/Clang ${REQUIRED_LLVM_MAJOR_VERSION} development headers are required."
+    )
+endif()
+file(READ "${_CLANG_VERSION_INC}" _CLANG_VERSION_INC_CONTENT)
+if (NOT _CLANG_VERSION_INC_CONTENT MATCHES "#define CLANG_VERSION_MAJOR ${REQUIRED_LLVM_MAJOR_VERSION}")
+    message(FATAL_ERROR
+        "The selected Clang headers in '${LIBCLANG_INCLUDE_DIR}' are not LLVM/Clang "
+        "${REQUIRED_LLVM_MAJOR_VERSION}. Please clear the CMake cache or pass "
+        "LLVM_ROOT=/path/to/llvm-${REQUIRED_LLVM_MAJOR_VERSION}."
+    )
+endif()
+message(STATUS "Using LLVM/Clang ${REQUIRED_LLVM_MAJOR_VERSION} libclang include dir: ${LIBCLANG_INCLUDE_DIR}")
+message(STATUS "Using LLVM/Clang ${REQUIRED_LLVM_MAJOR_VERSION} libclang library: ${LIBCLANG_LIBRARY}")
 if (LIBCLANG_INCLUDE_DIR)
     include_directories(${LIBCLANG_INCLUDE_DIR})
 endif()

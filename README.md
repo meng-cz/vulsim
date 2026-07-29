@@ -30,15 +30,37 @@
 
 介绍PPT：[Vul（泺源）项目介绍与工作整理](./doc/LuoYuan20260708-FULL.pdf)
 
-## 构建
+## 依赖
 
-基于 CMake 构建系统，除 libclang 之外无其他依赖（但仅支持 Linux 平台，Windows 下仍需测试）
+基于 CMake 构建系统，支持 Linux 平台，Windows 下仍需测试。依赖 LLVM/Clang 18 的开发包。
 
-安装环境（以 Ubuntu / apt 工具为例）：
+安装环境（以 Ubuntu / apt 工具为例，如果发行版仓库已经提供 LLVM 18）：
 
 ```bash
-sudo apt install git gcc g++ make cmake clang libclang-dev 
+sudo apt update
+sudo apt install git gcc g++ make cmake \
+    llvm-18-dev clang-18 libclang-18-dev
 ```
+
+如果当前 Ubuntu 版本默认仓库不提供 LLVM 18，可以参考 LLVM 官方 apt 源安装流程：
+
+```bash
+sudo apt update
+sudo apt install wget gnupg software-properties-common
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 18
+sudo apt install llvm-18-dev clang-18 libclang-18-dev
+```
+
+安装后可检查版本：
+
+```bash
+llvm-config-18 --version
+clang-18 --version
+```
+
+## 构建
 
 初始化 git 目录与 submodule：
 
@@ -55,6 +77,20 @@ mkdir build
 cd build
 cmake ..
 make -j8
+```
+
+如果 LLVM 18 安装在非默认路径，可以在配置时显式指定：
+
+```bash
+cmake .. -DLLVM_ROOT=/path/to/llvm-18
+```
+
+也可以直接指定 libclang：
+
+```bash
+cmake .. \
+    -DLIBCLANG_INCLUDE_DIR=/path/to/llvm-18/include \
+    -DLIBCLANG_LIBRARY=/path/to/llvm-18/lib/libclang.so
 ```
 
 构建完成后会在 `build` 目录下生成如下文件：
