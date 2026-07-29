@@ -32,7 +32,7 @@
 
 ## 依赖
 
-基于 CMake 构建系统，支持 Linux 平台，Windows 下仍需测试。依赖 LLVM/Clang 18 的开发包。
+基于 CMake 构建系统，支持 Linux 平台，Windows 下仍需测试。依赖 CMake 3.20 及以上版本，以及 LLVM/Clang 18 的开发包。
 
 安装环境（以 Ubuntu / apt 工具为例，如果发行版仓库已经提供 LLVM 18）：
 
@@ -77,20 +77,6 @@ mkdir build
 cd build
 cmake ..
 make -j8
-```
-
-如果 LLVM 18 安装在非默认路径，可以在配置时显式指定：
-
-```bash
-cmake .. -DLLVM_ROOT=/path/to/llvm-18
-```
-
-也可以直接指定 libclang：
-
-```bash
-cmake .. \
-    -DLIBCLANG_INCLUDE_DIR=/path/to/llvm-18/include \
-    -DLIBCLANG_LIBRARY=/path/to/llvm-18/lib/libclang.so
 ```
 
 构建完成后会在 `build` 目录下生成如下文件：

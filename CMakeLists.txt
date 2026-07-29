@@ -1,6 +1,6 @@
-project(VulConsole)
+cmake_minimum_required(VERSION 3.20)
 
-cmake_minimum_required(VERSION 3.6)
+project(VulConsole)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -16,7 +16,9 @@ set(REQUIRED_LLVM_MAJOR_VERSION 18)
 find_program(LLVM_CONFIG_EXECUTABLE
     NAMES llvm-config-${REQUIRED_LLVM_MAJOR_VERSION}
     PATHS
+        "$ENV{LLVM18_ROOT}/bin"
         "$ENV{LLVM_ROOT}/bin"
+        "${LLVM18_ROOT}/bin"
         "${LLVM_ROOT}/bin"
         "/usr/lib/llvm-${REQUIRED_LLVM_MAJOR_VERSION}/bin"
     NO_DEFAULT_PATH
@@ -26,7 +28,9 @@ find_program(LLVM_CONFIG_EXECUTABLE
 )
 
 set(_LLVM18_ROOT_HINTS
+    "$ENV{LLVM18_ROOT}"
     "$ENV{LLVM_ROOT}"
+    "${LLVM18_ROOT}"
     "${LLVM_ROOT}"
     "/usr/lib/llvm-${REQUIRED_LLVM_MAJOR_VERSION}"
 )
