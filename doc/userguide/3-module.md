@@ -37,7 +37,7 @@ REGISTER(pipe, PipeStage, dims=PIPE_DEPTH, ports=1) { ... }
 
 ## 3.2 模块实现版本选择
 
-模块可以使用 `INTERFACE` / `USE_VERSION` / `VERSION` 将对外接口和具体实现分开。只要模块文件中没有 `USE_VERSION(...)`，解析器就按旧流程处理整个模块文件；一旦出现 `USE_VERSION(...)`，该模块必须使用版本化组织方式。
+模块可以使用 `INTERFACE` / `USE_VERSION` / `VERSION` 将对外接口和具体实现分开。模块文件中没有 `INTERFACE()` 时，解析器按旧流程处理整个模块文件；一旦定义了 `INTERFACE()`，模块接口必须全部放在 `INTERFACE()` 中。
 
 版本化模块的顶层宏顺序必须是：
 
@@ -59,7 +59,7 @@ VERSION(other_version) {
 }
 ```
 
-`INTERFACE()` 必须位于所有 `VERSION(...)` 之前，并且必须是模块中的第一个顶层宏。`USE_VERSION(name);` 必须紧跟在 `INTERFACE()` 之后，用于选择当前实际使用的实现版本。后面可以定义一个或多个 `VERSION(name) { ... }`，被 `USE_VERSION` 选中的版本必须存在。
+`INTERFACE()` 必须是模块中的第一个顶层宏，并且必须位于所有实现代码之前。`USE_VERSION(name);` 用于选择当前实际使用的实现版本；如果使用 `USE_VERSION`，它必须紧跟在 `INTERFACE()` 之后，后面必须定义至少一个 `VERSION(name) { ... }`，并且被 `USE_VERSION` 选中的版本必须存在。
 
 `INTERFACE()` 中只允许出现 `PARAMETER`、`REQUEST` 和不带代码块的 `SERVICE` 声明：
 
@@ -73,9 +73,32 @@ INTERFACE() {
 
 `INTERFACE` 中的 `SERVICE` 仅为前置声明（参考后续 SERVICE 定义），不提供实现代码块。
 
-`VERSION(name)` 中包含具体实现，例如 `CONFIG`、`STRUCT`、`REGISTER`、`WIRE`、`BRAM`、`QUEUE`、`CHILD_INSTANCE`、`CONNECT_*`、`SERVICE(...) { ... }` 和 `TICK_IMPL() { ... }`。`VERSION` 中不能重新声明 `PARAMETER` 或 `REQUEST`；`SERVICE` 必须提供代码块，并且必须对应 `INTERFACE` 中已经声明过的同名服务。
+如果定义了 `INTERFACE()` 但没有定义 `USE_VERSION(...)`，这是合法的；此时不能再定义任何 `VERSION(...)`，`INTERFACE()` 后面的顶层宏整体构成默认实现版本。
 
-示例：
+实现版本中可以包含具体实现，例如 `CONFIG`、`STRUCT`、`REGISTER`、`WIRE`、`BRAM`、`QUEUE`、`CHILD_INSTANCE`、`CONNECT_*`、`SERVICE(...) { ... }` 和 `TICK_IMPL() { ... }`。无论是默认实现还是 `VERSION(name)`，都不能重新声明 `PARAMETER` 或 `REQUEST`；`SERVICE` 必须提供代码块，并且必须对应 `INTERFACE` 中已经声明过的同名服务。
+
+解析时，工具会把 `INTERFACE()` 的内容和所选实现内容按顺序拼接后送入普通模块解析流程。因此接口中的 `SERVICE` 声明和实现中的 `SERVICE` 实现仍遵循普通前置声明规则：`ARG/RESP` 的数量、类型和名字、`array`、`handshake` 必须一致；如果声明中显式写了 `priority=`，实现也必须写同样的 priority 值。嵌套域中的错误位置和 RTL debug 信息仍保留用户源文件中的原始行号。
+
+默认实现示例：
+
+```cpp
+INTERFACE() {
+    PARAMETER(WIDTH, 32);
+    REQUEST(done);
+    SERVICE(start, handshake=1);
+}
+
+REGISTER(count, uint32_t) {
+    count = 0;
+}
+
+SERVICE(start, handshake=1, ready=true) {
+    count.setnext(count + 1);
+    done();
+}
+```
+
+显式版本选择示例：
 
 ```cpp
 INTERFACE() {

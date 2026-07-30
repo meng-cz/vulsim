@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "vcpp.hpp"
+#pragma once
 
-#include "vulcpp/project_parser.hpp"
+#include "../project.h"
 
-VulStaticProject parseVcppStaticProject(
+VulStaticProject parseVcppStaticProjectImpl(
     const string &project_dir,
     const string &top_file_path,
     const string &main_file_path
-) {
-    return parseVcppStaticProjectImpl(project_dir, top_file_path, main_file_path);
-}
+);
