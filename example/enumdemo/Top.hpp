@@ -2,6 +2,10 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    SERVICE(set_state, ARG(CoreState) next_state, ARG(uint32_t) next_code);
+}
+
 REGISTER(state, CoreState) {
     state = CoreState::RESET;
 }

@@ -2,6 +2,11 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(done, ARG(uint32_t) code);
+    REQUEST(emit_payload, handshake=1, ARG(ProxyPayload) payload, RESP(ProxyPayload) echoed);
+}
+
 QUEUE(simple_q, ProxyPayload, 4);
 QUEUE_MP(mp_q, ProxyPayload, 8, 2, 2);
 
@@ -12,9 +17,6 @@ ROM(coeff_rom, 16, PROXY_MEM_SIZE, 2, rom_init.hex);
 REGISTER(addr_reg, uint32_t) {
     addr_reg = 0;
 }
-
-REQUEST(done, ARG(uint32_t) code);
-REQUEST_READY(emit_payload, ARG(ProxyPayload) payload, RESP(ProxyPayload) echoed);
 
 TICK_IMPL() {
     uint32_t addr = addr_reg & (PROXY_MEM_SIZE - 1);

@@ -3,9 +3,10 @@
 
 #include <defhelper.hpp>
 
-REQUEST_READY(deq, RESP(uint32_t) data);
-
-REQUEST(output, ARG(uint32_t) data);
+INTERFACE() {
+    REQUEST(deq, handshake=1, RESP(uint32_t) data);
+    REQUEST(output, ARG(uint32_t) data);
+}
 
 REGISTER(cycle, uint32_t) {
     cycle = 0;
@@ -20,4 +21,3 @@ TICK_IMPL() {
         }
     }
 }
-

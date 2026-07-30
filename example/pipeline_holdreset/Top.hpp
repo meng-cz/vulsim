@@ -2,6 +2,10 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    SERVICE(step, ARG(bool) in_valid, ARG(uint32_t) in_data, ARG(bool) stall, ARG(bool) flush);
+}
+
 REGISTER_ARRAY1(pipe, PipeStage, PIPE_DEPTH, 1) {
     for (int i = 0; i < PIPE_DEPTH; ++i) {
         pipe[i].valid = false;
@@ -39,4 +43,3 @@ QUERY(snapshot, PipelineSnapshot) {
 
 TICK_IMPL() {
 }
-

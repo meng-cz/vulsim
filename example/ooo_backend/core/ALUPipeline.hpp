@@ -2,11 +2,15 @@
 
 #include "../header.hpp"
 
-PARAMETER(PIPE_SLOTS, 8);
-PARAMETER(INPUT_DEPTH, 8);
-PARAMETER(RESULT_DEPTH, 8);
-PARAMETER(MUL_LATENCY, 3);
-PARAMETER(DIV_LATENCY, 8);
+INTERFACE() {
+    PARAMETER(PIPE_SLOTS, 8);
+    PARAMETER(INPUT_DEPTH, 8);
+    PARAMETER(RESULT_DEPTH, 8);
+    PARAMETER(MUL_LATENCY, 3);
+    PARAMETER(DIV_LATENCY, 8);
+    SERVICE(issue, handshake=1, ARG(FuRequest) req);
+    SERVICE(pop_result, handshake=1, RESP(WritebackEvent) wb);
+}
 
 HELPER() {
 inline uint32_t alu_latency(const FuRequest &req) {
@@ -72,11 +76,11 @@ REGISTER_ARRAY1(slot_req, FuRequest, PIPE_SLOTS, 1) {
     }
 }
 
-SERVICE_READY(issue, issueq.enqready(), ARG(FuRequest) req) {
+SERVICE(issue, handshake=1, ready=issueq.enqready(), ARG(FuRequest) req) {
     issueq.enqnext(req);
 }
 
-SERVICE_READY(pop_result, resultq.deqvalid(), RESP(WritebackEvent) wb) {
+SERVICE(pop_result, handshake=1, ready=resultq.deqvalid(), RESP(WritebackEvent) wb) {
     wb = resultq.front();
     resultq.deqnext();
 }

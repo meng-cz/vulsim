@@ -4,7 +4,9 @@
 
 #include "header.hpp"
 
-REQUEST(output, ARG(uint32_t) data);
+INTERFACE() {
+    REQUEST(output, ARG(uint32_t) data);
+}
 
 REGISTER(mirror, uint32_t) {
     mirror = 0;

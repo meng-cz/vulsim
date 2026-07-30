@@ -5,6 +5,11 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(output, ARG(AESData) data);
+    SERVICE(input, handshake=1, ARG(AESData) data, ARG(AESKey) key);
+}
+
 // Parameter
 
 // Struct
@@ -27,9 +32,7 @@ REGISTER_MUL(state, uint32_t, 2) {
 
 // Port
 
-REQUEST(output, ARG(AESData) data);
-
-SERVICE_READY(input, (state == 0 || state >= 10), ARG(AESData) data, ARG(AESKey) key) {
+SERVICE(input, handshake=1, ready=(state == 0 || state >= 10), ARG(AESData) data, ARG(AESKey) key) {
     k.setnext<0>(key);
     AESData indata;
     for (uint32_t i = 0; i < 16; i++) {
@@ -135,5 +138,4 @@ TICK_IMPL() {
         state.setnext<1>(state + 1);
     }
 }
-
 

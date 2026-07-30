@@ -3,7 +3,10 @@
 #include "header.hpp"
 #include "defhelper.hpp"
 
-REQUEST(s3output, ARG(uint64_t) y);
+INTERFACE() {
+    REQUEST(s3output, ARG(uint64_t) y);
+    SERVICE(s0input, ARG(uint32_t) a, ARG(uint32_t) b);
+}
 
 STRUCT(S0S1RegData) {
     uint32_t a;
@@ -104,4 +107,3 @@ TICK_IMPL() {
         s3output(y.to<uint64_t>());
     };
 }
-

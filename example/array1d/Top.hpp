@@ -4,11 +4,13 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(print, ARG(uint32_t) data);
+}
+
 REGISTER(cycle, uint32_t) {
     cycle = 0;
 }
-
-REQUEST(print, ARG(uint32_t) data);
 
 CHILD_INSTANCE_ARRAY1(LineNode, lane, LEN);
 

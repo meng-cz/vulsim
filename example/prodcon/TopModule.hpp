@@ -5,6 +5,10 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(output, ARG(uint8_t) s);
+}
+
 // Parameter
 
 // Struct
@@ -12,8 +16,6 @@
 // Register
 
 // Port
-
-REQUEST(output, ARG(uint8_t) s);
 
 // Logic block
 
@@ -25,4 +27,3 @@ CHILD_INSTANCE(Consumer, cons);
 CONNECT_CR_CS(prod, send, cons, recv);
 
 CONNECT_CR_R(cons, output, output);
-

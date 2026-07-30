@@ -2,6 +2,10 @@
 
 #include "../header.hpp"
 
+INTERFACE() {
+    SERVICE(decode, ARG(uint32_t) inst, RESP(DecodedInst) out);
+}
+
 HELPER() {
 inline uint64_t sign_extend_u64(uint64_t value, uint32_t bits) {
     if (bits >= 64) {

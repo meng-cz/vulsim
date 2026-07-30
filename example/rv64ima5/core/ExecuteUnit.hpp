@@ -2,6 +2,10 @@
 
 #include "../header.hpp"
 
+INTERFACE() {
+    SERVICE(exec, ARG(ExecRequest) req, RESP(ExecResult) out);
+}
+
 HELPER() {
 inline uint64_t sign_extend_width(uint64_t value, uint8_t width) {
     if (width == 1) {

@@ -4,7 +4,9 @@
 
 #include "header.hpp"
 
-REQUEST(output, ARG(uint32_t) data);
+INTERFACE() {
+    REQUEST(output, ARG(uint32_t) data);
+}
 
 CHILD_INSTANCE(IncNode, node);
 

@@ -2,6 +2,20 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    SERVICE(push, ARG(U32x3) values, ARG(uint32_t) num);
+    SERVICE(pop, ARG(uint32_t) num, RESP(uint32_t) valid_before, RESP(U32x2) values);
+    SERVICE(pop_push,
+            ARG(uint32_t) pop_num,
+            ARG(U32x3) values,
+            ARG(uint32_t) push_num,
+            RESP(uint32_t) ready_before,
+            RESP(uint32_t) valid_before,
+            RESP(uint32_t) ready_after,
+            RESP(U32x2) popped);
+    SERVICE(clear_push, ARG(U32x3) values, ARG(uint32_t) num);
+}
+
 QUEUE_MP(q, uint32_t, Q_DEPTH, Q_ENQ_WIDTH, Q_DEQ_WIDTH);
 
 SERVICE(push, ARG(U32x3) values, ARG(uint32_t) num) {

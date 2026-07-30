@@ -5,6 +5,10 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(send, handshake=1, ARG(uint8_t) d);
+}
+
 // Parameter
 
 // Struct
@@ -20,8 +24,6 @@ REGISTER(count, uint8_t) {
 
 // Port
 
-REQUEST_READY(send, ARG(uint8_t) d);
-
 // Logic block
 
 TICK_IMPL() {
@@ -30,4 +32,3 @@ TICK_IMPL() {
         count.setnext(count + 1);
     }
 }
-

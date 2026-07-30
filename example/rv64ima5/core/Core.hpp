@@ -5,6 +5,15 @@
 #include "ExecuteUnit.hpp"
 #include "RegisterFile.hpp"
 
+INTERFACE() {
+    REQUEST(icache_req, ARG(uint64_t) pc);
+    REQUEST(icache_resp, RESP(bool) hit, RESP(uint32_t) inst);
+    REQUEST(dcache_req, ARG(MemRequest) req);
+    REQUEST(dcache_resp, RESP(bool) hit, RESP(MemResponse) resp);
+    REQUEST(trace_wb, ARG(uint32_t) rd, ARG(uint64_t) data, ARG(bool) wen);
+    REQUEST(trace_halt, ARG(uint64_t) pc);
+}
+
 HELPER() {
 inline IfIdStage make_ifid_invalid() {
     IfIdStage s;
@@ -148,13 +157,6 @@ REGISTER(fetch_req_pc, uint64_t) {
 REGISTER(mem_waiting, bool) {
     mem_waiting = false;
 }
-
-REQUEST(icache_req, ARG(uint64_t) pc);
-REQUEST(icache_resp, RESP(bool) hit, RESP(uint32_t) inst);
-REQUEST(dcache_req, ARG(MemRequest) req);
-REQUEST(dcache_resp, RESP(bool) hit, RESP(MemResponse) resp);
-REQUEST(trace_wb, ARG(uint32_t) rd, ARG(uint64_t) data, ARG(bool) wen);
-REQUEST(trace_halt, ARG(uint64_t) pc);
 
 CHILD_INSTANCE(Decoder, dec);
 CHILD_INSTANCE(ExecuteUnit, exu);

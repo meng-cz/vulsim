@@ -5,6 +5,12 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(readresp_s1, ARG(bool) hit, ARG(Int<DATA_WIDTH>) data);
+    SERVICE(read_s0, ARG(Int<ADDR_WIDTH>) addr);
+    SERVICE(refill_s0, ARG(Int<ADDR_WIDTH>) addr, ARG(Int<DATA_WIDTH>) data);
+}
+
 // Parameter
 
 // Struct
@@ -34,8 +40,6 @@ WIRE(read_inputed, bool) {
 }
 
 // Port
-
-REQUEST(readresp_s1, ARG(bool) hit, ARG(Int<DATA_WIDTH>) data);
 
 SERVICE(read_s0, ARG(Int<ADDR_WIDTH>) addr)  {
     ReadStageReg s0;

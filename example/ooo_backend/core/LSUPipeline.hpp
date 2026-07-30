@@ -2,10 +2,16 @@
 
 #include "../header.hpp"
 
-PARAMETER(PIPE_SLOTS, 4);
-PARAMETER(INPUT_DEPTH, 4);
-PARAMETER(RESULT_DEPTH, 4);
-PARAMETER(ADDR_LATENCY, 2);
+INTERFACE() {
+    PARAMETER(PIPE_SLOTS, 4);
+    PARAMETER(INPUT_DEPTH, 4);
+    PARAMETER(RESULT_DEPTH, 4);
+    PARAMETER(ADDR_LATENCY, 2);
+    REQUEST(mem_req, ARG(MemRequest) req);
+    REQUEST(mem_resp, handshake=1, RESP(MemResponse) resp);
+    SERVICE(issue, handshake=1, ARG(FuRequest) req);
+    SERVICE(pop_result, handshake=1, RESP(WritebackEvent) wb);
+}
 
 STRUCT(LSUSlot) {
     bool valid;
@@ -17,9 +23,6 @@ STRUCT(LSUSlot) {
 
 QUEUE(issueq, FuRequest, INPUT_DEPTH);
 QUEUE(resultq, WritebackEvent, RESULT_DEPTH);
-
-REQUEST(mem_req, ARG(MemRequest) req);
-REQUEST_READY(mem_resp, RESP(MemResponse) resp);
 
 REGISTER_ARRAY1(slot_state, LSUSlot, PIPE_SLOTS, 1) {
     for (int i = 0; i < PIPE_SLOTS; ++i) {
@@ -38,11 +41,11 @@ REGISTER_ARRAY1(slot_state, LSUSlot, PIPE_SLOTS, 1) {
     }
 }
 
-SERVICE_READY(issue, issueq.enqready(), ARG(FuRequest) req) {
+SERVICE(issue, handshake=1, ready=issueq.enqready(), ARG(FuRequest) req) {
     issueq.enqnext(req);
 }
 
-SERVICE_READY(pop_result, resultq.deqvalid(), RESP(WritebackEvent) wb) {
+SERVICE(pop_result, handshake=1, ready=resultq.deqvalid(), RESP(WritebackEvent) wb) {
     wb = resultq.front();
     resultq.deqnext();
 }

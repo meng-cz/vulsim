@@ -4,6 +4,12 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(print, array=HEI, ARG(uint32_t) data);
+    REQUEST(spill, ARG(uint32_t) data);
+    SERVICE(output, array=HEI, ARG(uint32_t) data);
+}
+
 REGISTER(cycle, uint32_t) {
     cycle = 0;
 }
@@ -16,10 +22,7 @@ REGISTER(captured1, uint32_t) {
     captured1 = 0;
 }
 
-REQUEST(print, ARRAY(HEI), ARG(uint32_t) data);
-REQUEST(spill, ARG(uint32_t) data);
-
-SERVICE(output, ARRAY(HEI), ARG(uint32_t) data) {
+SERVICE(output, array=HEI, ARG(uint32_t) data) {
     if constexpr (IDX == 0) {
         captured0.setnext(data);
     } else if constexpr (IDX == 1) {

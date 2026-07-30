@@ -3,7 +3,9 @@
 
 #include <defhelper.hpp>
 
-REQUEST(output, ARG(uint32_t) data);
+INTERFACE() {
+    REQUEST(output, ARG(uint32_t) data);
+}
 
 CHILD_INSTANCE(FIFO, fifo);
 CHILD_INSTANCE(Reader, reader);

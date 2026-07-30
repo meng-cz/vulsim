@@ -2,6 +2,11 @@
 
 #include "../header.hpp"
 
+INTERFACE() {
+    SERVICE(read2, ARG(uint32_t) rs1, ARG(uint32_t) rs2, RESP(RegReadPair) out);
+    SERVICE(write, ARG(uint32_t) rd, ARG(uint64_t) data, ARG(bool) wen);
+}
+
 REGISTER_ARRAY1(regs, uint64_t, 32, 1) {
     for (int i = 0; i < 32; ++i) {
         regs[i] = 0;

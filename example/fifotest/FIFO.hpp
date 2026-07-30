@@ -3,11 +3,15 @@
 
 #include <defhelper.hpp>
 
+INTERFACE() {
+    SERVICE(deq, handshake=1, RESP(uint32_t) data);
+}
+
 CONFIG(QUEUE_SIZE, 8);
 
 QUEUE(q, uint32_t, QUEUE_SIZE);
 
-SERVICE_READY(deq, q.deqvalid(), RESP(uint32_t) data) {
+SERVICE(deq, handshake=1, ready=q.deqvalid(), RESP(uint32_t) data) {
     data = q.front();
     q.deqnext();
 }
@@ -22,4 +26,3 @@ TICK_IMPL() {
         q.enqnext(cycle);
     }
 }
-

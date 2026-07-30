@@ -4,6 +4,10 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    SERVICE(push, ARG(uint32_t) data);
+}
+
 REGISTER(sum, uint32_t) {
     sum = 0;
 }

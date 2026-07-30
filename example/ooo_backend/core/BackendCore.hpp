@@ -4,8 +4,15 @@
 #include "ALUPipeline.hpp"
 #include "LSUPipeline.hpp"
 
-PARAMETER(ALU_LANES, 2);
-PARAMETER(LSU_LANES, 1);
+INTERFACE() {
+    PARAMETER(ALU_LANES, 2);
+    PARAMETER(LSU_LANES, 1);
+    SERVICE(push_inst, handshake=1, array=INGRESS_WIDTH, ARG(BackendInstr) inst);
+    REQUEST(mem_req0, ARG(MemRequest) req);
+    REQUEST(mem_resp0, handshake=1, RESP(MemResponse) resp);
+    REQUEST(mem_req1, ARG(MemRequest) req);
+    REQUEST(mem_resp1, handshake=1, RESP(MemResponse) resp);
+}
 
 HELPER() {
 inline bool op_writes_dest(uint8_t opcode, uint8_t rd) {
@@ -168,17 +175,12 @@ REGISTER_ARRAY1(ingress_buf, BackendInstr, FRONTEND_QUEUE_DEPTH, 1) {
     }
 }
 
-SERVICE_READY(push_inst, !push_valid[IDX], ARRAY(INGRESS_WIDTH), ARG(BackendInstr) inst) {
+SERVICE(push_inst, handshake=1, ready=!push_valid[IDX], array=INGRESS_WIDTH, ARG(BackendInstr) inst) {
     BackendInstr copy = inst;
     copy.valid = true;
     push_data.setnext<0>(IDX, copy);
     push_valid.setnext<0>(IDX, true);
 }
-
-REQUEST(mem_req0, ARG(MemRequest) req);
-REQUEST_READY(mem_resp0, RESP(MemResponse) resp);
-REQUEST(mem_req1, ARG(MemRequest) req);
-REQUEST_READY(mem_resp1, RESP(MemResponse) resp);
 
 CHILD_INSTANCE(ALUPipeline, alu0);
 CHILD_INSTANCE(ALUPipeline, alu1);

@@ -4,6 +4,11 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    REQUEST(event, ARG(uint8_t) state, ARG(uint8_t) count);
+    SERVICE(command, ARG(uint8_t) opcode);
+}
+
 REGISTER(state, uint8_t) {
     state = FSM_IDLE;
 }
@@ -11,8 +16,6 @@ REGISTER(state, uint8_t) {
 REGISTER(count, uint8_t) {
     count = 0;
 }
-
-REQUEST(event, ARG(uint8_t) state, ARG(uint8_t) count);
 
 SERVICE(command, ARG(uint8_t) opcode) {
     uint8_t next_state = state;

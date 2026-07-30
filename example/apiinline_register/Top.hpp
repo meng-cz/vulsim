@@ -2,6 +2,11 @@
 
 #include "header.hpp"
 
+INTERFACE() {
+    SERVICE(write_scalar, ARG(uint32_t) value);
+    SERVICE(write_payload, ARG(Payload) next_payload);
+}
+
 REGISTER(scalar_reg, uint32_t) {
     scalar_reg = 1;
 }
