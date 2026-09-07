@@ -925,6 +925,21 @@ inline ArgPort procArg(const VulStaticArg &arg, const VulStaticBundleLib &bundle
     return port;
 }
 
+inline string reqservValueArgList(const VulStaticReqServ &reqserv) {
+    string out;
+    for (const auto &param : reqserv.param_order) {
+        if (!out.empty()) out += ", ";
+        if (param.kind == VulReqServParamKind::Arg) {
+            const auto &arg = reqserv.args.at(param.index);
+            out += arg.type.toString() + " " + arg.name;
+        } else {
+            const auto &ret = reqserv.rets.at(param.index);
+            out += ret.type.toString() + " & " + ret.name;
+        }
+    }
+    return out;
+}
+
 static void insertHLSResetInitAfterFunctionOpen(
     vector<string> &lines,
     VulDebugLocs &debug,
@@ -1176,28 +1191,19 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
 
     map<int32_t, vector<ServiceCache>> service_cache; // priority -> service cache
 
-    auto append_call_name = [](string &call_names, const string &name) {
-        if (!call_names.empty()) {
-            call_names += ", ";
-        }
-        call_names += name;
-    };
-
-    auto emit_unpack_arg = [&](const ArgPort &arg, const string &portname, string &call_names) {
+    auto emit_unpack_arg = [&](const ArgPort &arg, const string &portname) {
         string typestr = arg.type.toString();
         ctx.hls_body.push_back("  " + typestr + " " + arg.name + " = " +
                                apiinline::defaultValueExprForType(arg.type, ctx.local_bundlelib) + ";\n");
         for (const auto &field : arg.flat_fields) {
             ctx.hls_body.push_back("  " + field.name + " = " + typedExtractExpr(field, portname) + ";\n");
         }
-        append_call_name(call_names, arg.name);
     };
 
-    auto emit_construct_ret = [&](const ArgPort &ret, string &call_names) {
+    auto emit_construct_ret = [&](const ArgPort &ret) {
         string typestr = ret.type.toString();
         ctx.hls_body.push_back("  " + typestr + " " + ret.name + " = " +
                                apiinline::defaultValueExprForType(ret.type, ctx.local_bundlelib) + ";\n");
-        append_call_name(call_names, ret.name);
     };
 
     auto emit_pack_ret = [&](const ArgPort &ret, const string &portname) {
@@ -1230,15 +1236,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
         if (!ctx.emit_hls_api_helpers) {
-            arglists.clear();
-            for (const auto &arg : serv.args) {
-                if (!arglists.empty()) arglists += ", ";
-                arglists += arg.type.toString() + " " + arg.name;
-            }
-            for (const auto &ret : serv.rets) {
-                if (!arglists.empty()) arglists += ", ";
-                arglists += ret.type.toString() + " & " + ret.name;
-            }
+            arglists = reqservValueArgList(serv);
         }
         bool has_rdy = serv.has_handshake;
         const bool is_arrayed = serv.is_arrayed;
@@ -1364,14 +1362,14 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                 if (cache.is_arrayed) {
                     for (uint32_t idx = 0; idx < cache.array_size; ++idx) {
                         ctx.hls_body.push_back("{\n");
-                        string call_names = "";
+                        const string &call_names = cache.argnames;
                         for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                             const auto &arg = cache.arg_ports[i];
                             string portname = (reqservArgPort(cache.name, arg.name) + "[" + std::to_string(idx) + "]");
-                            emit_unpack_arg(arg, portname, call_names);
+                            emit_unpack_arg(arg, portname);
                         }
                         for (const auto &ret : cache.ret_ports) {
-                            emit_construct_ret(ret, call_names);
+                            emit_construct_ret(ret);
                         }
                         ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + call_names + ");\n");
                         ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) {\n");
@@ -1386,14 +1384,14 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                     }
                 } else {
                     ctx.hls_body.push_back("{\n");
-                    string call_names = "";
+                    const string &call_names = cache.argnames;
                     for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                         const auto &arg = cache.arg_ports[i];
                         string portname = (reqservArgPort(cache.name, arg.name));
-                        emit_unpack_arg(arg, portname, call_names);
+                        emit_unpack_arg(arg, portname);
                     }
                     for (const auto &ret : cache.ret_ports) {
-                        emit_construct_ret(ret, call_names);
+                        emit_construct_ret(ret);
                     }
                     ctx.hls_body.push_back("  bool rdy = " + condFuncName(cache.name) + "(" + call_names + ");\n");
                     ctx.hls_body.push_back("  if (rdy && " + reqservVldPort(cache.name) + ") {\n");
@@ -1410,14 +1408,14 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                 if (cache.is_arrayed) {
                     for (uint32_t idx = 0; idx < cache.array_size; ++idx) {
                         ctx.hls_body.push_back("{\n");
-                        string call_names = "";
+                        const string &call_names = cache.argnames;
                         for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                             const auto &arg = cache.arg_ports[i];
                             string portname = reqservArgPort(cache.name, arg.name) + "[" + std::to_string(idx) + "]";
-                            emit_unpack_arg(arg, portname, call_names);
+                            emit_unpack_arg(arg, portname);
                         }
                         for (const auto &ret : cache.ret_ports) {
-                            emit_construct_ret(ret, call_names);
+                            emit_construct_ret(ret);
                         }
                         ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + "[" + std::to_string(idx) + "]) {\n");
                         ctx.hls_body.push_back("    " + implFuncName(cache.name) + ".template operator()<" + std::to_string(idx) + ">(" + call_names + ");\n");
@@ -1430,14 +1428,14 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
                     }
                 } else {
                     ctx.hls_body.push_back("{\n");
-                    string call_names = "";
+                    const string &call_names = cache.argnames;
                     for (uint32_t i = 0; i < cache.arg_ports.size(); ++i) {
                         const auto &arg = cache.arg_ports[i];
                         string portname = reqservArgPort(cache.name, arg.name);
-                        emit_unpack_arg(arg, portname, call_names);
+                        emit_unpack_arg(arg, portname);
                     }
                     for (const auto &ret : cache.ret_ports) {
-                        emit_construct_ret(ret, call_names);
+                        emit_construct_ret(ret);
                     }
                     ctx.hls_body.push_back("  if (" + reqservVldPort(cache.name) + ") {\n");
                     ctx.hls_body.push_back("    " + implFuncName(cache.name) + "(" + call_names + ");\n");
@@ -1791,17 +1789,20 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 vector<string> arg_macro_names;
                 vector<string> ret_macro_names;
                 string macro_arg_list;
-                for (size_t i = 0; i < arg_ports.size(); ++i) {
-                    const string macro_name = "__vul_child_arg_" + std::to_string(i);
+                arg_macro_names.resize(arg_ports.size());
+                ret_macro_names.resize(ret_ports.size());
+                for (const auto &param : serv.param_order) {
+                    const bool is_arg = param.kind == VulReqServParamKind::Arg;
+                    const string macro_name = is_arg
+                        ? "__vul_child_arg_" + std::to_string(param.index)
+                        : "__vul_child_ret_" + std::to_string(param.index);
                     if (!macro_arg_list.empty()) macro_arg_list += ", ";
                     macro_arg_list += macro_name;
-                    arg_macro_names.push_back("(" + macro_name + ")");
-                }
-                for (size_t i = 0; i < ret_ports.size(); ++i) {
-                    const string macro_name = "__vul_child_ret_" + std::to_string(i);
-                    if (!macro_arg_list.empty()) macro_arg_list += ", ";
-                    macro_arg_list += macro_name;
-                    ret_macro_names.push_back("(" + macro_name + ")");
+                    if (is_arg) {
+                        arg_macro_names.at(param.index) = "(" + macro_name + ")";
+                    } else {
+                        ret_macro_names.at(param.index) = "(" + macro_name + ")";
+                    }
                 }
                 ctx.hls_header.push_back("#define " + alias_name + "(" + macro_arg_list + ") { \\\n");
                 ctx.hls_header.push_back("  " + reqservVldPort(signal_base) + " = true; \\\n");
@@ -1829,15 +1830,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 ctx.hls_final.push_back("#undef " + alias_name + "\n");
                 continue;
             }
-            string v2_arglists;
-            for (const auto &arg : serv.args) {
-                if (!v2_arglists.empty()) v2_arglists += ", ";
-                v2_arglists += arg.type.toString() + " " + arg.name;
-            }
-            for (const auto &ret : serv.rets) {
-                if (!v2_arglists.empty()) v2_arglists += ", ";
-                v2_arglists += ret.type.toString() + " & " + ret.name;
-            }
+            const string v2_arglists = reqservValueArgList(serv);
             if (is_alias_arrayed) {
                 ctx.hls_helpers.push_back("auto " + alias_name + " = [&]<uint32_t IDX = 0>(" + v2_arglists + ") -> " + serv.returnType() + " {\n");
                 ctx.hls_helpers.push_back("  static_assert(IDX < " + std::to_string(group.size()) + ", \"Implicit request index out of range\");\n");
@@ -3228,7 +3221,8 @@ vector<string> genVerilatorTestMainCpp(
             }
         }
     }
-    for (const auto &[name, temp_serv] : test.services) {
+    for (const auto &name : test.service_order) {
+        const auto &temp_serv = test.services.at(name);
         const auto &top_req = top_module.requests.at(name);
         if (top_req.is_arrayed) {
             out.push_back("  std::array<bool, " + std::to_string(top_req.array_size) + "> __handled_" + name + " = {};\n");
@@ -3296,7 +3290,8 @@ vector<string> genVerilatorTestMainCpp(
     out.push_back("    while (again) {\n");
     out.push_back("      again = false;\n");
 
-    for (const auto &[name, temp_serv] : test.services) {
+    for (const auto &name : test.service_order) {
+        const auto &temp_serv = test.services.at(name);
         const auto &top_req = top_module.requests.at(name);
         VulStaticReqServ serv = staticalizeReqServ(temp_serv, project.global_configlib);
         vector<ArgPort> arg_ports;
@@ -3310,17 +3305,13 @@ vector<string> genVerilatorTestMainCpp(
             const string handled = is_arrayed ? ("__handled_" + name + "[" + std::to_string(idx) + "]") : ("__handled_" + name);
             const string valid = verilatorIndexedTopExpr(reqservVldPort(name), is_arrayed, idx);
             out.push_back("      {\n");
-            string call_names;
             for (const auto &arg : arg_ports) {
                 emitVerilatorUnpack(out, arg, verilatorIndexedTopExpr(reqservArgPort(name, arg.name), is_arrayed, idx), "        ");
-                if (!call_names.empty()) call_names += ", ";
-                call_names += arg.name;
             }
             for (const auto &ret : ret_ports) {
                 out.push_back("        " + ret.type.toString() + " " + ret.name + " = {};\n");
-                if (!call_names.empty()) call_names += ", ";
-                call_names += ret.name;
             }
+            const string call_names = top_req.signatureArgNameList();
             if (serv.has_handshake) {
                 out.push_back("        bool ready = __cond_" + name + "(" + call_names + ");\n");
                 out.push_back("        " + verilatorIndexedTopExpr(reqservRdyPort(name), is_arrayed, idx) + " = ready;\n");

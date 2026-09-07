@@ -134,6 +134,9 @@ public:
         if (options.priority.has_value()) {
             serv.priority = *options.priority;
         }
+        if (context.test.services.find(serv.name) == context.test.services.end()) {
+            context.test.service_order.push_back(serv.name);
+        }
         context.test.services[serv.name] = std::move(serv);
     }
 };
@@ -157,6 +160,9 @@ public:
         ReqServParseOptions options;
         options.allow_array = true;
         parseReqArgsAndRets(entry.args, 2, serv, &options, "SERVICE_READY");
+        if (context.test.services.find(serv.name) == context.test.services.end()) {
+            context.test.service_order.push_back(serv.name);
+        }
         context.test.services[serv.name] = std::move(serv);
     }
 };

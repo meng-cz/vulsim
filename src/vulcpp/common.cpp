@@ -236,8 +236,10 @@ void parseReqArgsAndRets(
 
         if (type_tag.size() > 5 && type_tag.rfind("ARG(", 0) == 0 && type_tag.back() == ')') {
             reqserv.args.emplace_back(type_tag.substr(4, type_tag.size() - 5), arg_name);
+            reqserv.param_order.push_back({VulReqServParamKind::Arg, reqserv.args.size() - 1});
         } else if (type_tag.size() > 6 && type_tag.rfind("RESP(", 0) == 0 && type_tag.back() == ')') {
             reqserv.rets.emplace_back(type_tag.substr(5, type_tag.size() - 6), arg_name);
+            reqserv.param_order.push_back({VulReqServParamKind::Resp, reqserv.rets.size() - 1});
         } else {
             throw VulException("invalid argument type tag '" + type_tag + "'");
         }

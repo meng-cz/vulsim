@@ -320,6 +320,10 @@ static bool sameServiceDeclarationSignature(
         reason = "RESP count differs";
         return false;
     }
+    if (decl.param_order != impl.param_order) {
+        reason = "ARG/RESP declaration order differs";
+        return false;
+    }
     for (size_t i = 0; i < decl.args.size(); ++i) {
         if (decl.args[i].name != impl.args[i].name) {
             reason = "ARG #" + std::to_string(i) + " name differs";
@@ -351,6 +355,7 @@ VulStaticReqServ staticalizeReqServ(const VulTempReqServBase &item, const VulSta
     static_req.is_arrayed = false;
     static_req.array_size = 1;
     static_req.has_handshake = item.has_handshake;
+    static_req.param_order = item.param_order;
     if (!item.array_size.empty()) {
         ConfigRealValue array_size = calculateConstexprValue(item.array_size, config_lib);
         if (array_size <= 0) {

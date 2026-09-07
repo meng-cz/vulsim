@@ -34,6 +34,7 @@ struct RequestInfo {
     const VulStaticReqServ *req = nullptr;
     vector<ReqArgInfo> args;
     vector<ReqArgInfo> rets;
+    vector<VulReqServParamRef> param_order;
     string helper_name;
 };
 
@@ -94,13 +95,22 @@ void emitRequestBody(
     const string sel = req.is_arrayed ? ("[" + idx_expr + "]") : "";
     os << "  " << vldPort(req.name) << sel << " = true;\n";
 
-    size_t arg_idx = 0;
-    for (const auto &arg : info.args) {
-        if (arg_idx >= call_args.size()) {
-            break;
+    vector<string> arg_exprs(info.args.size());
+    vector<string> ret_exprs(info.rets.size());
+    for (size_t i = 0; i < info.param_order.size() && i < call_args.size(); ++i) {
+        const auto &param = info.param_order[i];
+        if (param.kind == VulReqServParamKind::Arg) {
+            arg_exprs.at(param.index) = call_args[i];
+        } else {
+            ret_exprs.at(param.index) = call_args[i];
         }
+    }
+
+    for (size_t i = 0; i < info.args.size(); ++i) {
+        const auto &arg = info.args[i];
+        if (arg_exprs[i].empty()) continue;
         os << "  " << arg.type_str << " __vul_req_arg_" << arg.name
-           << " = (" << call_args[arg_idx] << ");\n";
+           << " = (" << arg_exprs[i] << ");\n";
         for (const auto &field : arg.fields) {
             const string value = packFlatFieldValueExpr(
                 argFieldExpr("__vul_req_arg_" + arg.name, arg.name, field.name),
@@ -108,20 +118,17 @@ void emitRequestBody(
             os << "  " << uintExtractExpr(argPort(req.name, arg.name) + sel, field.offset + field.width - 1, field.offset)
                << " = " << value << ";\n";
         }
-        ++arg_idx;
     }
 
-    for (const auto &ret : info.rets) {
-        if (arg_idx >= call_args.size()) {
-            break;
-        }
-        const string ret_expr = call_args[arg_idx];
+    for (size_t i = 0; i < info.rets.size(); ++i) {
+        const auto &ret = info.rets[i];
+        if (ret_exprs[i].empty()) continue;
+        const string &ret_expr = ret_exprs[i];
         for (const auto &field : ret.fields) {
             os << "  " << argFieldExpr(ret_expr, ret.name, field.name) << " = "
                << uintExtractExpr(argPort(req.name, ret.name) + sel, field.offset + field.width - 1, field.offset)
                << ";\n";
         }
-        ++arg_idx;
     }
 
     if (emit_return && req.has_handshake) {
@@ -137,23 +144,23 @@ string requestHelperDef(const RequestInfo &info) {
     }
     os << (req.has_handshake ? "bool " : "void ") << info.helper_name << "(";
     bool need_comma = false;
-    for (const auto &arg : info.args) {
+    for (const auto &param : info.param_order) {
         if (need_comma) os << ", ";
-        os << arg.type_str << " " << arg.name;
-        need_comma = true;
-    }
-    for (const auto &ret : info.rets) {
-        if (need_comma) os << ", ";
-        os << ret.type_str << " &" << ret.name;
+        if (param.kind == VulReqServParamKind::Arg) {
+            const auto &arg = info.args.at(param.index);
+            os << arg.type_str << " " << arg.name;
+        } else {
+            const auto &ret = info.rets.at(param.index);
+            os << ret.type_str << " &" << ret.name;
+        }
         need_comma = true;
     }
     os << ") {\n";
     vector<string> arg_names;
-    for (const auto &arg : info.args) {
-        arg_names.push_back(arg.name);
-    }
-    for (const auto &ret : info.rets) {
-        arg_names.push_back(ret.name);
+    for (const auto &param : info.param_order) {
+        arg_names.push_back(param.kind == VulReqServParamKind::Arg
+            ? info.args.at(param.index).name
+            : info.rets.at(param.index).name);
     }
     emitRequestBody(os, info, req.is_arrayed ? "IDX" : "0", arg_names);
     os << "}\n";
@@ -225,6 +232,7 @@ InlineCode inlineRequestAPIs(
     for (const auto &[name, req] : module.requests) {
         RequestInfo info;
         info.req = &req;
+        info.param_order = req.param_order;
         info.helper_name = "__vul_req_call_" + req.name;
         for (const auto &arg : req.args) {
             ReqArgInfo out;

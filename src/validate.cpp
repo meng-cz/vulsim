@@ -127,6 +127,7 @@ bool samePortShapeIgnoringArray(
     if (a.has_handshake != b.has_handshake) return false;
     if (a.args.size() != b.args.size()) return false;
     if (a.rets.size() != b.rets.size()) return false;
+    if (a.param_order != b.param_order) return false;
     for (size_t i = 0; i < a.args.size(); ++i) {
         if (a.args[i].type != b.args[i].type) return false;
     }

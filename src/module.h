@@ -139,48 +139,63 @@ struct VulTempWire {
     VulDebugLocs reset_codelines_debug;
 };
 
+enum class VulReqServParamKind {
+    Arg,
+    Resp,
+};
+
+struct VulReqServParamRef {
+    VulReqServParamKind kind = VulReqServParamKind::Arg;
+    size_t index = 0;
+
+    inline bool operator==(const VulReqServParamRef &other) const {
+        return kind == other.kind && index == other.index;
+    }
+};
+
 struct VulTempReqServBase {
     string name;
     string array_size; // empty means non-arrayed request/service port
-    vector<pair<string, string>> args; // pair of arg name and arg type
-    vector<pair<string, string>> rets; // pair of ret name and ret type
+    vector<pair<string, string>> args; // pair of argument type and name
+    vector<pair<string, string>> rets; // pair of response type and name
+    vector<VulReqServParamRef> param_order; // source declaration order across ARG/RESP
     bool has_handshake;
 
     inline string signatureArgNameList() const {
         string sig;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) sig += ", ";
-            sig += args[i].second;
-        }
-        for (size_t i = 0; i < rets.size(); ++i) {
-            if (i > 0 || args.size() > 0) sig += ", ";
-            sig += rets[i].second;
+        for (const auto &param : param_order) {
+            if (!sig.empty()) sig += ", ";
+            sig += param.kind == VulReqServParamKind::Arg
+                ? args.at(param.index).second
+                : rets.at(param.index).second;
         }
         return sig;
     }
 
     inline string signatureArgTypeOnly() const {
         string sig;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) sig += ", ";
-            sig += string("const ") + args[i].first + " & ";
-        }
-        for (size_t i = 0; i < rets.size(); ++i) {
-            if (i > 0 || args.size() > 0) sig += ", ";
-            sig += rets[i].first + " & ";
+        for (const auto &param : param_order) {
+            if (!sig.empty()) sig += ", ";
+            if (param.kind == VulReqServParamKind::Arg) {
+                sig += string("const ") + args.at(param.index).first + " & ";
+            } else {
+                sig += rets.at(param.index).first + " & ";
+            }
         }
         return sig;
     }
 
     inline string signatureArgOnly() const {
         string sig;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) sig += ", ";
-            sig += (string("const ") + args[i].first + " & ") + args[i].second;
-        }
-        for (size_t i = 0; i < rets.size(); ++i) {
-            if (i > 0 || args.size() > 0) sig += ", ";
-            sig += (rets[i].first + " & " + rets[i].second);
+        for (const auto &param : param_order) {
+            if (!sig.empty()) sig += ", ";
+            if (param.kind == VulReqServParamKind::Arg) {
+                const auto &arg = args.at(param.index);
+                sig += string("const ") + arg.first + " & " + arg.second;
+            } else {
+                const auto &ret = rets.at(param.index);
+                sig += ret.first + " & " + ret.second;
+            }
         }
         return sig;
     }
@@ -359,6 +374,7 @@ struct VulStaticReqServ {
     ConfigRealValue array_size = 1;
     vector<VulStaticArg> args;
     vector<VulStaticArg> rets;
+    vector<VulReqServParamRef> param_order;
     bool has_handshake;
 
     inline bool match(const VulStaticReqServ &a) const {
@@ -373,44 +389,45 @@ struct VulStaticReqServ {
         for (size_t i = 0; i < a.rets.size(); ++i) {
             if (a.rets[i].type != rets[i].type) return false;
         }
+        if (a.param_order != param_order) return false;
         return true;
     }
 
     inline string signatureArgNameList() const {
         string sig;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) sig += ", ";
-            sig += args[i].name;
-        }
-        for (size_t i = 0; i < rets.size(); ++i) {
-            if (i > 0 || args.size() > 0) sig += ", ";
-            sig += rets[i].name;
+        for (const auto &param : param_order) {
+            if (!sig.empty()) sig += ", ";
+            sig += param.kind == VulReqServParamKind::Arg
+                ? args.at(param.index).name
+                : rets.at(param.index).name;
         }
         return sig;
     }
 
     inline string signatureArgTypeOnly() const {
         string sig;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) sig += ", ";
-            sig += string("const ") + args[i].type.toString() + " & ";
-        }
-        for (size_t i = 0; i < rets.size(); ++i) {
-            if (i > 0 || args.size() > 0) sig += ", ";
-            sig += rets[i].type.toString() + " & ";
+        for (const auto &param : param_order) {
+            if (!sig.empty()) sig += ", ";
+            if (param.kind == VulReqServParamKind::Arg) {
+                sig += string("const ") + args.at(param.index).type.toString() + " & ";
+            } else {
+                sig += rets.at(param.index).type.toString() + " & ";
+            }
         }
         return sig;
     }
 
     inline string signatureArgOnly() const {
         string sig;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) sig += ", ";
-            sig += (string("const ") + args[i].type.toString() + " & ") + args[i].name;
-        }
-        for (size_t i = 0; i < rets.size(); ++i) {
-            if (i > 0 || args.size() > 0) sig += ", ";
-            sig += (rets[i].type.toString() + " & " + rets[i].name);
+        for (const auto &param : param_order) {
+            if (!sig.empty()) sig += ", ";
+            if (param.kind == VulReqServParamKind::Arg) {
+                const auto &arg = args.at(param.index);
+                sig += string("const ") + arg.type.toString() + " & " + arg.name;
+            } else {
+                const auto &ret = rets.at(param.index);
+                sig += ret.type.toString() + " & " + ret.name;
+            }
         }
         return sig;
     }
@@ -607,6 +624,7 @@ struct VulStaticTestHarnessModule {
 
     unordered_map<ReqServName, VulTempReq>      requests;
     unordered_map<ReqServName, VulTempServ>      services;
+    vector<ReqServName>                         service_order; // deterministic TestMain callback order
     unordered_map<ReqServName, VulStaticQuery>  queries;
 
     vector<CCodeLine> test_codelines;
