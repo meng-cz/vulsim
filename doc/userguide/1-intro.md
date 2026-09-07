@@ -173,6 +173,7 @@ QUERY(status, Status);
 # -p: 可选，用于覆盖 Main 中通过 PROJECT(...) 声明的项目根目录路径
 # -l: 指定 VulCPP 库文件的路径（默认./vullib/）
 # -o: 指定生成的仿真代码输出目录（默认./sim_out/）
+# -f/--force: 输出目录非空时不询问并自动清空；空目录可直接使用
 
 # 编译生成的仿真代码 (build.sh 默认使用 g++)
 cd sim_out

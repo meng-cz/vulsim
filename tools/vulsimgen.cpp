@@ -20,6 +20,7 @@
 #include "breakpoint.hpp"
 #include "trace.hpp"
 #include "vullib.hpp"
+#include "output_dir.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -63,6 +64,7 @@ struct SimGenArgs {
     std::string break_file;
     std::string break_line;
     uint64_t break_cycles = 1024;
+    bool force = false;
 };
 
 int simgenStatic(const SimGenArgs &args) {
@@ -116,23 +118,8 @@ int simgenStatic(const SimGenArgs &args) {
     }
 
     std::filesystem::path out_path(out_dir);
-    if (!std::filesystem::exists(out_path)) {
-        std::filesystem::create_directories(out_path);
-    } else if (!std::filesystem::is_directory(out_path)) {
-        throw VulException("Output path is not a directory: " + out_dir);
-    } else {
-        // ask user to confirm before deleting existing files in the output directory
-        std::cout << "Output directory already exists: " << out_dir << std::endl;
-        std::cout << "Do you want to clear the output directory before generating code? (y/n) ";
-        char choice;
-        std::cin >> choice;
-        if (choice == 'y' || choice == 'Y') {
-            std::filesystem::remove_all(out_path);
-            std::filesystem::create_directories(out_path);
-        } else {
-            std::cout << "Output directory is not empty. Please clear the output directory or choose a different output directory." << std::endl;
-            exit(1);
-        }
+    if (!prepareOutputDirectory(out_path, out_dir, args.force)) {
+        return 1;
     }
 
     {
@@ -351,6 +338,10 @@ int main(int argc, char * argv[]) {
     parser.add_argument("-l", "--lib")
         .help("sets the directory for runtime library files (default: ./vullib)")
         .default_value(std::string("./vullib"));
+    parser.add_argument("-f", "--force")
+        .help("overwrite a non-empty output directory without prompting")
+        .default_value(false)
+        .implicit_value(true);
     parser.add_argument("-T", "--tracefile")
         .help("tracing signal matcher file for generating tracing code (optional)")
         .default_value(std::string(""));
@@ -389,7 +380,8 @@ int main(int argc, char * argv[]) {
     string break_file = parser.get<std::string>("--breakfile");
     string break_line = parser.get<std::string>("--break");
     uint64_t break_cycles = parser.get<uint64_t>("--breakcycles");
-    SimGenArgs args{top_file, main_file, proj_dir, out_dir, lib_dir, trace_file, trace_line, break_file, break_line, break_cycles};
+    bool force = parser.get<bool>("--force");
+    SimGenArgs args{top_file, main_file, proj_dir, out_dir, lib_dir, trace_file, trace_line, break_file, break_line, break_cycles, force};
 
     try{
         return simgenStatic(args);

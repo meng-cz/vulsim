@@ -19,6 +19,7 @@
 #include "debugmap.hpp"
 #include "argparse.hpp"
 #include "vullib.hpp"
+#include "output_dir.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -83,6 +84,10 @@ int main(int argc, char * argv[]) {
     parser.add_argument("-p", "--project")
         .help("sets the project directory (default: parent directory of the top module file)")
         .default_value(std::string(""));
+    parser.add_argument("-f", "--force")
+        .help("overwrite a non-empty output directory without prompting")
+        .default_value(false)
+        .implicit_value(true);
     parser.add_argument("--v1")
         .help("use experimental RTL generator v1 path")
         .default_value(false)
@@ -105,6 +110,7 @@ int main(int argc, char * argv[]) {
     string out_dir = parser.get<std::string>("--out");
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
+    bool force = parser.get<bool>("--force");
     bool use_v1 = parser.get<bool>("--v1");
     bool explicit_v2 = parser.get<bool>("--v2");
     if (use_v1 && explicit_v2) {
@@ -137,24 +143,8 @@ int main(int argc, char * argv[]) {
     VulStaticProject project = parseVcppStaticProject(proj_dir, top_file, main_file);
 
     std::filesystem::path out_path(out_dir);
-    if (!std::filesystem::exists(out_path)) {
-        std::filesystem::create_directories(out_path);
-    } else if (!std::filesystem::is_directory(out_path)) {
-        std::cerr << "Error: Output path is not a directory: " << out_dir << std::endl;
+    if (!prepareOutputDirectory(out_path, out_dir, force)) {
         return 1;
-    } else {
-        // ask user to confirm before deleting existing files in the output directory
-        std::cout << "Output directory already exists: " << out_dir << std::endl;
-        std::cout << "Do you want to clear the output directory before generating code? (y/n) ";
-        char choice;
-        std::cin >> choice;
-        if (choice == 'y' || choice == 'Y') {
-            std::filesystem::remove_all(out_path);
-            std::filesystem::create_directories(out_path);
-        } else {
-            std::cerr << "Error: Output directory is not empty. Please clear the output directory or choose a different output directory." << std::endl;
-            return 1;
-        }
     }
 
     // gen module
