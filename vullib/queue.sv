@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module VulQueue #(
     parameter int unsigned Width = 32,
     parameter int unsigned Depth = 4

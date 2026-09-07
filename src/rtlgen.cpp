@@ -2828,6 +2828,8 @@ RTLGenResult genModuleRTLImpl(
     ports.push_back("input rstn");
     ports.insert(ports.end(), ctx.rtl_ports.begin(), ctx.rtl_ports.end());
 
+    rtl.push_back("`timescale 1ns/1ps\n");
+    rtl.push_back("\n");
     rtl.push_back("module " + module_name + "(\n");
     for (size_t i = 0; i < ports.size(); ++i) {
         rtl.push_back("  " + ports[i] + (i + 1 == ports.size() ? "" : ",") + "\n");

@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module VulBRAM1RW #(
     parameter DataWidth = 32,
     parameter AddrWidth = 10

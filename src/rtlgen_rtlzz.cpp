@@ -34,6 +34,19 @@ void appendTextAsLines(vector<string> &lines, const string &text) {
     }
 }
 
+string withoutLeadingTimescaleDirective(string text) {
+    const size_t directive_pos = text.find_first_not_of(" \t\r\n");
+    if (directive_pos == string::npos || text.compare(directive_pos, 10, "`timescale") != 0) {
+        return text;
+    }
+    const size_t line_end = text.find('\n', directive_pos);
+    if (line_end == string::npos) {
+        return "";
+    }
+    text.erase(0, line_end + 1);
+    return text;
+}
+
 } // namespace
 
 RTLV2LogicRTLResult appendRTLV2LogicRTL(
@@ -66,7 +79,9 @@ RTLV2LogicRTLResult appendRTLV2LogicRTL(
     }
 
     result.rtl_skeleten_codes.push_back("\n");
-    appendTextAsLines(result.rtl_skeleten_codes, logic_rtl.rtl_text);
+    appendTextAsLines(
+        result.rtl_skeleten_codes,
+        withoutLeadingTimescaleDirective(std::move(logic_rtl.rtl_text)));
     vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
     result.rtl_skeleten_debug_lines = vulDebugBuildGeneratedMap(result.rtl_skeleten_debug);
     RTLV2LogicRTLResult out;

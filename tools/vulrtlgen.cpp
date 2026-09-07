@@ -68,7 +68,7 @@ inline static std::string joinNames(const std::vector<std::string> &names) {
 
 static int runVulRTLGen(int argc, char * argv[]) {
 
-    argparse::ArgumentParser parser("vulsimgen", "VulSim Verilog Generator V1.0");
+    argparse::ArgumentParser parser("vulrtlgen", "VulSim Verilog Generator V1.0");
     parser.add_argument("-t", "--top")
         .help("sets the top module file")
         .default_value(std::string(""));
