@@ -66,7 +66,7 @@ inline static std::string joinNames(const std::vector<std::string> &names) {
     return out;
 }
 
-int main(int argc, char * argv[]) {
+static int runVulRTLGen(int argc, char * argv[]) {
 
     argparse::ArgumentParser parser("vulsimgen", "VulSim Verilog Generator V1.0");
     parser.add_argument("-t", "--top")
@@ -253,4 +253,17 @@ int main(int argc, char * argv[]) {
     }
 
     return 0;
+}
+
+int main(int argc, char * argv[]) {
+    try {
+        return runVulRTLGen(argc, argv);
+    } catch (const VulException &e) {
+        std::cerr << "ERROR: " << e.what() << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "ERROR: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ERROR: Unknown internal error" << std::endl;
+    }
+    return 1;
 }

@@ -319,7 +319,7 @@ int simgenStatic(const SimGenArgs &args) {
 }
 
 
-int main(int argc, char * argv[]) {
+static int runVulSimGen(int argc, char * argv[]) {
 
     argparse::ArgumentParser parser("vulsimgen", "VulSim Simulation Generator V1.0");
     parser.add_argument("-t", "--top")
@@ -383,12 +383,18 @@ int main(int argc, char * argv[]) {
     bool force = parser.get<bool>("--force");
     SimGenArgs args{top_file, main_file, proj_dir, out_dir, lib_dir, trace_file, trace_line, break_file, break_line, break_cycles, force};
 
-    try{
-        return simgenStatic(args);
+    return simgenStatic(args);
+}
+
+int main(int argc, char * argv[]) {
+    try {
+        return runVulSimGen(argc, argv);
+    } catch (const VulException &e) {
+        std::cerr << "ERROR: " << e.what() << std::endl;
     } catch (const std::exception &e) {
         std::cerr << "ERROR: " << e.what() << std::endl;
-        return 1;
+    } catch (...) {
+        std::cerr << "ERROR: Unknown internal error" << std::endl;
     }
-
-    return 0;
+    return 1;
 }
