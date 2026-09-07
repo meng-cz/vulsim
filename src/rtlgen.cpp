@@ -115,6 +115,25 @@ inline string flatFieldValueExpr(const string &root, const string &flat_name) {
     return flat_name;
 }
 
+inline string reqservFieldValueExpr(
+    const string &root,
+    const string &decl_name,
+    const string &flat_name
+) {
+    if (flat_name == decl_name) {
+        return root;
+    }
+    const string member_prefix = decl_name + ".";
+    if (flat_name.rfind(member_prefix, 0) == 0) {
+        return root + "." + flat_name.substr(member_prefix.size());
+    }
+    const string index_prefix = decl_name + "[";
+    if (flat_name.rfind(index_prefix, 0) == 0) {
+        return root + flat_name.substr(decl_name.size());
+    }
+    return flatFieldValueExpr(root, flat_name);
+}
+
 struct HLSGlobalPortDecl {
     string direction;
     string name;
@@ -1769,12 +1788,41 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             const bool is_alias_arrayed = group.front().alias_indexed;
             if (!is_alias_arrayed && serv.returnType() == "void") {
                 const string signal_base = childServiceSignalBase(group.front().instance_name, group.front().service_name);
-                ctx.hls_header.push_back("#define " + alias_name + "(" + serv.signatureArgNameList() + ") { \\\n");
+                vector<string> arg_macro_names;
+                vector<string> ret_macro_names;
+                string macro_arg_list;
+                for (size_t i = 0; i < arg_ports.size(); ++i) {
+                    const string macro_name = "__vul_child_arg_" + std::to_string(i);
+                    if (!macro_arg_list.empty()) macro_arg_list += ", ";
+                    macro_arg_list += macro_name;
+                    arg_macro_names.push_back("(" + macro_name + ")");
+                }
+                for (size_t i = 0; i < ret_ports.size(); ++i) {
+                    const string macro_name = "__vul_child_ret_" + std::to_string(i);
+                    if (!macro_arg_list.empty()) macro_arg_list += ", ";
+                    macro_arg_list += macro_name;
+                    ret_macro_names.push_back("(" + macro_name + ")");
+                }
+                ctx.hls_header.push_back("#define " + alias_name + "(" + macro_arg_list + ") { \\\n");
                 ctx.hls_header.push_back("  " + reqservVldPort(signal_base) + " = true; \\\n");
-                for (const auto &arg : arg_ports) {
+                for (size_t i = 0; i < arg_ports.size(); ++i) {
+                    const auto &arg = arg_ports[i];
                     const string arg_port_name = reqservArgPort(signal_base, arg.name);
                     for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("  " + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + "; \\\n");
+                        const string value_expr = reqservFieldValueExpr(arg_macro_names[i], arg.name, field.name);
+                        ctx.hls_header.push_back("  " + uintExtractExpr(arg_port_name, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, value_expr) + "; \\\n");
+                    }
+                }
+                for (size_t i = 0; i < ret_ports.size(); ++i) {
+                    const auto &ret = ret_ports[i];
+                    const string ret_port_name = reqservArgPort(signal_base, ret.name);
+                    for (const auto &field : ret.flat_fields) {
+                        const string lvalue_expr = reqservFieldValueExpr(ret_macro_names[i], ret.name, field.name);
+                        const string value_expr = apiinline::unpackFlatFieldValueExpr(
+                            lvalue_expr,
+                            uintExtractExpr(ret_port_name, field.offset + field.width - 1, field.offset),
+                            field);
+                        ctx.hls_header.push_back("  " + lvalue_expr + " = " + value_expr + "; \\\n");
                     }
                 }
                 ctx.hls_header.push_back("}\n");
