@@ -98,7 +98,7 @@ inline constexpr int64_t clog2(int64_t value) {
 #define CHILD_INSTANCE_ARRAY1(module, name, N0, ...) void * name[N0];
 #define CHILD_INSTANCE_ARRAY2(module, name, N0, N1, ...) void * name[N0][N1];
 
-#define USE_CHILD_SERVICE_PORT(instance, serv, alias, ...) template<uint32_t IDX = 0> bool alias (__VA_ARGS__);
+#define USE_CHILD_SERVICE(instance, serv, alias, ...) template<uint32_t IDX = 0> bool alias (__VA_ARGS__);
 
 #define USE_CHILD_QUERY(instance, name, alias, rettype) template<uint32_t IDX = 0> rettype alias();
 
