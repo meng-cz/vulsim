@@ -49,7 +49,7 @@ string withoutLeadingTimescaleDirective(string text) {
 
 } // namespace
 
-RTLV2LogicRTLResult appendRTLV2LogicRTL(
+LogicRTLResult appendLogicRTL(
     RTLGenResult &result,
     const VulStaticModuleInstance &module,
     const string &logic_hls_filepath,
@@ -69,7 +69,7 @@ RTLV2LogicRTLResult appendRTLV2LogicRTL(
         unroll_limit
     );
     if (!logic_rtl.ok) {
-        RTLV2LogicRTLResult out;
+        LogicRTLResult out;
         out.ok = false;
         out.error = "RTLzz compile failed for '" + logic_module_name + "' in '" + logic_hls_filepath + "': " + logic_rtl.error;
         out.error_debug_codelines = std::move(logic_rtl.error_debug_codelines);
@@ -84,7 +84,7 @@ RTLV2LogicRTLResult appendRTLV2LogicRTL(
         withoutLeadingTimescaleDirective(std::move(logic_rtl.rtl_text)));
     vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
     result.rtl_skeleten_debug_lines = vulDebugBuildGeneratedMap(result.rtl_skeleten_debug);
-    RTLV2LogicRTLResult out;
+    LogicRTLResult out;
     out.debug_codelines = std::move(logic_rtl.debug_codelines);
     return out;
 }

@@ -295,12 +295,10 @@
 
 ## src/rtlgen.cpp
 
-**文件功能**：生成 RTL skeleton、HLS logic wrapper、API helper 和 Verilator 测试桥接代码；RTLZZ V2 输入使用带 `#pragma input_port/output_port` 的文件级全局端口 ABI。
+**文件功能**：生成 RTL skeleton、logic wrapper 和 Verilator 测试桥接代码；logic 经过 APIInline 后，以带 `#pragma input_port/output_port` 的文件级全局端口 ABI 交给 RTLZZ。
 
 **主要函数**
-- `genModuleRTL(...)`：生成旧路径 RTL 代码。
-- `genModuleRTLV2(...)`：生成 V2 RTL skeleton 和 inline 后逻辑代码。
-- `genModuleRTLImpl(...)`：执行 RTL 生成各阶段的共用实现；组装 HLS 目标代码时为缺失行尾的用户代码补充换行，并保持逐行 debug 映射。
+- `genModuleRTL(...)`：生成 RTL skeleton，对 logic 调用 APIInline，并输出供 RTLZZ 编译的逻辑代码。
 - `globalizeHLSArgument(...)`：将内部积累的旧式主函数参数声明转换为新 ABI 的全局端口声明和方向 pragma。
 - `_procConstAndBundle(...)`：生成常量、类型和 helper 头部。
 - `_procWires(...)`：生成 wire 相关 HLS 初始化和 RTL 声明。
@@ -320,17 +318,16 @@
 **主要函数/类型**
 - `RTLGenResult`：保存 skeleton、logic、debug map 和资源文件列表。
 - `LogicSubModuleName(...)`：生成逻辑子模块名称。
-- `genModuleRTL(...)`：声明 V1 RTL 生成入口。
-- `genModuleRTLV2(...)`：声明 V2 RTL 生成入口。
-- `appendRTLV2LogicRTL(...)`：声明调用 RTLZZ 追加 logic RTL 的入口。
+- `genModuleRTL(...)`：声明唯一的 RTL skeleton/APIInline 生成入口。
+- `appendLogicRTL(...)`：声明调用 RTLZZ 追加 logic RTL 的入口。
 - `genVerilatorTestMainCpp(...)`：声明 Verilator 测试代码生成入口。
 
 ## src/rtlgen_rtlzz.cpp
 
-**文件功能**：将 RTLGenV2 生成的 logic C++ 交给 RTLZZ 转换为 RTL 并追加到 skeleton。
+**文件功能**：将 RTLGen 生成并经 APIInline 处理的 logic C++ 交给 RTLZZ 转换为 RTL并追加到 skeleton。
 
 **主要函数**
-- `appendRTLV2LogicRTL(...)`：调用 RTLZZ 生成 logic RTL 并追加到 `RTLGenResult`。
+- `appendLogicRTL(...)`：调用 RTLZZ 生成 logic RTL 并追加到 `RTLGenResult`。
 - `appendTextAsLines(...)`：将 RTLZZ 输出文本追加为代码行。
 
 ## src/rtlzz_bridge.cpp

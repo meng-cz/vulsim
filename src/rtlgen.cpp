@@ -38,27 +38,24 @@ struct RTLGenContext {
     const VulStaticConfigLib &local_configlib;
     const VulStaticBundleLib &local_bundlelib;
     const vector<string> &global_helper_codes;
-    bool emit_hls_api_helpers;
 
     RTLGenContext(
         const VulStaticModuleInstance &module,
         const VulStaticConfigLib &local_configlib,
         const VulStaticBundleLib &local_bundlelib,
-        const vector<string> &global_helper_codes,
-        bool emit_hls_api_helpers
+        const vector<string> &global_helper_codes
     )
         : module(module),
           local_configlib(local_configlib),
           local_bundlelib(local_bundlelib),
-          global_helper_codes(global_helper_codes),
-          emit_hls_api_helpers(emit_hls_api_helpers) {}
+          global_helper_codes(global_helper_codes) {}
 
     vector<string> hls_header; // 文件开头的常量和结构体声明
     VulDebugLocs hls_header_debug;
     vector<string> hls_arguments; // HLS主函数的参数列表，仅包含类型和参数名字符串，没有逗号或换行
     vector<string> hls_init; // HLS主函数开头的初始化代码，主要是寄存器和线网的定义和reset赋值
     VulDebugLocs hls_init_debug;
-    vector<string> hls_reset_init; // 暂存寄存器 resetvalue 计算代码，v2 在 API inline 后插入
+    vector<string> hls_reset_init; // 暂存寄存器 resetvalue 计算代码，在 API inline 后插入
     VulDebugLocs hls_reset_init_debug;
     vector<string> hls_helpers; // HLS主函数中定义的辅助函数，用来将函数调用转换成对信号的操作
     VulDebugLocs hls_helpers_debug;
@@ -526,9 +523,8 @@ void _procConstAndBundle(RTLGenContext &ctx){
     for (const auto &cfg_entry : ctx.local_configlib) {
         const string &cfg_name = cfg_entry.first;
         ConfigRealValue real_value = cfg_entry.second;
-        const string definition = ctx.emit_hls_api_helpers
-            ? "constexpr int64_t " + cfg_name + " = " + std::to_string(real_value) + ";\n"
-            : "#define " + cfg_name + " (" + std::to_string(real_value) + ")\n";
+        const string definition =
+            "#define " + cfg_name + " (" + std::to_string(real_value) + ")\n";
         vulDebugAppendLine(
             ctx.hls_header,
             ctx.hls_header_debug,
@@ -624,107 +620,11 @@ void _procRegisters(RTLGenContext &ctx) {
         }
         string resetvalue_type_str = rdata_type_str;
 
-        if (ctx.emit_hls_api_helpers) {
-            ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
-            ctx.hls_header.push_back("const " + rdata_type_str + " &rdata;\n");
-            ctx.hls_header.push_back(wen_type_str + " &wen;\n");
-            ctx.hls_header.push_back(wdata_type_str + " &wdata;\n");
-            ctx.hls_header.push_back(ctrl_type_str + " &holdnext_req;\n");
-            ctx.hls_header.push_back(ctrl_type_str + " &resetnext_req;\n");
-            ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back(proxy_class_name + "(const " + rdata_type_str + " &rdata, " + wen_type_str + " &wen, " + wdata_type_str + " &wdata, " + ctrl_type_str + " &holdnext_req, " + ctrl_type_str + " &resetnext_req) : rdata(rdata), wen(wen), wdata(wdata), holdnext_req(holdnext_req), resetnext_req(resetnext_req) {}\n");
-            ctx.hls_header.push_back("\n");
-        }
 
-        if (ctx.emit_hls_api_helpers && !is_array) {
-            // allow implicit conversion to element type for non-array register
-            ctx.hls_header.push_back("operator " + element_type_str + "() const {\n");
-            ctx.hls_header.push_back("  " + element_type_str + " value;\n");
-            for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = " + typedExtractExpr(field, "rdata") + ";\n");
-            }
-            ctx.hls_header.push_back("  return value;\n");
-            ctx.hls_header.push_back("}\n");
 
-            // single element get for non-array register
-            ctx.hls_header.push_back(element_type_str + " get() const {\n");
-            ctx.hls_header.push_back("  " + element_type_str + " value;\n");
-            for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = " + typedExtractExpr(field, "rdata") + ";\n");
-            }
-            ctx.hls_header.push_back("  return value;\n");
-            ctx.hls_header.push_back("}\n");
 
-            // single element set for non-array register
-            ctx.hls_header.push_back("template <uint32_t P = 0>\n");
-            ctx.hls_header.push_back("void setnext(const " + element_type_str + " &value) {\n");
-            ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
-            ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
-            for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, flatFieldValueExpr("value", field.name)) + ";\n");
-            }
-            if (is_ported) {
-                ctx.hls_header.push_back("  wdata[P] = wdata_val;\n");
-                ctx.hls_header.push_back("  wen[P] = true;\n");
-            } else {
-                ctx.hls_header.push_back("  wdata = wdata_val;\n");
-                ctx.hls_header.push_back("  wen = true;\n");
-            }
-            ctx.hls_header.push_back("}\n");
 
-            ctx.hls_header.push_back("void holdnext() {\n");
-            ctx.hls_header.push_back("  holdnext_req = true;\n");
-            ctx.hls_header.push_back("}\n");
-            ctx.hls_header.push_back("void resetnext() {\n");
-            ctx.hls_header.push_back("  resetnext_req = true;\n");
-            ctx.hls_header.push_back("}\n");
-        } else if (ctx.emit_hls_api_helpers) {
-            // array element get for array register
-            ctx.hls_header.push_back(element_type_str + " operator[](const uint32_t idx) const {\n");
-            ctx.hls_header.push_back("  " + element_type_str + " value;\n");
-            ctx.hls_header.push_back("  Int<" + ewid_str + "> rdata_val = rdata[idx];\n");
-            for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + field.name + " = " + typedExtractExpr(field, "rdata_val") + ";\n");
-            }
-            ctx.hls_header.push_back("  return value;\n");
-            ctx.hls_header.push_back("}\n");
-
-            // array element set for array register
-            ctx.hls_header.push_back("template <uint32_t P = 0>\n");
-            ctx.hls_header.push_back("void setnext(const uint32_t idx, const " + element_type_str + " &value) {\n");
-            ctx.hls_header.push_back("  static_assert(P < " + wrport_num_str + ", \"Port index out of range\");\n");
-            ctx.hls_header.push_back("  Int<" + ewid_str + "> wdata_val;\n");
-            for (const auto &field : out) {
-                ctx.hls_header.push_back("  " + uintExtractExpr("wdata_val", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, flatFieldValueExpr("value", field.name)) + ";\n");
-            }
-            if (is_ported) {
-                ctx.hls_header.push_back("  wdata[idx][P] = wdata_val;\n");
-                ctx.hls_header.push_back("  wen[idx][P] = true;\n");
-            } else {
-                ctx.hls_header.push_back("  wdata[idx] = wdata_val;\n");
-                ctx.hls_header.push_back("  wen[idx] = true;\n");
-            }
-            ctx.hls_header.push_back("}\n");
-
-            ctx.hls_header.push_back("void holdnext(const uint32_t idx) {\n");
-            ctx.hls_header.push_back("  holdnext_req[idx] = true;\n");
-            ctx.hls_header.push_back("}\n");
-            ctx.hls_header.push_back("void holdnext() {\n");
-            ctx.hls_header.push_back("  for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) holdnext_req[__vul_i] = true;\n");
-            ctx.hls_header.push_back("}\n");
-            ctx.hls_header.push_back("void resetnext(const uint32_t idx) {\n");
-            ctx.hls_header.push_back("  resetnext_req[idx] = true;\n");
-            ctx.hls_header.push_back("}\n");
-            ctx.hls_header.push_back("void resetnext() {\n");
-            ctx.hls_header.push_back("  for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) resetnext_req[__vul_i] = true;\n");
-            ctx.hls_header.push_back("}\n");
-        }
-
-        if (ctx.emit_hls_api_helpers) {
-            ctx.hls_header.push_back("};\n");
-            ctx.hls_header.push_back("\n");
-        }
 
         string wdata_port_name = "wdata_" + reg.name + "__";
         string wen_port_name = "wen_" + reg.name + "__";
@@ -806,9 +706,7 @@ void _procRegisters(RTLGenContext &ctx) {
         ctx.hls_reset_init.push_back("}\n");
         ctx.hls_reset_init_debug.push_back({});
 
-        if (ctx.emit_hls_api_helpers) {
-            ctx.hls_init.push_back(proxy_class_name + " " + reg.name + "(" + rdata_port_name + ", " + wen_port_name + ", " + wdata_port_name + ", " + holdnext_port_name + ", " + resetnext_port_name + ");\n");
-        }
+
 
         // generate register instances
         string reg_decl_name = reg.name;
@@ -1078,63 +976,7 @@ void _procRequests(RTLGenContext &ctx) {
                 }
             }
 
-            if (ctx.emit_hls_api_helpers) {
-                // generate request helper function declaration (supports req<IDX>(...))
-                const string helper_struct_name = "__ReqHelper__" + req_name;
-                const string helper_var_name = "__req_helper__" + req_name;
-                const string array_size_str = std::to_string(array_size);
 
-                ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
-                ctx.hls_header.push_back("  " + arrayed_port_decl("bool") + " & vld_ports;\n");
-                if (has_rdy) {
-                    ctx.hls_header.push_back("  const " + arrayed_port_decl("bool") + " & rdy_ports;\n");
-                }
-                for (const auto &arg : arg_ports) {
-                    ctx.hls_header.push_back("  " + arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & arg_" + arg.name + ";\n");
-                }
-                for (const auto &ret : ret_ports) {
-                    ctx.hls_header.push_back("  const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & ret_" + ret.name + ";\n");
-                }
-
-                ctx.hls_header.push_back("\n");
-                ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
-                ctx.hls_header.push_back("  " + rettype + " call(" + arglists + ") {\n");
-                ctx.hls_header.push_back("    static_assert(IDX < " + array_size_str + ", \"Request port index out of range\");\n");
-                string sel_str = is_arrayed ? ("[IDX]") : "";
-                ctx.hls_header.push_back("    vld_ports" + sel_str + " = true;\n");
-                for (const auto &arg : arg_ports) {
-                    for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("    " + uintExtractExpr("arg_" + arg.name + sel_str, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
-                    }
-                }
-                for (const auto &ret : ret_ports) {
-                    for (const auto &field : ret.flat_fields) {
-                        ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field, "ret_" + ret.name + sel_str) + ";\n");
-                    }
-                }
-                if (has_rdy) {
-                    ctx.hls_header.push_back("    return rdy_ports" + sel_str + ";\n");
-                }
-                ctx.hls_header.push_back("  }\n");
-                ctx.hls_header.push_back("};\n");
-
-                ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
-                ctx.hls_helpers.push_back("  " + vld_port_name + ",\n");
-                if (has_rdy) {
-                    ctx.hls_helpers.push_back("  " + rdy_port_name + ",\n");
-                }
-                for (size_t i = 0; i < arg_ports.size(); ++i) {
-                    const auto &arg = arg_ports[i];
-                    ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, arg.name) + ",\n");
-                }
-                for (size_t i = 0; i < ret_ports.size(); ++i) {
-                    const auto &ret = ret_ports[i];
-                    ctx.hls_helpers.push_back("  " + reqservArgPort(req_name, ret.name) + ",\n");
-                }
-                ctx.hls_helpers.push_back("};\n");
-                ctx.hls_helpers.push_back("#define " + req_name + " " + helper_var_name + ".call\n");
-                ctx.hls_final.push_back("#undef " + req_name + "\n");
-            }
         }
 
         // generate RTL ports
@@ -1235,9 +1077,7 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
         string argtypes = serv.signatureArgTypeOnly();
         string argnames = serv.signatureArgNameList();
         string arglists = serv.signatureArgOnly();
-        if (!ctx.emit_hls_api_helpers) {
-            arglists = reqservValueArgList(serv);
-        }
+        arglists = reqservValueArgList(serv);
         bool has_rdy = serv.has_handshake;
         const bool is_arrayed = serv.is_arrayed;
         const uint32_t array_size = static_cast<uint32_t>(serv.array_size);
@@ -1719,70 +1559,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
             ret_ports.push_back(procArg(ret, ctx.local_bundlelib));
         }
 
-        if (ctx.emit_hls_api_helpers) {
-            const string helper_struct_name = "__ChildServiceHelper__" + alias_name;
-            const string helper_var_name = "__child_service_helper__" + alias_name;
-            const bool is_alias_arrayed = group.front().alias_indexed;
 
-            ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
-            for (size_t i = 0; i < group.size(); ++i) {
-                ctx.hls_header.push_back("  bool & vld_ports_" + std::to_string(i) + ";\n");
-                if (serv.has_handshake) {
-                    ctx.hls_header.push_back("  const bool & rdy_ports_" + std::to_string(i) + ";\n");
-                }
-                for (const auto &arg : arg_ports) {
-                    ctx.hls_header.push_back("  Int<" + std::to_string(arg.width) + "> & arg_" + arg.name + "_" + std::to_string(i) + ";\n");
-                }
-                for (const auto &ret : ret_ports) {
-                    ctx.hls_header.push_back("  const Int<" + std::to_string(ret.width) + "> & ret_" + ret.name + "_" + std::to_string(i) + ";\n");
-                }
-            }
-            ctx.hls_header.push_back("\n");
-            ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
-            ctx.hls_header.push_back("  " + serv.returnType() + " call(" + serv.signatureArgOnly() + ") {\n");
-            ctx.hls_header.push_back("    static_assert(IDX < " + std::to_string(is_alias_arrayed ? group.size() : 1) + ", \"Implicit request index out of range\");\n");
-            for (size_t i = 0; i < group.size(); ++i) {
-                string branch = (i == 0 ? "if constexpr" : "else if constexpr");
-                ctx.hls_header.push_back("    " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
-                ctx.hls_header.push_back("      vld_ports_" + std::to_string(i) + " = true;\n");
-                for (const auto &arg : arg_ports) {
-                    for (const auto &field : arg.flat_fields) {
-                        ctx.hls_header.push_back("      " + uintExtractExpr("arg_" + arg.name + "_" + std::to_string(i), field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
-                    }
-                }
-                for (const auto &ret : ret_ports) {
-                    for (const auto &field : ret.flat_fields) {
-                        ctx.hls_header.push_back("      " + field.name + " = " + typedExtractExpr(field, "ret_" + ret.name + "_" + std::to_string(i)) + ";\n");
-                    }
-                }
-                if (serv.has_handshake) {
-                    ctx.hls_header.push_back("      return rdy_ports_" + std::to_string(i) + ";\n");
-                } else if (serv.returnType() == "void") {
-                    ctx.hls_header.push_back("      return;\n");
-                }
-                ctx.hls_header.push_back("    }\n");
-            }
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("};\n");
-
-            ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
-            for (size_t i = 0; i < group.size(); ++i) {
-                const string signal_base = childServiceSignalBase(group[i].instance_name, group[i].service_name);
-                ctx.hls_helpers.push_back("  " + reqservVldPort(signal_base) + ",\n");
-                if (serv.has_handshake) {
-                    ctx.hls_helpers.push_back("  " + reqservRdyPort(signal_base) + ",\n");
-                }
-                for (const auto &arg : arg_ports) {
-                    ctx.hls_helpers.push_back("  " + reqservArgPort(signal_base, arg.name) + ",\n");
-                }
-                for (const auto &ret : ret_ports) {
-                    ctx.hls_helpers.push_back("  " + reqservArgPort(signal_base, ret.name) + ",\n");
-                }
-            }
-            ctx.hls_helpers.push_back("};\n");
-            ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
-            ctx.hls_final.push_back("#undef " + alias_name + "\n");
-        } else {
             const bool is_alias_arrayed = group.front().alias_indexed;
             if (!is_alias_arrayed && serv.returnType() == "void") {
                 const string signal_base = childServiceSignalBase(group.front().instance_name, group.front().service_name);
@@ -1871,7 +1648,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 }
             }
             ctx.hls_helpers.push_back("};\n");
-        }
+
     }
 
     std::map<string, vector<VulStaticChildQueryUse>> child_query_groups;
@@ -1894,54 +1671,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
         vector<FlatField> flat_fields;
         flatten_type_signature(query_iter->second.ret_type, ctx.local_bundlelib, "value", width, flat_fields);
 
-        if (ctx.emit_hls_api_helpers) {
-            const string helper_struct_name = "__ChildQueryHelper__" + alias_name;
-            const string helper_var_name = "__child_query_helper__" + alias_name;
-            const bool is_alias_arrayed = group.front().alias_indexed;
-            const string ret_type_str = query_iter->second.ret_type.toString();
 
-            ctx.hls_header.push_back("struct " + helper_struct_name + " {\n");
-            for (size_t i = 0; i < group.size(); ++i) {
-                ctx.hls_header.push_back("  const Int<" + std::to_string(width) + "> & value_" + std::to_string(i) + ";\n");
-            }
-            ctx.hls_header.push_back("\n");
-            if (is_alias_arrayed) {
-                ctx.hls_header.push_back("  template <uint32_t IDX = 0>\n");
-                ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
-                ctx.hls_header.push_back("    static_assert(IDX < " + std::to_string(group.size()) + ", \"Child query index out of range\");\n");
-                const string ret_default = apiinline::defaultValueExprForType(query_iter->second.ret_type, ctx.local_bundlelib);
-                for (size_t i = 0; i < group.size(); ++i) {
-                    string branch = (i == 0 ? "if constexpr" : "else if constexpr");
-                    ctx.hls_header.push_back("    " + branch + " (IDX == " + std::to_string(group[i].alias_index) + ") {\n");
-                    ctx.hls_header.push_back("      " + ret_type_str + " value = " + ret_default + ";\n");
-                    for (const auto &field : flat_fields) {
-                        ctx.hls_header.push_back("      " + field.name + " = " + typedExtractExpr(field, "value_" + std::to_string(i)) + ";\n");
-                    }
-                    ctx.hls_header.push_back("      return value;\n");
-                    ctx.hls_header.push_back("    }\n");
-                }
-                ctx.hls_header.push_back("  }\n");
-            } else {
-                ctx.hls_header.push_back("  " + ret_type_str + " call() const {\n");
-                ctx.hls_header.push_back("    " + ret_type_str + " value = " +
-                                         apiinline::defaultValueExprForType(query_iter->second.ret_type, ctx.local_bundlelib) + ";\n");
-                for (const auto &field : flat_fields) {
-                    ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field, "value_0") + ";\n");
-                }
-                ctx.hls_header.push_back("    return value;\n");
-                ctx.hls_header.push_back("  }\n");
-            }
-            ctx.hls_header.push_back("};\n");
-
-            ctx.hls_helpers.push_back(helper_struct_name + " " + helper_var_name + "{\n");
-            for (size_t i = 0; i < group.size(); ++i) {
-                const string signal_base = childQuerySignalBase(group[i].instance_name, group[i].query_name);
-                ctx.hls_helpers.push_back("  " + queryPort(signal_base) + ",\n");
-            }
-            ctx.hls_helpers.push_back("};\n");
-            ctx.hls_helpers.push_back("#define " + alias_name + " " + helper_var_name + ".call\n");
-            ctx.hls_final.push_back("#undef " + alias_name + "\n");
-        } else {
             const bool is_alias_arrayed = group.front().alias_indexed;
             const string ret_type_str = query_iter->second.ret_type.toString();
             if (is_alias_arrayed) {
@@ -1972,7 +1702,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 ctx.hls_helpers.push_back("  return value;\n");
                 ctx.hls_helpers.push_back("};\n");
             }
-        }
+
     }
 }
 
@@ -2031,76 +1761,7 @@ void _procQueues(RTLGenContext &ctx) {
             string enqdata_type_str = "Int<" + data_width_str + ">";
             string deqdata_type_str = "Int<" + data_width_str + ">";
 
-            if (ctx.emit_hls_api_helpers) {
-            ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
-            ctx.hls_header.push_back("  const " + enqready_type_str + " " + port_enqready + ";\n");
-            ctx.hls_header.push_back("  const " + deqvalid_type_str + " " + port_deqvalid + ";\n");
-            ctx.hls_header.push_back("  " + enqvalid_type_str + " &" + port_enqvalid + ";\n");
-            ctx.hls_header.push_back("  " + deqready_type_str + " &" + port_deqready + ";\n");
-            ctx.hls_header.push_back("  " + enqdata_type_str + " &" + port_enqdata + ";\n");
-            ctx.hls_header.push_back("  const " + deqdata_type_str + " " + port_deqdata + ";\n");
-            ctx.hls_header.push_back("  bool &" + port_clrnext + ";\n");
-            ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  " + 
-                proxy_class_name + 
-                "(const " + enqready_type_str + " " + port_enqready + 
-                ", const " + deqvalid_type_str + " " + port_deqvalid + 
-                ", " + enqvalid_type_str + " &" + port_enqvalid + 
-                ", " + deqready_type_str + " &" + port_deqready + 
-                ", " + enqdata_type_str + " &" + port_enqdata + 
-                ", const " + deqdata_type_str + " " + port_deqdata + 
-                ", bool &" + port_clrnext + 
-                ") : " + 
-                port_enqready + "(" + port_enqready + "), " + 
-                port_deqvalid + "(" + port_deqvalid + "), " + 
-                port_enqvalid + "(" + port_enqvalid + "), " + 
-                port_deqready + "(" + port_deqready + "), " + 
-                port_enqdata + "(" + port_enqdata + "), " + 
-                port_deqdata + "(" + port_deqdata + "), " + 
-                port_clrnext + "(" + port_clrnext + ") {}\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  bool enqready() const {\n");
-            ctx.hls_header.push_back("    return " + port_enqready + ";\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  bool deqvalid() const {\n");
-            ctx.hls_header.push_back("    return " + port_deqvalid + ";\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  void enqnext(const " + data_type_str + " &value) {\n");
-            ctx.hls_header.push_back("    assert(enqready());\n");
-            for (const auto &field : data_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr(port_enqdata, field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
-            }
-            ctx.hls_header.push_back("    " + port_enqvalid + " = true;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  " + data_type_str + " front() const {\n");
-            ctx.hls_header.push_back("    " + data_type_str + " value;\n");
-            for (const auto &field : data_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field, port_deqdata) + ";\n");
-            }
-            ctx.hls_header.push_back("    return value;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  void deqnext() {\n");
-            ctx.hls_header.push_back("    assert(deqvalid());\n");
-            ctx.hls_header.push_back("    " + port_deqready + " = true;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  void clrnext() {\n");
-            ctx.hls_header.push_back("    " + port_clrnext + " = true;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("};\n");
-            ctx.hls_header.push_back("\n");
-            }
 
             ctx.hls_arguments.push_back("const " + enqready_type_str + " " + port_enqready);
             ctx.hls_arguments.push_back("const " + deqvalid_type_str + " " + port_deqvalid);
@@ -2114,9 +1775,7 @@ void _procQueues(RTLGenContext &ctx) {
             ctx.hls_init.push_back(port_deqready + " = false;\n");
             ctx.hls_init.push_back(port_enqdata + " = 0;\n");
             ctx.hls_init.push_back(port_clrnext + " = false;\n");
-            if (ctx.emit_hls_api_helpers) {
-                ctx.hls_init.push_back(proxy_class_name + " " + que_name + "(" + port_enqready + ", " + port_deqvalid + ", " + port_enqvalid + ", " + port_deqready + ", " + port_enqdata + ", " + port_deqdata + ", " + port_clrnext + ");\n");
-            }
+
 
             ctx.rtl_decl.push_back("wire " + port_enqready + ";\n");
             ctx.rtl_decl.push_back("wire " + port_deqvalid + ";\n");
@@ -2156,91 +1815,7 @@ void _procQueues(RTLGenContext &ctx) {
             string enqdata_type_str = "std::array<Int<" + data_width_str + ">, " + enq_width_str + ">";
             string deqdata_type_str = "std::array<Int<" + data_width_str + ">, " + deq_width_str + ">";
 
-            if (ctx.emit_hls_api_helpers) {
-            ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
-            ctx.hls_header.push_back("  const " + enqready_type_str + " " + port_enqready + ";\n");
-            ctx.hls_header.push_back("  const " + deqvalid_type_str + " " + port_deqvalid + ";\n");
-            ctx.hls_header.push_back("  " + enqvalid_type_str + " &" + port_enqvalid + ";\n");
-            ctx.hls_header.push_back("  " + deqready_type_str + " &" + port_deqready + ";\n");
-            ctx.hls_header.push_back("  " + enqdata_type_str + " &" + port_enqdata + ";\n");
-            ctx.hls_header.push_back("  const " + deqdata_type_str + " &" + port_deqdata + ";\n");
-            ctx.hls_header.push_back("  bool &" + port_clrnext + ";\n");
-            ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  " + proxy_class_name + 
-                "(const " + enqready_type_str + " " + port_enqready + 
-                ", const " + deqvalid_type_str + " " + port_deqvalid + 
-                ", " + enqvalid_type_str + " &" + port_enqvalid + 
-                ", " + deqready_type_str + " &" + port_deqready + 
-                ", " + enqdata_type_str + " &" + port_enqdata + 
-                ", const " + deqdata_type_str + 
-                " &" + port_deqdata + 
-                ", bool &" + port_clrnext + 
-                ") : " + 
-                port_enqready + "(" + port_enqready + "), " + 
-                port_deqvalid + "(" + port_deqvalid + "), " + 
-                port_enqvalid + "(" + port_enqvalid + "), " + 
-                port_deqready + "(" + port_deqready + "), " + 
-                port_enqdata + "(" + port_enqdata + "), " + 
-                port_deqdata + "(" + port_deqdata + "), " + 
-                port_clrnext + "(" + port_clrnext + ") {}\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  " + enqready_type_str + " enqreqdy() const {\n");
-            ctx.hls_header.push_back("    return " + port_enqready + ".template to<uint32_t>();\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  " + deqvalid_type_str + " deqvalid() const {\n");
-            ctx.hls_header.push_back("    return " + port_deqvalid + ".template to<uint32_t>();\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  void enqnext(const " + enqdata_type_str + " &values, const " + enqready_type_str + " num = " + enq_width_str + ") {\n");
-            ctx.hls_header.push_back("    const " + enqready_type_str + " req = (num < " + enq_width_str + ") ? num : " + enq_width_str + ";\n");
-            ctx.hls_header.push_back("    const " + enqready_type_str + " rdy = enqreqdy();\n");
-            ctx.hls_header.push_back("    assert(req <= rdy);\n");
-            for (uint32_t i = 0; i < (uint32_t)que.enq_width; ++i) {
-                ctx.hls_header.push_back("    if (req > " + std::to_string(i) + ") {\n");
-                ctx.hls_header.push_back("      const " + data_type_str + " &value = values[" + std::to_string(i) + "];\n");
-                for (const auto &field : data_fields) {
-                    ctx.hls_header.push_back("      " + uintExtractExpr(port_enqdata + "[" + std::to_string(i) + "]", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
-                }
-                ctx.hls_header.push_back("    }\n");
-            }
-            ctx.hls_header.push_back("    " + port_enqvalid + " = static_cast<uint32_t>(req);\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  " + deqdata_type_str + " front(const " + deqvalid_type_str + " num = " + deq_width_str + ") const {\n");
-            ctx.hls_header.push_back("    (void)num;\n");
-            ctx.hls_header.push_back("    " + deqdata_type_str + " deq_buf;\n");
-            for (uint32_t i = 0; i < (uint32_t)que.deq_width; ++i) {
-                ctx.hls_header.push_back("    if (deqvalid() > " + std::to_string(i) + ") {\n");
-                ctx.hls_header.push_back("      auto &value = deq_buf[" + std::to_string(i) + "];\n");
-                for (const auto &field : data_fields) {
-                    ctx.hls_header.push_back("      " + field.name + " = " + typedExtractExpr(field, port_deqdata + "[" + std::to_string(i) + "]") + ";\n");
-                }
-                ctx.hls_header.push_back("    }\n");
-            }
-            ctx.hls_header.push_back("    return deq_buf;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  void deqnext(const " + deqvalid_type_str + " num = " + deq_width_str + ") {\n");
-            ctx.hls_header.push_back("    const " + deqvalid_type_str + " req = (num < " + deq_width_str + ") ? num : " + deq_width_str + ";\n");
-            ctx.hls_header.push_back("    const " + deqvalid_type_str + " valid = deqvalid();\n");
-            ctx.hls_header.push_back("    assert(req <= valid);\n");
-            ctx.hls_header.push_back("    " + port_deqready + " = static_cast<uint32_t>(req);\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  void clrnext() {\n");
-            ctx.hls_header.push_back("    " + port_clrnext + " = true;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("};\n");
-            ctx.hls_header.push_back("\n");
-            }
 
             ctx.hls_arguments.push_back("const " + enqready_type_str + " " + port_enqready);
             ctx.hls_arguments.push_back("const " + deqvalid_type_str + " " + port_deqvalid);
@@ -2256,9 +1831,7 @@ void _procQueues(RTLGenContext &ctx) {
                 ctx.hls_init.push_back(port_enqdata + "[" + std::to_string(i) + "] = 0;\n");
             }
             ctx.hls_init.push_back(port_clrnext + " = false;\n");
-            if (ctx.emit_hls_api_helpers) {
-                ctx.hls_init.push_back(proxy_class_name + " " + que_name + "(" + port_enqready + ", " + port_deqvalid + ", " + port_enqvalid + ", " + port_deqready + ", " + port_enqdata + ", " + port_deqdata + ", " + port_clrnext + ");\n");
-            }
+
 
             ctx.rtl_decl.push_back("wire [" + enq_cnt_width_str + "-1:0] " + port_enqready + ";\n");
             ctx.rtl_decl.push_back("wire [" + deq_cnt_width_str + "-1:0] " + port_deqvalid + ";\n");
@@ -2351,54 +1924,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             const string port_s1_wdata = "bram_" + bram_name + "__s1_wdata";
             const string port_s2_rdata = "bram_" + bram_name + "__s2_rdata";
 
-            if (ctx.emit_hls_api_helpers) {
-            ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
-            ctx.hls_header.push_back("  using DataType = " + data_type_str + ";\n");
-            ctx.hls_header.push_back("  using AddrType = " + addr_type_str + ";\n");
-            ctx.hls_header.push_back("  const Int<" + data_width_str + "> " + port_s2_rdata + ";\n");
-            ctx.hls_header.push_back("  bool &" + port_s1_en + ";\n");
-            ctx.hls_header.push_back("  bool &" + port_s1_we + ";\n");
-            ctx.hls_header.push_back("  Int<" + addr_width_str + "> &" + port_s1_addr + ";\n");
-            ctx.hls_header.push_back("  Int<" + data_width_str + "> &" + port_s1_wdata + ";\n");
-            ctx.hls_header.push_back("  mutable DataType readdata_buf;\n");
-            ctx.hls_header.push_back("\n");
-            ctx.hls_header.push_back("  " + proxy_class_name +
-                "(const Int<" + data_width_str + "> " + port_s2_rdata +
-                ", bool &" + port_s1_en +
-                ", bool &" + port_s1_we +
-                ", Int<" + addr_width_str + "> &" + port_s1_addr +
-                ", Int<" + data_width_str + "> &" + port_s1_wdata +
-                ") : " +
-                port_s2_rdata + "(" + port_s2_rdata + "), " +
-                port_s1_en + "(" + port_s1_en + "), " +
-                port_s1_we + "(" + port_s1_we + "), " +
-                port_s1_addr + "(" + port_s1_addr + "), " +
-                port_s1_wdata + "(" + port_s1_wdata + ") {}\n");
-            ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  void req(const AddrType &addr, const DataType &write_data, bool write_en) {\n");
-            ctx.hls_header.push_back("    " + port_s1_en + " = true;\n");
-            ctx.hls_header.push_back("    " + port_s1_we + " = write_en;\n");
-            ctx.hls_header.push_back("    " + port_s1_addr + " = addr;\n");
-            ctx.hls_header.push_back("    Int<" + data_width_str + "> packed;\n");
-            for (const auto &field : write_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
-            }
-            ctx.hls_header.push_back("    " + port_s1_wdata + " = packed;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  const DataType& readdata() const {\n");
-            ctx.hls_header.push_back("    DataType value;\n");
-            for (const auto &field : read_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field, port_s2_rdata) + ";\n");
-            }
-            ctx.hls_header.push_back("    readdata_buf = value;\n");
-            ctx.hls_header.push_back("    return readdata_buf;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("};\n");
-            ctx.hls_header.push_back("\n");
-            }
 
             ctx.hls_arguments.push_back("const Int<" + data_width_str + "> " + port_s2_rdata);
             ctx.hls_arguments.push_back("bool &" + port_s1_en);
@@ -2410,9 +1936,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_init.push_back(port_s1_we + " = false;\n");
             ctx.hls_init.push_back(port_s1_addr + " = 0;\n");
             ctx.hls_init.push_back(port_s1_wdata + " = 0;\n");
-            if (ctx.emit_hls_api_helpers) {
-                ctx.hls_init.push_back(proxy_class_name + " " + bram_name + "(" + port_s2_rdata + ", " + port_s1_en + ", " + port_s1_we + ", " + port_s1_addr + ", " + port_s1_wdata + ");\n");
-            }
+
 
             ctx.rtl_decl.push_back("wire " + port_s1_en + ";\n");
             ctx.rtl_decl.push_back("wire " + port_s1_we + ";\n");
@@ -2469,68 +1993,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             const string writeaddr_type_str = "std::array<Int<" + addr_width_str + ">, " + write_ports_str + ">";
             const string writedata_type_str = "std::array<Int<" + data_width_str + ">, " + write_ports_str + ">";
 
-            if (ctx.emit_hls_api_helpers) {
-            ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
-            ctx.hls_header.push_back("  using DataType = " + data_type_str + ";\n");
-            ctx.hls_header.push_back("  using AddrType = " + addr_type_str + ";\n");
-            ctx.hls_header.push_back("  " + readreq_type_str + " &" + port_s1_readreq + ";\n");
-            ctx.hls_header.push_back("  " + readaddr_type_str + " &" + port_s1_readaddr + ";\n");
-            ctx.hls_header.push_back("  const " + readdata_type_str + " " + port_s2_readdata + ";\n");
-            ctx.hls_header.push_back("  " + write_type_str + " &" + port_s1_write + ";\n");
-            ctx.hls_header.push_back("  " + writeaddr_type_str + " &" + port_s1_writeaddr + ";\n");
-            ctx.hls_header.push_back("  " + writedata_type_str + " &" + port_s1_writedata + ";\n");
-            ctx.hls_header.push_back("  mutable std::array<DataType, " + read_ports_str + "> readdata_buf;\n");
-            ctx.hls_header.push_back("\n");
-            ctx.hls_header.push_back("  " + proxy_class_name +
-                "(" + readreq_type_str + " &" + port_s1_readreq +
-                ", " + readaddr_type_str + " &" + port_s1_readaddr +
-                ", const " + readdata_type_str + " " + port_s2_readdata +
-                ", " + write_type_str + " &" + port_s1_write +
-                ", " + writeaddr_type_str + " &" + port_s1_writeaddr +
-                ", " + writedata_type_str + " &" + port_s1_writedata +
-                ") : " +
-                port_s1_readreq + "(" + port_s1_readreq + "), " +
-                port_s1_readaddr + "(" + port_s1_readaddr + "), " +
-                port_s2_readdata + "(" + port_s2_readdata + "), " +
-                port_s1_write + "(" + port_s1_write + "), " +
-                port_s1_writeaddr + "(" + port_s1_writeaddr + "), " +
-                port_s1_writedata + "(" + port_s1_writedata + ") {}\n");
-            ctx.hls_header.push_back("\n");
 
-            ctx.hls_header.push_back("  template <uint32_t PortIndex>\n");
-            ctx.hls_header.push_back("  void readreq(const AddrType &addr) {\n");
-            ctx.hls_header.push_back("    static_assert(PortIndex < " + read_ports_str + ", \"Read port index out of range\");\n");
-            ctx.hls_header.push_back("    " + port_s1_readreq + "[PortIndex] = true;\n");
-            ctx.hls_header.push_back("    " + port_s1_readaddr + "[PortIndex] = addr;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  template <uint32_t PortIndex>\n");
-            ctx.hls_header.push_back("  const DataType& readdata() const {\n");
-            ctx.hls_header.push_back("    static_assert(PortIndex < " + read_ports_str + ", \"Read port index out of range\");\n");
-            ctx.hls_header.push_back("    DataType value;\n");
-            for (const auto &field : read_fields) {
-                ctx.hls_header.push_back("    " + field.name + " = " + typedExtractExpr(field, port_s2_readdata + "[PortIndex]") + ";\n");
-            }
-            ctx.hls_header.push_back("    readdata_buf[PortIndex] = value;\n");
-            ctx.hls_header.push_back("    return readdata_buf[PortIndex];\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("\n");
-
-            ctx.hls_header.push_back("  template <uint32_t PortIndex>\n");
-            ctx.hls_header.push_back("  void write(const AddrType &addr, const DataType &data) {\n");
-            ctx.hls_header.push_back("    static_assert(PortIndex < " + write_ports_str + ", \"Write port index out of range\");\n");
-            ctx.hls_header.push_back("    " + port_s1_write + "[PortIndex] = true;\n");
-            ctx.hls_header.push_back("    " + port_s1_writeaddr + "[PortIndex] = addr;\n");
-            ctx.hls_header.push_back("    Int<" + data_width_str + "> packed;\n");
-            for (const auto &field : write_fields) {
-                ctx.hls_header.push_back("    " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
-            }
-            ctx.hls_header.push_back("    " + port_s1_writedata + "[PortIndex] = packed;\n");
-            ctx.hls_header.push_back("  }\n");
-            ctx.hls_header.push_back("};\n");
-            ctx.hls_header.push_back("\n");
-            }
 
             ctx.hls_arguments.push_back(readreq_type_str + " &" + port_s1_readreq);
             ctx.hls_arguments.push_back(readaddr_type_str + " &" + port_s1_readaddr);
@@ -2548,9 +2011,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
                 ctx.hls_init.push_back(port_s1_writeaddr + "[" + std::to_string(i) + "] = 0;\n");
                 ctx.hls_init.push_back(port_s1_writedata + "[" + std::to_string(i) + "] = 0;\n");
             }
-            if (ctx.emit_hls_api_helpers) {
-                ctx.hls_init.push_back(proxy_class_name + " " + bram_name + "(" + port_s1_readreq + ", " + port_s1_readaddr + ", " + port_s2_readdata + ", " + port_s1_write + ", " + port_s1_writeaddr + ", " + port_s1_writedata + ");\n");
-            }
+
 
             ctx.rtl_decl.push_back("wire " + port_s1_readreq + "[" + read_ports_str + "];\n");
             ctx.rtl_decl.push_back("wire [" + addr_width_m1_str + ":0] " + port_s1_readaddr + "[" + read_ports_str + "];\n");
@@ -2625,40 +2086,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
         const string readaddr_type_str = "std::array<Int<" + addr_width_str + ">, " + read_ports_str + ">";
         const string readdata_type_str = "std::array<Int<" + data_width_str + ">, " + read_ports_str + ">";
 
-        if (ctx.emit_hls_api_helpers) {
-        ctx.hls_header.push_back("struct " + proxy_class_name + " {\n");
-        ctx.hls_header.push_back("  using DataType = " + data_type_str + ";\n");
-        ctx.hls_header.push_back("  using AddrType = " + addr_type_str + ";\n");
-        ctx.hls_header.push_back("  " + readreq_type_str + " &" + port_s1_readreq + ";\n");
-        ctx.hls_header.push_back("  " + readaddr_type_str + " &" + port_s1_readaddr + ";\n");
-        ctx.hls_header.push_back("  const " + readdata_type_str + " " + port_s2_readdata + ";\n");
-        ctx.hls_header.push_back("\n");
-        ctx.hls_header.push_back("  " + proxy_class_name +
-            "(" + readreq_type_str + " &" + port_s1_readreq +
-            ", " + readaddr_type_str + " &" + port_s1_readaddr +
-            ", const " + readdata_type_str + " " + port_s2_readdata +
-            ") : " +
-            port_s1_readreq + "(" + port_s1_readreq + "), " +
-            port_s1_readaddr + "(" + port_s1_readaddr + "), " +
-            port_s2_readdata + "(" + port_s2_readdata + ") {}\n");
-        ctx.hls_header.push_back("\n");
 
-        ctx.hls_header.push_back("  template <uint32_t PortIndex>\n");
-        ctx.hls_header.push_back("  void readreq(const AddrType &addr) {\n");
-        ctx.hls_header.push_back("    static_assert(PortIndex < " + read_ports_str + ", \"Read port index out of range\");\n");
-        ctx.hls_header.push_back("    " + port_s1_readreq + "[PortIndex] = true;\n");
-        ctx.hls_header.push_back("    " + port_s1_readaddr + "[PortIndex] = addr;\n");
-        ctx.hls_header.push_back("  }\n");
-        ctx.hls_header.push_back("\n");
-
-        ctx.hls_header.push_back("  template <uint32_t PortIndex>\n");
-        ctx.hls_header.push_back("  const DataType readdata() const {\n");
-        ctx.hls_header.push_back("    static_assert(PortIndex < " + read_ports_str + ", \"Read port index out of range\");\n");
-        ctx.hls_header.push_back("    return " + port_s2_readdata + "[PortIndex];\n");
-        ctx.hls_header.push_back("  }\n");
-        ctx.hls_header.push_back("};\n");
-        ctx.hls_header.push_back("\n");
-        }
 
         ctx.hls_arguments.push_back(readreq_type_str + " &" + port_s1_readreq);
         ctx.hls_arguments.push_back(readaddr_type_str + " &" + port_s1_readaddr);
@@ -2668,9 +2096,7 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
             ctx.hls_init.push_back(port_s1_readreq + "[" + std::to_string(i) + "] = false;\n");
             ctx.hls_init.push_back(port_s1_readaddr + "[" + std::to_string(i) + "] = 0;\n");
         }
-        if (ctx.emit_hls_api_helpers) {
-            ctx.hls_init.push_back(proxy_class_name + " " + rom_name + "(" + port_s1_readreq + ", " + port_s1_readaddr + ", " + port_s2_readdata + ");\n");
-        }
+
 
         ctx.rtl_decl.push_back("wire " + port_s1_readreq + "[" + read_ports_str + "];\n");
         ctx.rtl_decl.push_back("wire [" + addr_width_m1_str + ":0] " + port_s1_readaddr + "[" + read_ports_str + "];\n");
@@ -2696,12 +2122,11 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
 
 }
 
-RTLGenResult genModuleRTLImpl(
+RTLGenResult genModuleRTL(
     const VulStaticModuleInstance &module,
     const VulStaticConfigLib &configlib,
     const VulStaticBundleLib &bundlelib,
-    const vector<string> &global_helper_codes,
-    bool emit_hls_api_helpers
+    const vector<string> &global_helper_codes
 ) {
     VulStaticConfigLib local_configlib = configlib;
     for (const auto &entry : module.local_parameters) {
@@ -2726,7 +2151,7 @@ RTLGenResult genModuleRTLImpl(
         }
     }
 
-    RTLGenContext ctx(module, local_configlib, local_bundlelib, global_helper_codes, emit_hls_api_helpers);
+    RTLGenContext ctx(module, local_configlib, local_bundlelib, global_helper_codes);
 
     _procConstAndBundle(ctx);
     _procWires(ctx);
@@ -2796,12 +2221,7 @@ RTLGenResult genModuleRTLImpl(
         if (!ctx.hls_helpers.empty()) {
             hls.push_back("\n");
         }
-        if (ctx.emit_hls_api_helpers) {
-            append_lines(hls, hls_debug, ctx.hls_reset_init, ctx.hls_reset_init_debug);
-            if (!ctx.hls_reset_init.empty()) {
-                hls.push_back("\n");
-            }
-        } else if (!ctx.hls_reset_init.empty()) {
+        if (!ctx.hls_reset_init.empty()) {
             hls.push_back("const bool __vul_register_reset_insert_anchor = false;\n");
             hls_debug.push_back({});
             hls.push_back("\n");
@@ -2864,7 +2284,7 @@ RTLGenResult genModuleRTLImpl(
     vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
 
     result.resource_files = std::move(ctx.resource_files);
-    if (result.has_logic_submodule && !ctx.emit_hls_api_helpers) {
+    if (result.has_logic_submodule) {
         auto inlined = apiinline::inlineAPIs(module, local_bundlelib, result.logic_hls_codes, result.logic_hls_debug);
         result.logic_hls_codes = std::move(inlined.lines);
         result.logic_hls_debug = std::move(inlined.debug);
@@ -2875,24 +2295,6 @@ RTLGenResult genModuleRTLImpl(
     result.rtl_skeleten_debug_lines = vulDebugBuildGeneratedMap(result.rtl_skeleten_debug);
 
     return result;
-}
-
-RTLGenResult genModuleRTL(
-    const VulStaticModuleInstance &module,
-    const VulStaticConfigLib &configlib,
-    const VulStaticBundleLib &bundlelib,
-    const vector<string> &global_helper_codes
-) {
-    return genModuleRTLImpl(module, configlib, bundlelib, global_helper_codes, true);
-}
-
-RTLGenResult genModuleRTLV2(
-    const VulStaticModuleInstance &module,
-    const VulStaticConfigLib &configlib,
-    const VulStaticBundleLib &bundlelib,
-    const vector<string> &global_helper_codes
-) {
-    return genModuleRTLImpl(module, configlib, bundlelib, global_helper_codes, false);
 }
 
 static string verilatorTopExpr(const string &port_name) {
