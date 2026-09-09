@@ -332,10 +332,10 @@
 
 ## src/rtlzz_bridge.cpp
 
-**文件功能**：封装对 RTLZZ 编译接口的调用。
+**文件功能**：封装对 RTLZZ 编译接口的调用，并将其进度事件呈现为 stdout 上的单行动态状态。
 
 **主要函数**
-- `generateLogicRTLWithRTLzz(...)`：读取 logic C++，调用 RTLZZ 生成 SystemVerilog 文本。
+- `generateLogicRTLWithRTLzz(...)`：读取 logic C++，为 RTLZZ 安装带模块名的进度回调，以 `\r` 原地刷新当前阶段/优化轮次，结束或异常时收尾换行，并生成 SystemVerilog 文本。
 
 ## src/rtlzz_bridge.hpp
 

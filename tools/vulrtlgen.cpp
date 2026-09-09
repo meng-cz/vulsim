@@ -149,6 +149,8 @@ static int runVulRTLGen(int argc, char * argv[]) {
 
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
+        std::cout << "[vulrtlgen] module " << mod_instance->simClassName()
+                  << ": generating RTL skeleton and API-inline logic\n";
         auto codes = rtlgen::genModuleRTL(
             *mod_instance,
             project.global_configlib,
@@ -212,6 +214,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
     // copy vullib files to output directory
     {
         VulErrorContextGuard _err("copying vul library files");
+        std::cout << "[vulrtlgen] copying vul library files from " << lib_dir << " to " << out_dir << std::endl;
 
         std::filesystem::path lib_path(lib_dir);
         if (!std::filesystem::exists(lib_path) || !std::filesystem::is_directory(lib_path)) {
@@ -226,6 +229,15 @@ static int runVulRTLGen(int argc, char * argv[]) {
             std::filesystem::copy_file(src_file, dst_file);
         }
     }
+
+    const std::filesystem::path absolute_out_path =
+        std::filesystem::absolute(out_path).lexically_normal();
+    const std::filesystem::path top_rtl_path =
+        absolute_out_path / project.top_module_instance->rtlSvPath();
+    std::cout << "[vulrtlgen] generation complete: output=\""
+              << absolute_out_path.string() << "\"; top file=\""
+              << top_rtl_path.string() << "\"; top module="
+              << project.top_module_instance->simClassName() << std::endl;
 
     return 0;
 }

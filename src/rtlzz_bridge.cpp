@@ -20,11 +20,53 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
 
 namespace {
+
+std::string displayModuleName(const std::string &top_function) {
+    static const std::string prefix = "LogicSubModule_";
+    if (top_function.rfind(prefix, 0) == 0) {
+        return top_function.substr(prefix.size());
+    }
+    return top_function;
+}
+
+class ProgressLine {
+public:
+    explicit ProgressLine(std::string prefix) : prefix_(std::move(prefix)) {}
+
+    ~ProgressLine() {
+        finish();
+    }
+
+    void update(const std::string &step) {
+        const std::string message = prefix_ + step;
+        std::cout << '\r' << message;
+        if (message.size() < width_) {
+            std::cout << std::string(width_ - message.size(), ' ')
+                      << '\r' << message;
+        }
+        std::cout << std::flush;
+        width_ = message.size();
+        active_ = true;
+    }
+
+    void finish() {
+        if (active_) {
+            std::cout << '\n';
+            active_ = false;
+        }
+    }
+
+private:
+    std::string prefix_;
+    std::size_t width_ = 0;
+    bool active_ = false;
+};
 
 std::vector<std::string> collectErrorSignalNames(
     const std::vector<rtlzz::RtlSignalDebugInfo> &signals
@@ -76,6 +118,11 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.unroll_limit = unroll_limit;
     options.clang_args.push_back("-std=c++20");
     options.rtl_debug = rtlzz::RtlDebugMode::Text;
+    const std::string module_name = displayModuleName(top_function);
+    ProgressLine progress_line("[vulrtlgen] module " + module_name + ": ");
+    options.progress_callback = [&progress_line](const std::string &step) {
+        progress_line.update(step);
+    };
 
     const auto source_parent = source_path.parent_path();
     if (!source_parent.empty()) {
@@ -83,6 +130,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     }
 
     auto result = rtlzz::compileToRtl(std::move(options));
+    progress_line.finish();
     RTLzzLogicRTLResult out;
     if (!result.ok()) {
         out.error = result.error;

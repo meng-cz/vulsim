@@ -4,9 +4,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${1:-/tmp/vulrtlgen_help_timescale_test_$$}"
+PROGRESS_LOG="${OUT_DIR}.progress.log"
+NORMALIZED_PROGRESS_LOG="${PROGRESS_LOG}.normalized"
 
-if [[ -e "$OUT_DIR" ]]; then
-    echo "output directory already exists: $OUT_DIR" >&2
+if [[ -e "$OUT_DIR" || -e "$PROGRESS_LOG" || -e "$NORMALIZED_PROGRESS_LOG" ]]; then
+    echo "output path already exists: $OUT_DIR, $PROGRESS_LOG, or $NORMALIZED_PROGRESS_LOG" >&2
     exit 1
 fi
 
@@ -27,7 +29,27 @@ build/vulrtlgen \
     -p example/childalias \
     -l vullib \
     -o "$OUT_DIR" \
-    -f >/dev/null
+    -f >"$PROGRESS_LOG"
+
+tr '\r' '\n' <"$PROGRESS_LOG" >"$NORMALIZED_PROGRESS_LOG"
+
+for module in Top_sim_top IncNode_sim_top_node; do
+    rg -Fxq "[vulrtlgen] module $module: generating RTL skeleton and API-inline logic" "$NORMALIZED_PROGRESS_LOG"
+    rg -Fxq "[vulrtlgen] module $module: RTLzz frontend parsing: s0clang18" "$NORMALIZED_PROGRESS_LOG"
+    rg -Fxq "[vulrtlgen] module $module: RTLzz frontend parsing: s11beir" "$NORMALIZED_PROGRESS_LOG"
+    rg -q "^\[vulrtlgen\] module $module: RTLzz backend optimization: round 1/[0-9]+$" "$NORMALIZED_PROGRESS_LOG"
+done
+if ! LC_ALL=C rg -q $'\r\[vulrtlgen\] module .*: RTLzz frontend parsing: s0clang18' "$PROGRESS_LOG"; then
+    echo "frontend progress is not written as an in-place carriage-return update" >&2
+    exit 1
+fi
+if ! LC_ALL=C rg -q $'\r\[vulrtlgen\] module .*: RTLzz backend optimization: round 1/' "$PROGRESS_LOG"; then
+    echo "backend progress is not written as an in-place carriage-return update" >&2
+    exit 1
+fi
+rg -Fxq \
+    "[vulrtlgen] generation complete: output=\"$OUT_DIR\"; top file=\"$OUT_DIR/sim/top.sv\"; top module=Top_sim_top" \
+    "$NORMALIZED_PROGRESS_LOG"
 
 mapfile -t SV_FILES < <(find "$OUT_DIR" -type f -name '*.sv' | sort)
 if [[ ${#SV_FILES[@]} -eq 0 ]]; then
