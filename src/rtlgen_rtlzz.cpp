@@ -54,7 +54,8 @@ LogicRTLResult appendLogicRTL(
     const VulStaticModuleInstance &module,
     const string &logic_hls_filepath,
     const string &lib_include_dir,
-    int unroll_limit
+    int unroll_limit,
+    bool release
 ) {
     if (!result.has_logic_submodule || result.logic_hls_codes.empty()) {
         return {};
@@ -66,7 +67,8 @@ LogicRTLResult appendLogicRTL(
         logic_hls_filepath,
         logic_module_name,
         lib_include_dir,
-        unroll_limit
+        unroll_limit,
+        release
     );
     if (!logic_rtl.ok) {
         LogicRTLResult out;

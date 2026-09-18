@@ -60,7 +60,8 @@ LogicRTLResult appendLogicRTL(
     const VulStaticModuleInstance &module,
     const string &logic_hls_filepath,
     const string &lib_include_dir,
-    int unroll_limit = 1024
+    int unroll_limit = 1024,
+    bool release = false
 );
 
 vector<string> genVerilatorTestMainCpp(

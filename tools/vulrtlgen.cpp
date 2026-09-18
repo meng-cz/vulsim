@@ -84,6 +84,10 @@ static int runVulRTLGen(int argc, char * argv[]) {
     parser.add_argument("-p", "--project")
         .help("sets the project directory (default: parent directory of the top module file)")
         .default_value(std::string(""));
+    parser.add_argument("-r", "--release")
+        .help("emit RTL without intermediate C++ or debug files")
+        .default_value(false)
+        .implicit_value(true);
     parser.add_argument("-f", "--force")
         .help("overwrite a non-empty output directory without prompting")
         .default_value(false)
@@ -96,6 +100,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
         return 1;
     }
 
+    const bool release = parser.get<bool>("--release");
     string top_file = parser.get<std::string>("--top");
     string main_file = parser.get<std::string>("--main");
     string out_dir = parser.get<std::string>("--out");
@@ -158,31 +163,41 @@ static int runVulRTLGen(int argc, char * argv[]) {
             project.global_helper_codes
         );
         const auto hls_out_path = out_path / hls_path;
+        // The frontend still needs a source file; remove it on every exit in release mode.
+        struct IntermediateCleanup {
+            std::filesystem::path path;
+            bool enabled;
+            ~IntermediateCleanup() {
+                if (enabled) { std::error_code ec; std::filesystem::remove(path, ec); }
+            }
+        } cleanup{hls_out_path, release};
         writeLinesToFile(codes.logic_hls_codes, hls_out_path.string());
-        vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
+        if (!release) vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
         const auto sv_path = mod_instance->rtlSvPath();
         rtlgen::LogicRTLResult rtlzz_result =
-            rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir);
+            rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir, 1024, release);
         if (!rtlzz_result.ok) {
-            const std::filesystem::path sv_out_path = out_path / sv_path;
-            const std::filesystem::path error_dbg_path =
-                (sv_out_path.has_parent_path() ? sv_out_path.parent_path() : out_path) / "error.dbg";
-            if (rtlzz_result.error_debug_codelines.empty()) {
-                rtlzz_result.error_debug_codelines.push_back(
-                    "RTLzz did not provide an error debug snapshot for this failure.\n"
-                );
-            }
-            writeLinesToFile(rtlzz_result.error_debug_codelines, error_dbg_path.string());
-            std::cerr << "RTLzz error signal(s): " << joinNames(rtlzz_result.error_signal_names) << std::endl;
-            std::cerr << "RTLzz error debug file: " << error_dbg_path.string() << std::endl;
-            if (!rtlzz_result.error_signal_debug_text.empty()) {
-                std::cerr << "RTLzz error signal debug:" << std::endl;
-                std::cerr << rtlzz_result.error_signal_debug_text;
-                if (rtlzz_result.error_signal_debug_text.back() != '\n') {
-                    std::cerr << std::endl;
+            if (!release) {
+                const std::filesystem::path sv_out_path = out_path / sv_path;
+                const std::filesystem::path error_dbg_path =
+                    (sv_out_path.has_parent_path() ? sv_out_path.parent_path() : out_path) / "error.dbg";
+                if (rtlzz_result.error_debug_codelines.empty()) {
+                    rtlzz_result.error_debug_codelines.push_back(
+                        "RTLzz did not provide an error debug snapshot for this failure.\n"
+                    );
                 }
-            } else {
-                std::cerr << "RTLzz error signal debug: <not provided by RTLzz>" << std::endl;
+                writeLinesToFile(rtlzz_result.error_debug_codelines, error_dbg_path.string());
+                std::cerr << "RTLzz error signal(s): " << joinNames(rtlzz_result.error_signal_names) << std::endl;
+                std::cerr << "RTLzz error debug file: " << error_dbg_path.string() << std::endl;
+                if (!rtlzz_result.error_signal_debug_text.empty()) {
+                    std::cerr << "RTLzz error signal debug:" << std::endl;
+                    std::cerr << rtlzz_result.error_signal_debug_text;
+                    if (rtlzz_result.error_signal_debug_text.back() != '\n') {
+                        std::cerr << std::endl;
+                    }
+                } else {
+                    std::cerr << "RTLzz error signal debug: <not provided by RTLzz>" << std::endl;
+                }
             }
             std::cerr << "Error: " << rtlzz_result.error << std::endl;
             return 1;
@@ -190,8 +205,8 @@ static int runVulRTLGen(int argc, char * argv[]) {
         std::vector<std::string> rtlzz_debug_codelines =
             std::move(rtlzz_result.debug_codelines);
         writeLinesToFile(codes.rtl_skeleten_codes, (out_path / sv_path).string());
-        vulDebugWriteMapToFile(codes.rtl_skeleten_debug_lines, (out_path / (sv_path + ".dbgmap")).string());
-        if (!rtlzz_debug_codelines.empty()) {
+        if (!release) vulDebugWriteMapToFile(codes.rtl_skeleten_debug_lines, (out_path / (sv_path + ".dbgmap")).string());
+        if (!release && !rtlzz_debug_codelines.empty()) {
             writeLinesToFile(rtlzz_debug_codelines, (out_path / (sv_path + ".dbg")).string());
         }
         for (const auto &res_file : codes.resource_files) {
@@ -205,7 +220,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
         }
     }
 
-    if (!main_file.empty()) {
+    if (!release && !main_file.empty()) {
         VulErrorContextGuard _err("generating Verilator TestMain cpp");
         vector<string> testmain_code = rtlgen::genVerilatorTestMainCpp(project);
         writeLinesToFile(testmain_code, (out_path / "VulTestMain.cpp").string());

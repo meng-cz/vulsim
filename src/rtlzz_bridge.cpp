@@ -90,7 +90,8 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::string &source_file,
     const std::string &top_function,
     const std::string &lib_include_dir,
-    int unroll_limit
+    int unroll_limit,
+    bool release
 ) {
     std::ifstream input(source_file);
     if (!input) {
@@ -117,7 +118,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.top_function = top_function;
     options.unroll_limit = unroll_limit;
     options.clang_args.push_back("-std=c++20");
-    options.rtl_debug = rtlzz::RtlDebugMode::Text;
+    options.rtl_debug = release ? rtlzz::RtlDebugMode::None : rtlzz::RtlDebugMode::Text;
     const std::string module_name = displayModuleName(top_function);
     ProgressLine progress_line("[vulrtlgen] module " + module_name + ": ");
     options.progress_callback = [&progress_line](const std::string &step) {

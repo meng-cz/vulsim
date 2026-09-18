@@ -137,3 +137,5 @@ ls -lah rtlout
 - pugixml: [https://github.com/zeux/pugixml](https://github.com/zeux/pugixml)
 - json : [https://github.com/nlohmann/json](https://github.com/nlohmann/json)
 - argparse : [https://github.com/p-ranav/argparse](https://github.com/p-ranav/argparse)
+
+生成 RTL 时可使用 `vulrtlgen -r -t example/aes1/AES1.hpp`（或 `--release`），不保留中间 `.logic.cpp`、`.dbg`、`.dbgmap` 和 TestMain C++ 文件。默认模式保持原有调试输出；综合所需的 RTL 库及显式资源仍会复制。
