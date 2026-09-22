@@ -1040,6 +1040,30 @@ constexpr int_operand_int_t<Operand> get_int_operand_value(const Operand& operan
     return Traits::get_int(operand);
 }
 
+template <uint32_t Width, typename LhsOperand, typename RhsOperand, typename CarryOperand>
+    requires(Width > 1 &&
+             IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID &&
+             IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID &&
+             !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED &&
+             !IntOperandTraits<std::remove_cvref_t<RhsOperand>>::IS_SIGNED &&
+             IntOperandTraits<std::remove_cvref_t<LhsOperand>>::BIT_WIDTH == Width &&
+             IntOperandTraits<std::remove_cvref_t<RhsOperand>>::BIT_WIDTH == Width &&
+             (std::is_same_v<std::remove_cvref_t<CarryOperand>, bool> ||
+              (IntOperandTraits<std::remove_cvref_t<CarryOperand>>::VALID &&
+               !IntOperandTraits<std::remove_cvref_t<CarryOperand>>::IS_SIGNED &&
+               IntOperandTraits<std::remove_cvref_t<CarryOperand>>::BIT_WIDTH == 1)))
+constexpr Int<Width> AddCarry(const LhsOperand& lhs, const RhsOperand& rhs,
+                              const CarryOperand& carry) {
+    const bool carry_bit = [&] {
+        if constexpr (std::is_same_v<std::remove_cvref_t<CarryOperand>, bool>)
+            return carry;
+        else
+            return get_int_operand_value(carry).template to<bool>();
+    }();
+    return Int<Width>(get_int_operand_value(lhs) + get_int_operand_value(rhs) +
+                      Int<1>(carry_bit));
+}
+
 template <uint32_t ShiftBitWidth>
 constexpr bool shift_amount_at_least_width(const Int<ShiftBitWidth>& shift, uint32_t width) {
     if constexpr (Int<ShiftBitWidth>::NUM_WORDS > 1) {
@@ -1940,3 +1964,4 @@ using vulfixint::ReduceOr;
 using vulfixint::ReduceXor;
 using vulfixint::Repeat;
 using vulfixint::Cat;
+using vulfixint::AddCarry;
