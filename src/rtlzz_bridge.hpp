@@ -33,6 +33,5 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::string &lib_include_dir,
     int unroll_limit = 1024,
     bool release = false,
-    unsigned threads = 1,
     bool concurrent_progress = false
 );

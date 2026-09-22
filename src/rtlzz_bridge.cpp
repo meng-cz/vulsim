@@ -98,7 +98,6 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::string &lib_include_dir,
     int unroll_limit,
     bool release,
-    unsigned threads,
     bool concurrent_progress
 ) {
     std::ifstream input(source_file);
@@ -125,7 +124,6 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.vullib_dir = lib_include_dir;
     options.top_function = top_function;
     options.unroll_limit = unroll_limit;
-    options.threads = threads;
     options.clang_args.push_back("-std=c++20");
     options.rtl_debug = release ? rtlzz::RtlDebugMode::None : rtlzz::RtlDebugMode::Text;
     const std::string module_name = displayModuleName(top_function);

@@ -159,14 +159,11 @@ static int runVulRTLGen(int argc, char * argv[]) {
     parser.add_argument("-l", "--lib")
         .help("sets the directory for runtime library files (default: ./vullib)")
         .default_value(std::string("./vullib"));
-    parser.add_argument("--project")
+    parser.add_argument("-p", "--project")
         .help("sets the project directory (default: parent directory of the top module file)")
         .default_value(std::string(""));
-    parser.add_argument("-p", "--process")
-        .help("maximum concurrent module tasks (default: 1)")
-        .default_value(std::string("1"));
     parser.add_argument("-j")
-        .help("threads per module for S6, S10 and BEOPT (default: 1)")
+        .help("maximum concurrent module processes (default: 1)")
         .default_value(std::string("1"));
     parser.add_argument("-r", "--release")
         .help("emit RTL without intermediate C++ or debug files")
@@ -191,8 +188,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
     bool force = parser.get<bool>("--force");
-    const unsigned processes = positiveCount(parser.get<std::string>("--process"), "--process");
-    const unsigned threads = positiveCount(parser.get<std::string>("-j"), "-j");
+    const unsigned processes = positiveCount(parser.get<std::string>("-j"), "-j");
     ModuleTasks tasks(processes);
 
     if (top_file.empty() && main_file.empty()) {
@@ -273,7 +269,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
         const auto sv_path = mod_instance->rtlSvPath();
         rtlgen::LogicRTLResult rtlzz_result =
             rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir,
-                                  1024, release, threads, processes > 1);
+                                  1024, release, processes > 1);
         if (!rtlzz_result.ok) {
             if (!release) {
                 const std::filesystem::path sv_out_path = out_path / sv_path;

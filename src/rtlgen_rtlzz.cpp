@@ -56,7 +56,6 @@ LogicRTLResult appendLogicRTL(
     const string &lib_include_dir,
     int unroll_limit,
     bool release,
-    unsigned threads,
     bool concurrent_progress
 ) {
     if (!result.has_logic_submodule || result.logic_hls_codes.empty()) {
@@ -71,7 +70,6 @@ LogicRTLResult appendLogicRTL(
         lib_include_dir,
         unroll_limit,
         release,
-        threads,
         concurrent_progress
     );
     if (!logic_rtl.ok) {
