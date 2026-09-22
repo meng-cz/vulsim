@@ -37,7 +37,8 @@ std::string displayModuleName(const std::string &top_function) {
 
 class ProgressLine {
 public:
-    explicit ProgressLine(std::string prefix) : prefix_(std::move(prefix)) {}
+    explicit ProgressLine(std::string prefix, bool concurrent)
+        : prefix_(std::move(prefix)), concurrent_(concurrent) {}
 
     ~ProgressLine() {
         finish();
@@ -45,6 +46,10 @@ public:
 
     void update(const std::string &step) {
         const std::string message = prefix_ + step;
+        if (concurrent_) {
+            std::cout << message + "\n" << std::flush;
+            return;
+        }
         std::cout << '\r' << message;
         if (message.size() < width_) {
             std::cout << std::string(width_ - message.size(), ' ')
@@ -66,6 +71,7 @@ private:
     std::string prefix_;
     std::size_t width_ = 0;
     bool active_ = false;
+    bool concurrent_ = false;
 };
 
 std::vector<std::string> collectErrorSignalNames(
@@ -91,7 +97,9 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::string &top_function,
     const std::string &lib_include_dir,
     int unroll_limit,
-    bool release
+    bool release,
+    unsigned threads,
+    bool concurrent_progress
 ) {
     std::ifstream input(source_file);
     if (!input) {
@@ -117,10 +125,11 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.vullib_dir = lib_include_dir;
     options.top_function = top_function;
     options.unroll_limit = unroll_limit;
+    options.threads = threads;
     options.clang_args.push_back("-std=c++20");
     options.rtl_debug = release ? rtlzz::RtlDebugMode::None : rtlzz::RtlDebugMode::Text;
     const std::string module_name = displayModuleName(top_function);
-    ProgressLine progress_line("[vulrtlgen] module " + module_name + ": ");
+    ProgressLine progress_line("[vulrtlgen] module " + module_name + ": ", concurrent_progress);
     options.progress_callback = [&progress_line](const std::string &step) {
         progress_line.update(step);
     };

@@ -28,6 +28,84 @@
 #include <unordered_set>
 #include <vector>
 #include <string>
+#include <cerrno>
+#include <charconv>
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
+namespace {
+unsigned positiveCount(const std::string& text, const char* option) {
+    unsigned value = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !value)
+        throw VulException(std::string(option) + " requires a positive integer");
+    return value;
+}
+
+// Fork only from the single-threaded coordinator; workers own all RTLzz state.
+class ModuleTasks {
+    unsigned limit_;
+    bool failed_ = false;
+#ifndef _WIN32
+    std::unordered_set<pid_t> children_;
+    void reap() {
+        int status = 0;
+        pid_t child;
+        do { child = waitpid(-1, &status, 0); } while (child < 0 && errno == EINTR);
+        if (child < 0) throw VulException("Failed to wait for module task");
+        if (!children_.erase(child)) return;
+        failed_ |= !WIFEXITED(status) || WEXITSTATUS(status) != 0;
+        if (WIFSIGNALED(status))
+            std::cerr << "Module task " << child << " terminated by signal " << WTERMSIG(status) << '\n';
+    }
+#endif
+public:
+    explicit ModuleTasks(unsigned limit) : limit_(limit) {
+#ifdef _WIN32
+        if (limit > 1) throw VulException("Parallel module processes require a POSIX platform");
+#endif
+    }
+    ~ModuleTasks() {
+#ifndef _WIN32
+        // Also join already-started jobs when the coordinator throws.
+        for (auto child : children_) {
+            int status;
+            while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+        }
+#endif
+    }
+    template<class Function> bool launch(Function function) {
+        if (limit_ == 1) { failed_ |= function() != 0; return !failed_; }
+#ifndef _WIN32
+        while (children_.size() >= limit_) reap();
+        if (failed_) return false;
+        std::cout.flush();
+        std::cerr.flush();
+        const auto child = fork();
+        if (child < 0) throw VulException("Failed to start module task");
+        if (child == 0) {
+            int status = 1;
+            try { status = function(); }
+            catch (const std::exception& error) { std::cerr << "ERROR: " << error.what() << '\n'; }
+            catch (...) { std::cerr << "ERROR: Unknown module task failure\n"; }
+            std::cout.flush();
+            std::cerr.flush();
+            _exit(status);
+        }
+        children_.insert(child);
+#endif
+        return true;
+    }
+    bool finish() {
+#ifndef _WIN32
+        while (!children_.empty()) reap();
+#endif
+        return !failed_;
+    }
+};
+} // namespace
 
 inline static void writeLinesToFile(const std::vector<std::string> &lines, const std::string &filepath) {
     const std::filesystem::path target_path(filepath);
@@ -81,9 +159,15 @@ static int runVulRTLGen(int argc, char * argv[]) {
     parser.add_argument("-l", "--lib")
         .help("sets the directory for runtime library files (default: ./vullib)")
         .default_value(std::string("./vullib"));
-    parser.add_argument("-p", "--project")
+    parser.add_argument("--project")
         .help("sets the project directory (default: parent directory of the top module file)")
         .default_value(std::string(""));
+    parser.add_argument("-p", "--process")
+        .help("maximum concurrent module tasks (default: 1)")
+        .default_value(std::string("1"));
+    parser.add_argument("-j")
+        .help("threads per module for S6, S10 and BEOPT (default: 1)")
+        .default_value(std::string("1"));
     parser.add_argument("-r", "--release")
         .help("emit RTL without intermediate C++ or debug files")
         .default_value(false)
@@ -107,6 +191,9 @@ static int runVulRTLGen(int argc, char * argv[]) {
     string proj_dir = parser.get<std::string>("--project");
     string lib_dir = parser.get<std::string>("--lib");
     bool force = parser.get<bool>("--force");
+    const unsigned processes = positiveCount(parser.get<std::string>("--process"), "--process");
+    const unsigned threads = positiveCount(parser.get<std::string>("-j"), "-j");
+    ModuleTasks tasks(processes);
 
     if (top_file.empty() && main_file.empty()) {
         std::cerr << "Error: Specify -t/--top, -m/--main, or a TestMain with TOP(...)." << std::endl;
@@ -139,6 +226,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
     std::unordered_set<std::string> generated_module_paths;
+    std::unordered_set<std::string> copied_resources;
     bfs_queue.push_back(project.top_module_instance);
     while (!bfs_queue.empty()) {
         auto mod_instance = bfs_queue.front();
@@ -162,6 +250,15 @@ static int runVulRTLGen(int argc, char * argv[]) {
             project.global_bundlelib,
             project.global_helper_codes
         );
+        // Shared resources are copied only by the coordinator, once per path.
+        for (const auto& resource : codes.resource_files) {
+            if (!copied_resources.insert(resource).second) continue;
+            const auto source = std::filesystem::path(proj_dir) / resource;
+            const auto destination = out_path / resource;
+            std::filesystem::create_directories(destination.parent_path());
+            std::filesystem::copy_file(source, destination);
+        }
+        if (!tasks.launch([&]() -> int {
         const auto hls_out_path = out_path / hls_path;
         // The frontend still needs a source file; remove it on every exit in release mode.
         struct IntermediateCleanup {
@@ -175,7 +272,8 @@ static int runVulRTLGen(int argc, char * argv[]) {
         if (!release) vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
         const auto sv_path = mod_instance->rtlSvPath();
         rtlgen::LogicRTLResult rtlzz_result =
-            rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir, 1024, release);
+            rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir,
+                                  1024, release, threads, processes > 1);
         if (!rtlzz_result.ok) {
             if (!release) {
                 const std::filesystem::path sv_out_path = out_path / sv_path;
@@ -209,16 +307,10 @@ static int runVulRTLGen(int argc, char * argv[]) {
         if (!release && !rtlzz_debug_codelines.empty()) {
             writeLinesToFile(rtlzz_debug_codelines, (out_path / (sv_path + ".dbg")).string());
         }
-        for (const auto &res_file : codes.resource_files) {
-            std::filesystem::path src_file = std::filesystem::path(proj_dir) / res_file;
-            if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
-                throw VulException("Resource file does not exist: " + src_file.string() + ", used in module: " + mod_instance->module_name);
-            }
-            std::filesystem::path dst_file = out_path / res_file;
-            std::filesystem::create_directories(dst_file.parent_path());
-            std::filesystem::copy_file(src_file, dst_file);
-        }
+        return 0;
+        })) return 1;
     }
+    if (!tasks.finish()) return 1;
 
     if (!release && !main_file.empty()) {
         VulErrorContextGuard _err("generating Verilator TestMain cpp");
