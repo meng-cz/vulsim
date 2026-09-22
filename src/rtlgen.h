@@ -31,6 +31,7 @@ inline string LogicSubModuleName(const ModuleName &module_name) {
 struct RTLGenResult {
     bool has_logic_submodule = true;
     vector<string> logic_hls_codes;
+    vector<pair<string, string>> logic_port_bindings;
     VulDebugLocs logic_hls_debug;
     VulDebugLines logic_hls_debug_lines;
     vector<string> rtl_skeleten_codes;

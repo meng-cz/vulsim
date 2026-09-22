@@ -17,6 +17,8 @@
 #include "debugmap.hpp"
 #include "rtlzz_bridge.hpp"
 
+#include <algorithm>
+
 namespace rtlgen {
 
 namespace {
@@ -32,19 +34,6 @@ void appendTextAsLines(vector<string> &lines, const string &text) {
         lines.push_back(text.substr(pos, next - pos + 1));
         pos = next + 1;
     }
-}
-
-string withoutLeadingTimescaleDirective(string text) {
-    const size_t directive_pos = text.find_first_not_of(" \t\r\n");
-    if (directive_pos == string::npos || text.compare(directive_pos, 10, "`timescale") != 0) {
-        return text;
-    }
-    const size_t line_end = text.find('\n', directive_pos);
-    if (line_end == string::npos) {
-        return "";
-    }
-    text.erase(0, line_end + 1);
-    return text;
 }
 
 } // namespace
@@ -68,6 +57,7 @@ LogicRTLResult appendLogicRTL(
         logic_hls_filepath,
         logic_module_name,
         lib_include_dir,
+        result.logic_port_bindings,
         unroll_limit,
         release,
         concurrent_progress
@@ -82,12 +72,34 @@ LogicRTLResult appendLogicRTL(
         return out;
     }
 
-    result.rtl_skeleten_codes.push_back("\n");
-    appendTextAsLines(
-        result.rtl_skeleten_codes,
-        withoutLeadingTimescaleDirective(std::move(logic_rtl.rtl_text)));
+    auto endmodule = std::find(result.rtl_skeleten_codes.begin(),
+                               result.rtl_skeleten_codes.end(), "endmodule\n");
+    if (endmodule == result.rtl_skeleten_codes.end()) {
+        LogicRTLResult out;
+        out.ok = false;
+        out.error = "RTL module framework is missing endmodule";
+        return out;
+    }
+    vector<string> body_lines;
+    body_lines.push_back("\n");
+    appendTextAsLines(body_lines, logic_rtl.rtl_text);
+    const auto offset = static_cast<size_t>(endmodule - result.rtl_skeleten_codes.begin());
+    result.rtl_skeleten_codes.insert(endmodule, body_lines.begin(), body_lines.end());
+    result.rtl_skeleten_debug.insert(result.rtl_skeleten_debug.begin() + offset,
+                                     body_lines.size(), {});
     vulDebugNormalize(result.rtl_skeleten_codes, result.rtl_skeleten_debug);
     result.rtl_skeleten_debug_lines = vulDebugBuildGeneratedMap(result.rtl_skeleten_debug);
+    const string line_prefix = "  rtl_line: ";
+    for (auto &line : logic_rtl.debug_codelines) {
+        if (line.rfind(line_prefix, 0) != 0) continue;
+        const size_t number_begin = line_prefix.size();
+        const size_t number_end = line.find_first_not_of("0123456789", number_begin);
+        if (number_end == number_begin) continue;
+        const auto relative_line = std::stoul(line.substr(number_begin, number_end - number_begin));
+        if (relative_line == 0) continue;
+        line.replace(number_begin, number_end - number_begin,
+                     std::to_string(relative_line + offset + 1));
+    }
     LogicRTLResult out;
     out.debug_codelines = std::move(logic_rtl.debug_codelines);
     return out;

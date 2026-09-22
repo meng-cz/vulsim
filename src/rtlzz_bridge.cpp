@@ -96,6 +96,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::string &source_file,
     const std::string &top_function,
     const std::string &lib_include_dir,
+    const std::vector<std::pair<std::string, std::string>> &port_bindings,
     int unroll_limit,
     bool release,
     bool concurrent_progress
@@ -123,6 +124,8 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.source_codelines = std::move(source_codelines);
     options.vullib_dir = lib_include_dir;
     options.top_function = top_function;
+    options.rtl_module_body = true;
+    options.rtl_port_bindings = port_bindings;
     options.unroll_limit = unroll_limit;
     options.clang_args.push_back("-std=c++20");
     options.rtl_debug = release ? rtlzz::RtlDebugMode::None : rtlzz::RtlDebugMode::Text;

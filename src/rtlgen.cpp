@@ -2186,6 +2186,16 @@ RTLGenResult genModuleRTL(
 
     RTLGenResult result;
     result.has_logic_submodule = !ctx.hls_arguments.empty();
+    for (const auto &connection : ctx.rtl_logicports) {
+        const size_t open = connection.find('(');
+        if (connection.empty() || connection.front() != '.' || open == string::npos ||
+            connection.back() != ')' || open <= 1) {
+            throw VulException("Malformed RTL logic port connection: " + connection);
+        }
+        result.logic_port_bindings.emplace_back(
+            connection.substr(1, open - 1),
+            connection.substr(open + 1, connection.size() - open - 2));
+    }
 
     const string module_name = module.simClassName();
     const string logic_module_name = LogicSubModuleName(module_name);
@@ -2284,15 +2294,6 @@ RTLGenResult genModuleRTL(
     }
     rtl.insert(rtl.end(), ctx.rtl_logic.begin(), ctx.rtl_logic.end());
     if (!ctx.rtl_logic.empty()) {
-        rtl.push_back("\n");
-    }
-
-    if (result.has_logic_submodule) {
-        rtl.push_back(logic_module_name + " u_logic (\n");
-        for (size_t i = 0; i < ctx.rtl_logicports.size(); ++i) {
-            rtl.push_back("  " + ctx.rtl_logicports[i] + (i + 1 == ctx.rtl_logicports.size() ? "" : ",") + "\n");
-        }
-        rtl.push_back(");\n");
         rtl.push_back("\n");
     }
 

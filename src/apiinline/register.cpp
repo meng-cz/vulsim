@@ -262,10 +262,6 @@ InlineCode inlineRegisterAPIs(
         info.wdata_port = "wdata_" + reg.name + "__";
         info.holdnext_port = "holdnext_" + reg.name + "__";
         info.resetnext_port = "resetnext_" + reg.name + "__";
-        // API usage is not available in this standalone helper; retain the
-        // historical behavior for direct register-inline unit tests.
-        info.uses_hold = true;
-        info.uses_reset = true;
         flatten_type_signature(reg.signature, bundlelib, "value", info.width, info.fields);
         if (info.fields.size() == 1 && info.fields[0].name == "value" &&
             enumDefaultValueExpr(reg.signature, bundlelib).empty()) {
@@ -284,6 +280,8 @@ InlineCode inlineRegisterAPIs(
     if (tokens.empty()) {
         return {logic_hls_codes, logic_hls_debug};
     }
+    // Match the framework's conditional hold/reset ports: unused controls
+    // must not leave helper definitions referring to undeclared signals.
     for (std::size_t i = 0; i + 2 < tokens.size(); ++i) {
         auto found = registers.find(tokens[i].spelling);
         if (found == registers.end() || tokens[i].spelling.empty() ||
