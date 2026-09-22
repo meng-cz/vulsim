@@ -35,6 +35,8 @@ struct RegisterInfo {
     string holdnext_port;
     string resetnext_port;
     string default_expr;
+    bool uses_hold = false;
+    bool uses_reset = false;
 };
 
 string readRegisterExpr(const RegisterInfo &info, const string &rdata_expr) {
@@ -106,6 +108,8 @@ string registerControlHelpers(const RegisterInfo &info) {
     std::ostringstream os;
     const bool is_array = !info.reg->dims.empty();
     for (const auto &method : {"holdnext", "resetnext"}) {
+        if ((method == string("holdnext") && !info.uses_hold) ||
+            (method == string("resetnext") && !info.uses_reset)) continue;
         const string port = method == string("holdnext")
             ? info.holdnext_port : info.resetnext_port;
         const string helper = "__vul_reg_" + string(method) + "_" + info.reg->name;
@@ -258,6 +262,10 @@ InlineCode inlineRegisterAPIs(
         info.wdata_port = "wdata_" + reg.name + "__";
         info.holdnext_port = "holdnext_" + reg.name + "__";
         info.resetnext_port = "resetnext_" + reg.name + "__";
+        // API usage is not available in this standalone helper; retain the
+        // historical behavior for direct register-inline unit tests.
+        info.uses_hold = true;
+        info.uses_reset = true;
         flatten_type_signature(reg.signature, bundlelib, "value", info.width, info.fields);
         if (info.fields.size() == 1 && info.fields[0].name == "value" &&
             enumDefaultValueExpr(reg.signature, bundlelib).empty()) {
@@ -275,6 +283,13 @@ InlineCode inlineRegisterAPIs(
     vector<TokenInfo> tokens = tokenizeWithLibclang(code);
     if (tokens.empty()) {
         return {logic_hls_codes, logic_hls_debug};
+    }
+    for (std::size_t i = 0; i + 2 < tokens.size(); ++i) {
+        auto found = registers.find(tokens[i].spelling);
+        if (found == registers.end() || tokens[i].spelling.empty() ||
+            tokens[i + 1].spelling != ".") continue;
+        if (tokens[i + 2].spelling == "holdnext") found->second.uses_hold = true;
+        if (tokens[i + 2].spelling == "resetnext") found->second.uses_reset = true;
     }
     vector<Replacement> repls;
     string helper_defs;

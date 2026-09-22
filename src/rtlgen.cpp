@@ -14,6 +14,7 @@
 
 #include "rtlgen.h"
 #include "apiinline/apiinline.hpp"
+#include "apiinline/register_usage_check.hpp"
 #include "debugmap.hpp"
 #include "simgen.h"
 
@@ -38,6 +39,7 @@ struct RTLGenContext {
     const VulStaticConfigLib &local_configlib;
     const VulStaticBundleLib &local_bundlelib;
     const vector<string> &global_helper_codes;
+    apiinline::RegisterAPIUsageMap register_api_usage;
 
     RTLGenContext(
         const VulStaticModuleInstance &module,
@@ -578,6 +580,9 @@ void _procRegisters(RTLGenContext &ctx) {
 
     for (const auto &reg : ctx.module.registers) {
         VulErrorContextGuard reg_guard("processing register " + reg.name);
+        const auto usage_it = ctx.register_api_usage.find(reg.name);
+        const bool uses_hold = usage_it != ctx.register_api_usage.end() && usage_it->second.hold;
+        const bool uses_reset = usage_it != ctx.register_api_usage.end() && usage_it->second.reset;
 
         bool is_ported = (reg.ports > 1);
         bool is_array = (!reg.dims.empty());
@@ -636,14 +641,14 @@ void _procRegisters(RTLGenContext &ctx) {
         ctx.hls_arguments.push_back("const " + rdata_type_str + " &" + rdata_port_name);
         ctx.hls_arguments.push_back(wen_type_str + " &" + wen_port_name);
         ctx.hls_arguments.push_back(wdata_type_str + " &" + wdata_port_name);
-        ctx.hls_arguments.push_back(ctrl_type_str + " &" + holdnext_port_name);
-        ctx.hls_arguments.push_back(ctrl_type_str + " &" + resetnext_port_name);
+        if (uses_hold) ctx.hls_arguments.push_back(ctrl_type_str + " &" + holdnext_port_name);
+        if (uses_reset) ctx.hls_arguments.push_back(ctrl_type_str + " &" + resetnext_port_name);
         ctx.hls_arguments.push_back(resetvalue_type_str + " &" + resetvalue_port_name);
 
         if (is_array && is_ported) {
             ctx.hls_init.push_back("for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) {\n");
-            ctx.hls_init.push_back("  " + holdnext_port_name + "[__vul_i] = false;\n");
-            ctx.hls_init.push_back("  " + resetnext_port_name + "[__vul_i] = false;\n");
+            if (uses_hold) ctx.hls_init.push_back("  " + holdnext_port_name + "[__vul_i] = false;\n");
+            if (uses_reset) ctx.hls_init.push_back("  " + resetnext_port_name + "[__vul_i] = false;\n");
             ctx.hls_init.push_back("  for (uint32_t __vul_p = 0; __vul_p < " + wrport_num_str + "; ++__vul_p) {\n");
             ctx.hls_init.push_back("    " + wen_port_name + "[__vul_i][__vul_p] = false;\n");
             ctx.hls_init.push_back("    " + wdata_port_name + "[__vul_i][__vul_p] = 0;\n");
@@ -651,21 +656,21 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.hls_init.push_back("}\n");
         } else if (is_array) {
             ctx.hls_init.push_back("for (uint32_t __vul_i = 0; __vul_i < " + size_str + "; ++__vul_i) {\n");
-            ctx.hls_init.push_back("  " + holdnext_port_name + "[__vul_i] = false;\n");
-            ctx.hls_init.push_back("  " + resetnext_port_name + "[__vul_i] = false;\n");
+            if (uses_hold) ctx.hls_init.push_back("  " + holdnext_port_name + "[__vul_i] = false;\n");
+            if (uses_reset) ctx.hls_init.push_back("  " + resetnext_port_name + "[__vul_i] = false;\n");
             ctx.hls_init.push_back("  " + wen_port_name + "[__vul_i] = false;\n");
             ctx.hls_init.push_back("  " + wdata_port_name + "[__vul_i] = 0;\n");
             ctx.hls_init.push_back("}\n");
         } else if (is_ported) {
-            ctx.hls_init.push_back(holdnext_port_name + " = false;\n");
-            ctx.hls_init.push_back(resetnext_port_name + " = false;\n");
+            if (uses_hold) ctx.hls_init.push_back(holdnext_port_name + " = false;\n");
+            if (uses_reset) ctx.hls_init.push_back(resetnext_port_name + " = false;\n");
             ctx.hls_init.push_back("for (uint32_t __vul_p = 0; __vul_p < " + wrport_num_str + "; ++__vul_p) {\n");
             ctx.hls_init.push_back("  " + wen_port_name + "[__vul_p] = false;\n");
             ctx.hls_init.push_back("  " + wdata_port_name + "[__vul_p] = 0;\n");
             ctx.hls_init.push_back("}\n");
         } else {
-            ctx.hls_init.push_back(holdnext_port_name + " = false;\n");
-            ctx.hls_init.push_back(resetnext_port_name + " = false;\n");
+            if (uses_hold) ctx.hls_init.push_back(holdnext_port_name + " = false;\n");
+            if (uses_reset) ctx.hls_init.push_back(resetnext_port_name + " = false;\n");
             ctx.hls_init.push_back(wen_port_name + " = false;\n");
             ctx.hls_init.push_back(wdata_port_name + " = 0;\n");
         }
@@ -718,8 +723,8 @@ void _procRegisters(RTLGenContext &ctx) {
 
         if (!is_array) {
             ctx.rtl_decl.push_back("reg [" + ewid_m1_str + ":0] " + reg_decl_name + ";\n");
-            ctx.rtl_decl.push_back("wire " + holdnext_wire_name + ";\n");
-            ctx.rtl_decl.push_back("wire " + resetnext_wire_name + ";\n");
+            if (uses_hold) ctx.rtl_decl.push_back("wire " + holdnext_wire_name + ";\n");
+            if (uses_reset) ctx.rtl_decl.push_back("wire " + resetnext_wire_name + ";\n");
             ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + resetvalue_wire_name + ";\n");
             if (is_ported) {
                 ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + wrport_num_str + "];\n");
@@ -734,11 +739,17 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.rtl_logic.push_back("  if (rstn == 0) begin\n");
             ctx.rtl_logic.push_back("    " + reg_decl_name + " <= " + resetvalue_wire_name + ";\n");
             ctx.rtl_logic.push_back("  end else begin\n");
-            ctx.rtl_logic.push_back("    if (" + resetnext_wire_name + ") begin\n");
-            ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + resetvalue_wire_name + ";\n");
-            ctx.rtl_logic.push_back("    end else if (" + holdnext_wire_name + ") begin\n");
-            ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + reg_decl_name + ";\n");
-            ctx.rtl_logic.push_back("    end else begin\n");
+            if (uses_reset) {
+                ctx.rtl_logic.push_back("    if (" + resetnext_wire_name + ") begin\n");
+                ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + resetvalue_wire_name + ";\n");
+                ctx.rtl_logic.push_back("    end else ");
+            }
+            if (uses_hold) {
+                ctx.rtl_logic.push_back("if (" + holdnext_wire_name + ") begin\n");
+                ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + reg_decl_name + ";\n");
+                ctx.rtl_logic.push_back("    end else ");
+            }
+            ctx.rtl_logic.push_back("begin\n");
             if (!is_ported) {
                 ctx.rtl_logic.push_back("    if (" + wen_wire_name + ") begin\n");
                 ctx.rtl_logic.push_back("      " + reg_decl_name + " <= " + wdata_wire_name + ";\n");
@@ -755,8 +766,8 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.rtl_logic.push_back("end\n");
         } else {
             ctx.rtl_decl.push_back("reg [" + ewid_m1_str + ":0] " + reg_decl_name + "[" + size_str + "];\n");
-            ctx.rtl_decl.push_back("wire " + holdnext_wire_name + "[" + size_str + "];\n");
-            ctx.rtl_decl.push_back("wire " + resetnext_wire_name + "[" + size_str + "];\n");
+            if (uses_hold) ctx.rtl_decl.push_back("wire " + holdnext_wire_name + "[" + size_str + "];\n");
+            if (uses_reset) ctx.rtl_decl.push_back("wire " + resetnext_wire_name + "[" + size_str + "];\n");
             ctx.rtl_decl.push_back("wire [" + ewid_m1_str + ":0] " + resetvalue_wire_name + "[" + size_str + "];\n");
             if (is_ported) {
                 ctx.rtl_decl.push_back("wire " + wen_wire_name + "[" + size_str + "][" + wrport_num_str + "];\n");
@@ -774,11 +785,17 @@ void _procRegisters(RTLGenContext &ctx) {
             ctx.rtl_logic.push_back("    end\n");
             ctx.rtl_logic.push_back("  end else begin\n");
             ctx.rtl_logic.push_back("    for (int i = 0; i < " + size_str + "; i++) begin\n");
-            ctx.rtl_logic.push_back("      if (" + resetnext_wire_name + "[i]) begin\n");
-            ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + resetvalue_wire_name + "[i];\n");
-            ctx.rtl_logic.push_back("      end else if (" + holdnext_wire_name + "[i]) begin\n");
-            ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + reg_decl_name + "[i];\n");
-            ctx.rtl_logic.push_back("      end else begin\n");
+            if (uses_reset) {
+                ctx.rtl_logic.push_back("      if (" + resetnext_wire_name + "[i]) begin\n");
+                ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + resetvalue_wire_name + "[i];\n");
+                ctx.rtl_logic.push_back("      end else ");
+            }
+            if (uses_hold) {
+                ctx.rtl_logic.push_back("if (" + holdnext_wire_name + "[i]) begin\n");
+                ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + reg_decl_name + "[i];\n");
+                ctx.rtl_logic.push_back("      end else ");
+            }
+            ctx.rtl_logic.push_back("begin\n");
             if (!is_ported) {
                 ctx.rtl_logic.push_back("      if (" + wen_wire_name + "[i]) begin\n");
                 ctx.rtl_logic.push_back("        " + reg_decl_name + "[i] <= " + wdata_wire_name + "[i];\n");
@@ -799,8 +816,8 @@ void _procRegisters(RTLGenContext &ctx) {
         ctx.rtl_logicports.push_back("." + rdata_port_name + "(" + reg_decl_name + ")");
         ctx.rtl_logicports.push_back("." + wen_port_name + "(" + wen_wire_name + ")");
         ctx.rtl_logicports.push_back("." + wdata_port_name + "(" + wdata_wire_name + ")");
-        ctx.rtl_logicports.push_back("." + holdnext_port_name + "(" + holdnext_wire_name + ")");
-        ctx.rtl_logicports.push_back("." + resetnext_port_name + "(" + resetnext_wire_name + ")");
+        if (uses_hold) ctx.rtl_logicports.push_back("." + holdnext_port_name + "(" + holdnext_wire_name + ")");
+        if (uses_reset) ctx.rtl_logicports.push_back("." + resetnext_port_name + "(" + resetnext_wire_name + ")");
         ctx.rtl_logicports.push_back("." + resetvalue_port_name + "(" + resetvalue_wire_name + ")");
 
     }
@@ -2155,13 +2172,17 @@ RTLGenResult genModuleRTL(
 
     _procConstAndBundle(ctx);
     _procWires(ctx);
-    _procRegisters(ctx);
     _procRequests(ctx);
     _procQueries(ctx);
     _procServicesAndTicks(ctx);
     _procChildrenAndConnection(ctx);
     _procQueues(ctx);
     _procBRAMAndROM(ctx);
+    vector<string> usage_lines = ctx.hls_blocks;
+    usage_lines.insert(usage_lines.end(), ctx.hls_body.begin(), ctx.hls_body.end());
+    usage_lines.insert(usage_lines.end(), ctx.hls_final.begin(), ctx.hls_final.end());
+    ctx.register_api_usage = apiinline::checkRegisterAPIUsage(module, usage_lines);
+    _procRegisters(ctx);
 
     RTLGenResult result;
     result.has_logic_submodule = !ctx.hls_arguments.empty();
