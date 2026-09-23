@@ -22,15 +22,22 @@
 #include "output_dir.hpp"
 
 #include <filesystem>
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <deque>
+#include <functional>
+#include <memory>
 #include <unordered_set>
 #include <vector>
 #include <string>
 #include <cerrno>
 #include <charconv>
+#include <cstdint>
+#include <cstring>
 #ifndef _WIN32
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -44,66 +51,245 @@ unsigned positiveCount(const std::string& text, const char* option) {
     return value;
 }
 
+class TaskDashboard {
+public:
+    TaskDashboard(unsigned worker_count, unsigned total)
+        : total_(total), workers_(worker_count) {
+#ifndef _WIN32
+        interactive_ = isatty(STDOUT_FILENO) != 0;
+#endif
+        if (interactive_) render();
+        else printProgress();
+    }
+
+    void start(unsigned worker, const std::string &module, const std::string &stage) {
+        workers_[worker] = {module, stage, true};
+        refresh();
+    }
+    void update(unsigned worker, const std::string &stage) {
+        if (worker < workers_.size() && workers_[worker].active) workers_[worker].stage = stage;
+        refresh();
+    }
+    void complete(unsigned worker, bool failed) {
+        ++completed_;
+        if (failed) ++failed_;
+        if (worker < workers_.size()) workers_[worker] = {{}, failed ? "failed" : "completed", false};
+        refresh();
+    }
+    unsigned failed() const { return failed_; }
+
+private:
+    struct Worker { std::string module; std::string stage; bool active = false; };
+    bool interactive_;
+    unsigned total_;
+    unsigned completed_ = 0;
+    unsigned failed_ = 0;
+    std::vector<Worker> workers_;
+
+    std::string progress() const {
+        return "[vulrtlgen] Tasks: " + std::to_string(completed_) + "/" + std::to_string(total_) +
+               " completed, " + std::to_string(failed_) + " failed";
+    }
+    std::string workerLine(unsigned index) const {
+        const Worker &worker = workers_[index];
+        if (!worker.active) return "Worker " + std::to_string(index + 1) + ": idle";
+        return "Worker " + std::to_string(index + 1) + ": module " + worker.module + " : + " + worker.stage;
+    }
+    void render() const {
+        const unsigned rows = static_cast<unsigned>(workers_.size()) + 1;
+        if (rendered_) std::cout << "\033[" << rows << "A";
+        std::cout << "\r\033[2K" << progress() << '\n';
+        for (unsigned index = 0; index < workers_.size(); ++index)
+            std::cout << "\r\033[2K" << workerLine(index) << '\n';
+        std::cout.flush();
+        rendered_ = true;
+    }
+    void printProgress() const {
+        std::cout << progress() << std::endl;
+        for (unsigned index = 0; index < workers_.size(); ++index)
+            if (workers_[index].active) std::cout << workerLine(index) << std::endl;
+    }
+    void refresh() const { if (interactive_) render(); else printProgress(); }
+    mutable bool rendered_ = false;
+};
+
+class TaskReporter {
+public:
+    explicit TaskReporter(int fd = -1, std::string *direct_errors = nullptr)
+        : fd_(fd), direct_errors_(direct_errors) {}
+    void progress(const std::string &message) const { send('P', message); }
+    void error(const std::string &message) const {
+        if (fd_ < 0 && direct_errors_) *direct_errors_ += message;
+        else if (fd_ < 0) std::cerr << message << std::flush;
+        else send('E', message);
+    }
+private:
+    int fd_;
+    std::string *direct_errors_;
+    void send(char kind, const std::string &message) const {
+#ifdef _WIN32
+        (void)kind;
+        (void)message;
+        return;
+#else
+        if (fd_ < 0) return;
+        const std::uint32_t size = static_cast<std::uint32_t>(message.size());
+        char header[5] = {kind, 0, 0, 0, 0};
+        std::memcpy(header + 1, &size, sizeof(size));
+        auto write_all = [&](const char *data, std::size_t remaining) {
+            while (remaining) {
+                const ssize_t written = write(fd_, data, remaining);
+                if (written <= 0) return;
+                data += written;
+                remaining -= static_cast<std::size_t>(written);
+            }
+        };
+        write_all(header, sizeof(header));
+        write_all(message.data(), message.size());
+#endif
+    }
+};
+
 // Fork only from the single-threaded coordinator; workers own all RTLzz state.
 class ModuleTasks {
-    unsigned limit_;
-    bool failed_ = false;
-#ifndef _WIN32
-    std::unordered_set<pid_t> children_;
-    void reap() {
-        int status = 0;
-        pid_t child;
-        do { child = waitpid(-1, &status, 0); } while (child < 0 && errno == EINTR);
-        if (child < 0) throw VulException("Failed to wait for module task");
-        if (!children_.erase(child)) return;
-        failed_ |= !WIFEXITED(status) || WEXITSTATUS(status) != 0;
-        if (WIFSIGNALED(status))
-            std::cerr << "Module task " << child << " terminated by signal " << WTERMSIG(status) << '\n';
-    }
-#endif
 public:
-    explicit ModuleTasks(unsigned limit) : limit_(limit) {
+    struct Failure { std::string module; std::string output; };
+    ModuleTasks(unsigned limit, unsigned total)
+        : limit_(limit), dashboard_(limit > 1 ? std::make_unique<TaskDashboard>(limit, total) : nullptr) {
 #ifdef _WIN32
         if (limit > 1) throw VulException("Parallel module processes require a POSIX platform");
 #endif
     }
     ~ModuleTasks() {
 #ifndef _WIN32
-        // Also join already-started jobs when the coordinator throws.
-        for (auto child : children_) {
-            int status;
-            while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+        for (auto &child : children_) {
+            if (child.read_fd >= 0) close(child.read_fd);
+            int status = 0;
+            while (waitpid(child.pid, &status, 0) < 0 && errno == EINTR) {}
         }
 #endif
     }
-    template<class Function> bool launch(Function function) {
-        if (limit_ == 1) { failed_ |= function() != 0; return !failed_; }
+
+    template<class Function> void launch(const std::string &module, Function function) {
+        if (limit_ == 1) {
+            std::string errors;
+            TaskReporter reporter(-1, &errors);
+            const int status = function(reporter);
+            if (status != 0) failures_.push_back({module, errors.empty() ? "Module task returned failure.\n" : std::move(errors)});
+            return;
+        }
 #ifndef _WIN32
-        while (children_.size() >= limit_) reap();
-        if (failed_) return false;
+        while (children_.size() >= limit_) waitForEvent();
+        int pipes[2];
+        if (pipe(pipes) != 0) throw VulException("Failed to create module task progress pipe");
         std::cout.flush();
         std::cerr.flush();
-        const auto child = fork();
-        if (child < 0) throw VulException("Failed to start module task");
-        if (child == 0) {
+        const pid_t pid = fork();
+        if (pid < 0) {
+            close(pipes[0]); close(pipes[1]);
+            throw VulException("Failed to start module task");
+        }
+        const unsigned worker = next_worker_++ % limit_;
+        if (pid == 0) {
+            close(pipes[0]);
             int status = 1;
-            try { status = function(); }
-            catch (const std::exception& error) { std::cerr << "ERROR: " << error.what() << '\n'; }
-            catch (...) { std::cerr << "ERROR: Unknown module task failure\n"; }
-            std::cout.flush();
-            std::cerr.flush();
+            TaskReporter reporter(pipes[1]);
+            try { status = function(reporter); }
+            catch (const std::exception& error) { reporter.error(std::string("ERROR: ") + error.what() + "\n"); }
+            catch (...) { reporter.error("ERROR: Unknown module task failure\n"); }
+            close(pipes[1]);
             _exit(status);
         }
-        children_.insert(child);
+        close(pipes[1]);
+        const int flags = fcntl(pipes[0], F_GETFL, 0);
+        if (flags >= 0) fcntl(pipes[0], F_SETFL, flags | O_NONBLOCK);
+        children_.push_back({pid, pipes[0], worker, module});
+        dashboard_->start(worker, module, "starting");
 #endif
-        return true;
     }
+
     bool finish() {
 #ifndef _WIN32
-        while (!children_.empty()) reap();
+        while (!children_.empty()) waitForEvent();
 #endif
-        return !failed_;
+        return failures_.empty();
     }
+    const std::vector<Failure> &failures() const { return failures_; }
+
+private:
+    unsigned limit_;
+    std::unique_ptr<TaskDashboard> dashboard_;
+    std::vector<Failure> failures_;
+#ifndef _WIN32
+    struct Child {
+        pid_t pid;
+        int read_fd;
+        unsigned worker;
+        std::string module;
+        std::vector<char> received;
+        std::string errors;
+    };
+    std::vector<Child> children_;
+    unsigned next_worker_ = 0;
+
+    void consume(Child &child) {
+        char buffer[4096];
+        for (;;) {
+            const ssize_t count = read(child.read_fd, buffer, sizeof(buffer));
+            if (count > 0) child.received.insert(child.received.end(), buffer, buffer + count);
+            else if (count == 0) { close(child.read_fd); child.read_fd = -1; break; }
+            else if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            else if (errno == EINTR) continue;
+            else { close(child.read_fd); child.read_fd = -1; break; }
+        }
+        std::size_t offset = 0;
+        while (child.received.size() - offset >= 5) {
+            std::uint32_t size = 0;
+            std::memcpy(&size, child.received.data() + offset + 1, sizeof(size));
+            if (size > 16 * 1024 * 1024) throw VulException("Invalid module task progress record");
+            if (child.received.size() - offset < 5 + size) break;
+            const std::string message(child.received.data() + offset + 5, size);
+            if (child.received[offset] == 'P') dashboard_->update(child.worker, message);
+            else if (child.received[offset] == 'E') child.errors += message;
+            offset += 5 + size;
+        }
+        if (offset) child.received.erase(child.received.begin(), child.received.begin() + offset);
+    }
+    void consumeAll() { for (auto &child : children_) if (child.read_fd >= 0) consume(child); }
+    void reapFinished() {
+        for (;;) {
+            int status = 0;
+            const pid_t pid = waitpid(-1, &status, WNOHANG);
+            if (pid == 0) return;
+            if (pid < 0) { if (errno == EINTR) continue; if (errno == ECHILD) return; throw VulException("Failed to wait for module task"); }
+            const auto found = std::find_if(children_.begin(), children_.end(), [pid](const Child &child) { return child.pid == pid; });
+            if (found == children_.end()) continue;
+            while (found->read_fd >= 0) consume(*found);
+            const bool failed = !WIFEXITED(status) || WEXITSTATUS(status) != 0;
+            if (failed) {
+                if (WIFSIGNALED(status)) found->errors += "Terminated by signal " + std::to_string(WTERMSIG(status)) + "\n";
+                if (found->errors.empty()) found->errors = "Module task returned failure without diagnostic output.\n";
+                failures_.push_back({found->module, std::move(found->errors)});
+            }
+            dashboard_->complete(found->worker, failed);
+            children_.erase(found);
+        }
+    }
+    void waitForEvent() {
+        consumeAll();
+        reapFinished();
+        if (children_.empty()) return;
+        std::vector<pollfd> poll_fds;
+        for (const auto &child : children_) if (child.read_fd >= 0) poll_fds.push_back({child.read_fd, POLLIN | POLLHUP, 0});
+        if (!poll_fds.empty()) {
+            int result;
+            do { result = poll(poll_fds.data(), poll_fds.size(), 100); } while (result < 0 && errno == EINTR);
+            if (result < 0) throw VulException("Failed to read module task progress");
+        }
+        consumeAll();
+        reapFinished();
+    }
+#endif
 };
 } // namespace
 
@@ -189,7 +375,6 @@ static int runVulRTLGen(int argc, char * argv[]) {
     string lib_dir = parser.get<std::string>("--lib");
     bool force = parser.get<bool>("--force");
     const unsigned processes = positiveCount(parser.get<std::string>("-j"), "-j");
-    ModuleTasks tasks(processes);
 
     if (top_file.empty() && main_file.empty()) {
         std::cerr << "Error: Specify -t/--top, -m/--main, or a TestMain with TOP(...)." << std::endl;
@@ -219,10 +404,12 @@ static int runVulRTLGen(int argc, char * argv[]) {
         return 1;
     }
 
-    // gen module
+    // Determine the unique generated modules before launching workers so the
+    // dashboard can display a stable total task count.
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
     std::unordered_set<std::string> generated_module_paths;
     std::unordered_set<std::string> copied_resources;
+    std::vector<shared_ptr<VulStaticModuleInstance>> modules;
     bfs_queue.push_back(project.top_module_instance);
     while (!bfs_queue.empty()) {
         auto mod_instance = bfs_queue.front();
@@ -235,11 +422,19 @@ static int runVulRTLGen(int argc, char * argv[]) {
         if (!generated_module_paths.insert(hls_path).second) {
             continue;
         }
+        modules.push_back(std::move(mod_instance));
+    }
+
+    ModuleTasks tasks(processes, static_cast<unsigned>(modules.size()));
+    for (const auto &mod_instance : modules) {
+        const std::string hls_path = mod_instance->rtlHlsPath();
 
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
-        std::cout << "[vulrtlgen] module " << mod_instance->simClassName()
-                  << ": generating RTL skeleton and API-inline logic\n";
+        if (processes == 1) {
+            std::cout << "[vulrtlgen] module " << mod_instance->simClassName()
+                      << ": generating RTL skeleton and API-inline logic\n";
+        }
         auto codes = rtlgen::genModuleRTL(
             *mod_instance,
             project.global_configlib,
@@ -254,7 +449,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
             std::filesystem::create_directories(destination.parent_path());
             std::filesystem::copy_file(source, destination);
         }
-        if (!tasks.launch([&]() -> int {
+        tasks.launch(mod_instance->simClassName(), [&](TaskReporter &reporter) -> int {
         const auto hls_out_path = out_path / hls_path;
         // The frontend still needs a source file; remove it on every exit in release mode.
         struct IntermediateCleanup {
@@ -269,11 +464,15 @@ static int runVulRTLGen(int argc, char * argv[]) {
         const auto sv_path = mod_instance->rtlSvPath();
         rtlgen::LogicRTLResult rtlzz_result =
             rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir,
-                                  1024, release, processes > 1);
+                                  1024, release,
+                                  processes > 1
+                                      ? std::function<void(const std::string &)>([&reporter](const std::string &step) { reporter.progress(step); })
+                                      : std::function<void(const std::string &)>{});
         if (!rtlzz_result.ok) {
+            std::filesystem::path error_dbg_path;
             if (!release) {
                 const std::filesystem::path sv_out_path = out_path / sv_path;
-                const std::filesystem::path error_dbg_path =
+                error_dbg_path =
                     (sv_out_path.has_parent_path() ? sv_out_path.parent_path() : out_path) / "error.dbg";
                 if (rtlzz_result.error_debug_codelines.empty()) {
                     rtlzz_result.error_debug_codelines.push_back(
@@ -281,19 +480,20 @@ static int runVulRTLGen(int argc, char * argv[]) {
                     );
                 }
                 writeLinesToFile(rtlzz_result.error_debug_codelines, error_dbg_path.string());
-                std::cerr << "RTLzz error signal(s): " << joinNames(rtlzz_result.error_signal_names) << std::endl;
-                std::cerr << "RTLzz error debug file: " << error_dbg_path.string() << std::endl;
+            }
+            std::string failure;
+            if (!release) {
+                failure += "RTLzz error signal(s): " + joinNames(rtlzz_result.error_signal_names) + "\n";
+                failure += "RTLzz error debug file: " + error_dbg_path.string() + "\n";
                 if (!rtlzz_result.error_signal_debug_text.empty()) {
-                    std::cerr << "RTLzz error signal debug:" << std::endl;
-                    std::cerr << rtlzz_result.error_signal_debug_text;
-                    if (rtlzz_result.error_signal_debug_text.back() != '\n') {
-                        std::cerr << std::endl;
-                    }
+                    failure += "RTLzz error signal debug:\n" + rtlzz_result.error_signal_debug_text;
+                    if (failure.back() != '\n') failure += '\n';
                 } else {
-                    std::cerr << "RTLzz error signal debug: <not provided by RTLzz>" << std::endl;
+                    failure += "RTLzz error signal debug: <not provided by RTLzz>\n";
                 }
             }
-            std::cerr << "Error: " << rtlzz_result.error << std::endl;
+            failure += "Error: " + rtlzz_result.error + "\n";
+            reporter.error(failure);
             return 1;
         }
         std::vector<std::string> rtlzz_debug_codelines =
@@ -304,9 +504,18 @@ static int runVulRTLGen(int argc, char * argv[]) {
             writeLinesToFile(rtlzz_debug_codelines, (out_path / (sv_path + ".dbg")).string());
         }
         return 0;
-        })) return 1;
+        });
     }
-    if (!tasks.finish()) return 1;
+    if (!tasks.finish()) {
+        std::cerr << "[vulrtlgen] Summary: " << tasks.failures().size() << " module task(s) failed\n";
+        for (const auto &failure : tasks.failures()) {
+            std::cerr << "[vulrtlgen] Failed module " << failure.module << ":\n" << failure.output;
+            if (failure.output.empty() || failure.output.back() != '\n') std::cerr << '\n';
+        }
+        return 1;
+    }
+
+    std::cout << "[vulrtlgen] Summary:\n";
 
     if (!release && !main_file.empty()) {
         VulErrorContextGuard _err("generating Verilator TestMain cpp");

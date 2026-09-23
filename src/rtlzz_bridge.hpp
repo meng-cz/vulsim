@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <functional>
 
 struct RTLzzLogicRTLResult {
     bool ok = false;
@@ -35,5 +36,5 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::vector<std::pair<std::string, std::string>> &port_bindings,
     int unroll_limit = 1024,
     bool release = false,
-    bool concurrent_progress = false
+    std::function<void(const std::string &)> progress_callback = {}
 );

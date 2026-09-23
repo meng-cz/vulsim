@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
@@ -37,8 +38,7 @@ std::string displayModuleName(const std::string &top_function) {
 
 class ProgressLine {
 public:
-    explicit ProgressLine(std::string prefix, bool concurrent)
-        : prefix_(std::move(prefix)), concurrent_(concurrent) {}
+    explicit ProgressLine(std::string prefix) : prefix_(std::move(prefix)) {}
 
     ~ProgressLine() {
         finish();
@@ -46,10 +46,6 @@ public:
 
     void update(const std::string &step) {
         const std::string message = prefix_ + step;
-        if (concurrent_) {
-            std::cout << message + "\n" << std::flush;
-            return;
-        }
         std::cout << '\r' << message;
         if (message.size() < width_) {
             std::cout << std::string(width_ - message.size(), ' ')
@@ -71,7 +67,6 @@ private:
     std::string prefix_;
     std::size_t width_ = 0;
     bool active_ = false;
-    bool concurrent_ = false;
 };
 
 std::vector<std::string> collectErrorSignalNames(
@@ -99,7 +94,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::vector<std::pair<std::string, std::string>> &port_bindings,
     int unroll_limit,
     bool release,
-    bool concurrent_progress
+    std::function<void(const std::string &)> progress_callback
 ) {
     std::ifstream input(source_file);
     if (!input) {
@@ -130,10 +125,15 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.clang_args.push_back("-std=c++20");
     options.rtl_debug = release ? rtlzz::RtlDebugMode::None : rtlzz::RtlDebugMode::Text;
     const std::string module_name = displayModuleName(top_function);
-    ProgressLine progress_line("[vulrtlgen] module " + module_name + ": ", concurrent_progress);
-    options.progress_callback = [&progress_line](const std::string &step) {
-        progress_line.update(step);
-    };
+    std::unique_ptr<ProgressLine> progress_line;
+    if (progress_callback) {
+        options.progress_callback = std::move(progress_callback);
+    } else {
+        progress_line = std::make_unique<ProgressLine>("[vulrtlgen] module " + module_name + ": ");
+        options.progress_callback = [&progress_line](const std::string &step) {
+            progress_line->update(step);
+        };
+    }
 
     const auto source_parent = source_path.parent_path();
     if (!source_parent.empty()) {
@@ -141,7 +141,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     }
 
     auto result = rtlzz::compileToRtl(std::move(options));
-    progress_line.finish();
+    if (progress_line) progress_line->finish();
     RTLzzLogicRTLResult out;
     if (!result.ok()) {
         out.error = result.error;

@@ -17,6 +17,8 @@
 #include "errormsg.hpp"
 #include "type.h"
 
+#include <functional>
+
 #include "bundlelib.h"
 #include "configlib.h"
 #include "module.h"
@@ -63,7 +65,7 @@ LogicRTLResult appendLogicRTL(
     const string &lib_include_dir,
     int unroll_limit = 1024,
     bool release = false,
-    bool concurrent_progress = false
+    std::function<void(const std::string &)> progress_callback = {}
 );
 
 vector<string> genVerilatorTestMainCpp(

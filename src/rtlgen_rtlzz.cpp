@@ -45,7 +45,7 @@ LogicRTLResult appendLogicRTL(
     const string &lib_include_dir,
     int unroll_limit,
     bool release,
-    bool concurrent_progress
+    std::function<void(const std::string &)> progress_callback
 ) {
     if (!result.has_logic_submodule || result.logic_hls_codes.empty()) {
         return {};
@@ -60,7 +60,7 @@ LogicRTLResult appendLogicRTL(
         result.logic_port_bindings,
         unroll_limit,
         release,
-        concurrent_progress
+        std::move(progress_callback)
     );
     if (!logic_rtl.ok) {
         LogicRTLResult out;
