@@ -355,6 +355,10 @@ static int runVulRTLGen(int argc, char * argv[]) {
         .help("emit RTL without intermediate C++ or debug files")
         .default_value(false)
         .implicit_value(true);
+    parser.add_argument("--circt")
+        .help("emit RTL through the CIRCT HW/Comb backend")
+        .default_value(false)
+        .implicit_value(true);
     parser.add_argument("-f", "--force")
         .help("overwrite a non-empty output directory without prompting")
         .default_value(false)
@@ -368,6 +372,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
     }
 
     const bool release = parser.get<bool>("--release");
+    const bool use_circt = parser.get<bool>("--circt");
     string top_file = parser.get<std::string>("--top");
     string main_file = parser.get<std::string>("--main");
     string out_dir = parser.get<std::string>("--out");
@@ -464,7 +469,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
         const auto sv_path = mod_instance->rtlSvPath();
         rtlgen::LogicRTLResult rtlzz_result =
             rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir,
-                                  1024, release,
+                                  1024, release, use_circt,
                                   processes > 1
                                       ? std::function<void(const std::string &)>([&reporter](const std::string &step) { reporter.progress(step); })
                                       : std::function<void(const std::string &)>{});

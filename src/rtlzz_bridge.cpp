@@ -94,6 +94,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::vector<std::pair<std::string, std::string>> &port_bindings,
     int unroll_limit,
     bool release,
+    bool use_circt,
     std::function<void(const std::string &)> progress_callback
 ) {
     std::ifstream input(source_file);
@@ -120,6 +121,7 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     options.vullib_dir = lib_include_dir;
     options.top_function = top_function;
     options.rtl_module_body = true;
+    options.use_circt = use_circt;
     options.rtl_port_bindings = port_bindings;
     options.unroll_limit = unroll_limit;
     options.clang_args.push_back("-std=c++20");

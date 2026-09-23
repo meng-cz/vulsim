@@ -65,6 +65,7 @@ LogicRTLResult appendLogicRTL(
     const string &lib_include_dir,
     int unroll_limit = 1024,
     bool release = false,
+    bool use_circt = false,
     std::function<void(const std::string &)> progress_callback = {}
 );
 

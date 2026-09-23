@@ -36,5 +36,6 @@ RTLzzLogicRTLResult generateLogicRTLWithRTLzz(
     const std::vector<std::pair<std::string, std::string>> &port_bindings,
     int unroll_limit = 1024,
     bool release = false,
+    bool use_circt = false,
     std::function<void(const std::string &)> progress_callback = {}
 );
