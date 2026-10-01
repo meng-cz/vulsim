@@ -1041,7 +1041,7 @@ constexpr int_operand_int_t<Operand> get_int_operand_value(const Operand& operan
 }
 
 template <uint32_t Width, typename LhsOperand, typename RhsOperand, typename CarryOperand>
-    requires(Width > 1 &&
+    requires(Width > 0 &&
              IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID &&
              IntOperandTraits<std::remove_cvref_t<RhsOperand>>::VALID &&
              !IntOperandTraits<std::remove_cvref_t<LhsOperand>>::IS_SIGNED &&
@@ -1052,7 +1052,7 @@ template <uint32_t Width, typename LhsOperand, typename RhsOperand, typename Car
               (IntOperandTraits<std::remove_cvref_t<CarryOperand>>::VALID &&
                !IntOperandTraits<std::remove_cvref_t<CarryOperand>>::IS_SIGNED &&
                IntOperandTraits<std::remove_cvref_t<CarryOperand>>::BIT_WIDTH == 1)))
-constexpr Int<Width> AddCarry(const LhsOperand& lhs, const RhsOperand& rhs,
+constexpr Int<Width + 1> AddCarry(const LhsOperand& lhs, const RhsOperand& rhs,
                               const CarryOperand& carry) {
     const bool carry_bit = [&] {
         if constexpr (std::is_same_v<std::remove_cvref_t<CarryOperand>, bool>)
@@ -1060,8 +1060,39 @@ constexpr Int<Width> AddCarry(const LhsOperand& lhs, const RhsOperand& rhs,
         else
             return get_int_operand_value(carry).template to<bool>();
     }();
-    return Int<Width>(get_int_operand_value(lhs) + get_int_operand_value(rhs) +
-                      Int<1>(carry_bit));
+    return Int<Width + 1>(get_int_operand_value(lhs)) +
+           Int<Width + 1>(get_int_operand_value(rhs)) +
+           Int<Width + 1>(carry_bit);
+}
+
+template <uint32_t Width, typename LhsOperand, typename RhsOperand>
+    requires requires(const LhsOperand& lhs, const RhsOperand& rhs) {
+        AddCarry<Width>(lhs, rhs, false);
+    }
+constexpr auto AddCarry(const LhsOperand& lhs, const RhsOperand& rhs) {
+    return AddCarry<Width>(lhs, rhs, false);
+}
+
+template <typename LhsOperand, typename RhsOperand, typename CarryOperand>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID &&
+             requires(const LhsOperand& lhs, const RhsOperand& rhs,
+                      const CarryOperand& carry) {
+                 AddCarry<int_operand_bit_width_v<LhsOperand>>(lhs, rhs, carry);
+             })
+constexpr auto AddCarry(const LhsOperand& lhs, const RhsOperand& rhs,
+                        const CarryOperand& carry) {
+    constexpr uint32_t Width = int_operand_bit_width_v<LhsOperand>;
+    return AddCarry<Width>(lhs, rhs, carry);
+}
+
+template <typename LhsOperand, typename RhsOperand>
+    requires(IntOperandTraits<std::remove_cvref_t<LhsOperand>>::VALID &&
+             requires(const LhsOperand& lhs, const RhsOperand& rhs) {
+                 AddCarry<int_operand_bit_width_v<LhsOperand>>(lhs, rhs, false);
+             })
+constexpr auto AddCarry(const LhsOperand& lhs, const RhsOperand& rhs) {
+    constexpr uint32_t Width = int_operand_bit_width_v<LhsOperand>;
+    return AddCarry<Width>(lhs, rhs, false);
 }
 
 template <uint32_t ShiftBitWidth>
@@ -1100,7 +1131,7 @@ template <typename LhsOperand, typename RhsOperand>
 constexpr auto operator+(const LhsOperand& lhs_operand, const RhsOperand& rhs_operand) {
     constexpr uint32_t LHS_BIT_WIDTH = int_operand_bit_width_v<LhsOperand>;
     constexpr uint32_t RHS_BIT_WIDTH = int_operand_bit_width_v<RhsOperand>;
-    constexpr uint32_t RESULT_BIT_WIDTH = ((LHS_BIT_WIDTH > RHS_BIT_WIDTH) ? LHS_BIT_WIDTH : RHS_BIT_WIDTH) + 1;
+    constexpr uint32_t RESULT_BIT_WIDTH = (LHS_BIT_WIDTH > RHS_BIT_WIDTH) ? LHS_BIT_WIDTH : RHS_BIT_WIDTH;
     constexpr uint32_t LHS_WORDS = Int<LHS_BIT_WIDTH>::NUM_WORDS;
     constexpr uint32_t RHS_WORDS = Int<RHS_BIT_WIDTH>::NUM_WORDS;
     constexpr uint32_t MAX_WORDS = (LHS_WORDS > RHS_WORDS) ? LHS_WORDS : RHS_WORDS;

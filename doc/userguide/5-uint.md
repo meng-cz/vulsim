@@ -129,9 +129,15 @@ Int<24> y = Cat(Int<8>(0x12), Int<8>(0x34), Int<8>(0x56));
 ## 5.6 算术运算
 
 加法：
-- `Int<A> + Int<B> -> Int<max(A, B) + 1>`。
+- `Int<A> + Int<B> -> Int<max(A, B)>`；结果宽度不扩展，超出结果位宽的进位会被丢弃。
 - `Int<W> + integral` 会先把整数构造成 `Int<W>`，再复用加法。
 - 加法只接受无符号 `Int/Ref`，不接受 `.sint()`。
+
+若需要保留加法进位，使用自由函数 `AddCarry`：
+- `AddCarry(a, b)` 和 `AddCarry(a, b, carry)` 都返回 `Int<N + 1>`，其中 `a`、`b` 必须是相同位宽 `N` 的无符号 `Int/Ref`，且 `N > 0`。
+- 二参数形式等价于进位输入为 `false`；三参数形式的 `carry` 可为 `bool` 或一位无符号 `Int/Ref`。
+- 位宽可从操作数推导，也可显式提供：`AddCarry<N>(a, b)`、`AddCarry<N>(a, b, carry)`。
+- 与 `+` 不同，`AddCarry` 将 `a`、`b` 的和及输入进位都纳入 `N + 1` 位结果，不丢弃最终进位。
 
 减法：
 - `Int<A> - Int<B> -> Int<max(A, B)>`。
@@ -149,7 +155,9 @@ Int<24> y = Cat(Int<8>(0x12), Int<8>(0x34), Int<8>(0x56));
 
 ```cpp
 Int<8> a = 200, b = 100;
-auto s = a + b;                         // Int<9>
+auto s = a + b;                         // Int<8>，结果为 44，最高位进位被丢弃
+auto s_with_carry = AddCarry(a, b);     // Int<9>，结果为 300
+auto s_with_carry_in = AddCarry<8>(a, b, true); // Int<9>，结果为 301
 auto d = a - b;                         // Int<8>
 auto n = -a;                            // Int<8>
 auto p0 = Int<8>(0xF0) * Int<8>(2);     // Int<16> 无符号乘法

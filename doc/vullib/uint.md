@@ -127,12 +127,30 @@ constexpr auto Cat(const Operands&... operands);
 加法：
 
 ```cpp
-Int<A> + Int<B> -> Int<max(A, B) + 1>
-Int<W> + integral -> Int<W + 1>
-integral + Int<W> -> Int<W + 1>
+Int<A> + Int<B> -> Int<max(A, B)>
+Int<W> + integral -> Int<W>
+integral + Int<W> -> Int<W>
 ```
 
-只接受无符号 `Int/Ref`。标准整数会先构造成另一侧同宽 `Int`，再复用主重载。
+只接受无符号 `Int/Ref`。标准整数会先构造成另一侧同宽 `Int`，再复用主重载。加法结果不扩宽，超出结果位宽的最高位进位会被丢弃。
+
+需要保留进位时使用 `AddCarry`：
+
+```cpp
+AddCarry(a, b) -> Int<N + 1>
+AddCarry(a, b, carry) -> Int<N + 1>
+AddCarry<N>(a, b) -> Int<N + 1>
+AddCarry<N>(a, b, carry) -> Int<N + 1>
+```
+
+`N` 是 `a`、`b` 的输入位宽，要求两者是等宽无符号 `Int/Ref`，且 `N > 0`。位宽既可从操作数推导，也可显式写为模板实参。二参数形式等价于进位输入 `false`；三参数形式的 `carry` 接受 `bool` 或一位无符号 `Int/Ref`。结果容纳 `a + b + carry`，宽度为 `N + 1`。
+
+```cpp
+Int<8> a = 200, b = 100;
+auto wrapped = a + b;                  // Int<8>，值为 44
+auto full_sum = AddCarry(a, b);        // Int<9>，值为 300
+auto with_carry = AddCarry<8>(a, b, true); // Int<9>，值为 301
+```
 
 减法：
 

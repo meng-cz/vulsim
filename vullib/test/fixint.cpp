@@ -457,71 +457,70 @@ void test_unsigned_addition() {
     Int<8> a = 200;
     Int<8> b = 100;
     auto sum = a + b;
-    static_assert(std::is_same_v<decltype(sum), Int<9>>);
-    expect_eq(sum, Int<9>(300));
+    static_assert(std::is_same_v<decltype(sum), Int<8>>);
+    expect_eq(sum, Int<8>(44));
 
     Int<4> c = 0xF;
     Int<4> d = 0x1;
     auto sum_small = c + d;
-    static_assert(std::is_same_v<decltype(sum_small), Int<5>>);
-    expect_eq(sum_small, Int<5>(0x10));
+    static_assert(std::is_same_v<decltype(sum_small), Int<4>>);
+    expect_eq(sum_small, Int<4>(0));
 
     Int<8> e = 0xD6;
     auto sum_slice = e.at<7, 4>() + e.at<3, 0>();
-    static_assert(std::is_same_v<decltype(sum_slice), Int<5>>);
-    expect_eq(sum_slice, Int<5>(0x13));
+    static_assert(std::is_same_v<decltype(sum_slice), Int<4>>);
+    expect_eq(sum_slice, Int<4>(3));
 
     const Int<8> ce = e;
     auto sum_const_slice = ce.at<7, 4>() + ce.at<5, 2>();
-    static_assert(std::is_same_v<decltype(sum_const_slice), Int<5>>);
-    expect_eq(sum_const_slice, Int<5>(0x12));
+    static_assert(std::is_same_v<decltype(sum_const_slice), Int<4>>);
+    expect_eq(sum_const_slice, Int<4>(2));
 
     Int<8> bits = 0b00000011;
     auto bit_sum = bits.at<0>() + bits.at<1>();
-    static_assert(std::is_same_v<decltype(bit_sum), Int<2>>);
-    expect_eq(bit_sum, Int<2>(2));
+    static_assert(std::is_same_v<decltype(bit_sum), Int<1>>);
+    expect_eq(bit_sum, Int<1>(0));
 
     auto mixed = bits.at<0>() + e.at<7, 4>();
-    static_assert(std::is_same_v<decltype(mixed), Int<5>>);
-    expect_eq(mixed, Int<5>(0x0E));
+    static_assert(std::is_same_v<decltype(mixed), Int<4>>);
+    expect_eq(mixed, Int<4>(0x0E));
 
     auto int_plus_u = e + uint16_t(1);
     auto u_plus_int = uint16_t(1) + e;
-    static_assert(std::is_same_v<decltype(int_plus_u), Int<9>>);
-    static_assert(std::is_same_v<decltype(u_plus_int), Int<9>>);
-    expect_eq(int_plus_u, Int<9>(0x0D7));
-    expect_eq(u_plus_int, Int<9>(0x0D7));
+    static_assert(std::is_same_v<decltype(int_plus_u), Int<8>>);
+    static_assert(std::is_same_v<decltype(u_plus_int), Int<8>>);
+    expect_eq(int_plus_u, Int<8>(0xD7));
+    expect_eq(u_plus_int, Int<8>(0xD7));
 
     auto int_plus_s = e + int16_t(-1);
     auto s_plus_int = int16_t(-1) + e;
-    expect_eq(int_plus_s, Int<9>(0x1D5));
-    expect_eq(s_plus_int, Int<9>(0x1D5));
+    expect_eq(int_plus_s, Int<8>(0xD5));
+    expect_eq(s_plus_int, Int<8>(0xD5));
 
     auto slice_plus_u = e.at<7, 4>() + uint8_t(2);
     auto u_plus_slice = uint8_t(2) + e.at<7, 4>();
-    static_assert(std::is_same_v<decltype(slice_plus_u), Int<5>>);
-    static_assert(std::is_same_v<decltype(u_plus_slice), Int<5>>);
-    expect_eq(slice_plus_u, Int<5>(0x0F));
-    expect_eq(u_plus_slice, Int<5>(0x0F));
+    static_assert(std::is_same_v<decltype(slice_plus_u), Int<4>>);
+    static_assert(std::is_same_v<decltype(u_plus_slice), Int<4>>);
+    expect_eq(slice_plus_u, Int<4>(0x0F));
+    expect_eq(u_plus_slice, Int<4>(0x0F));
 
     auto slice_plus_s = e.at<3, 0>() + int8_t(-2);
     auto s_plus_slice = int8_t(-2) + e.at<3, 0>();
-    expect_eq(slice_plus_s, Int<5>(0x14));
-    expect_eq(s_plus_slice, Int<5>(0x14));
+    expect_eq(slice_plus_s, Int<4>(4));
+    expect_eq(s_plus_slice, Int<4>(4));
 
     auto bit_plus_u = bits.at<0>() + uint8_t(1);
     auto u_plus_bit = uint8_t(1) + bits.at<0>();
-    static_assert(std::is_same_v<decltype(bit_plus_u), Int<2>>);
-    static_assert(std::is_same_v<decltype(u_plus_bit), Int<2>>);
-    expect_eq(bit_plus_u, Int<2>(2));
-    expect_eq(u_plus_bit, Int<2>(2));
+    static_assert(std::is_same_v<decltype(bit_plus_u), Int<1>>);
+    static_assert(std::is_same_v<decltype(u_plus_bit), Int<1>>);
+    expect_eq(bit_plus_u, Int<1>(0));
+    expect_eq(u_plus_bit, Int<1>(0));
 
     Int<64> all_ones = ~uint64_t(0);
     Int<1> one = 1;
     auto carry64 = all_ones + one;
-    static_assert(std::is_same_v<decltype(carry64), Int<65>>);
-    expect_eq(Int<64>(carry64.at<63, 0>()), Int<64>(0));
-    expect_eq(Int<1>(carry64.at<64>()), Int<1>(1));
+    static_assert(std::is_same_v<decltype(carry64), Int<64>>);
+    expect_eq(carry64, Int<64>(0));
 
     Int<130> wide_a = 0;
     Int<130> wide_b = 0;
@@ -529,18 +528,16 @@ void test_unsigned_addition() {
     wide_b.at<0>() = true;
 
     auto wide_sum = wide_a + wide_b;
-    static_assert(std::is_same_v<decltype(wide_sum), Int<131>>);
-    expect_eq(Int<130>(wide_sum.at<129, 0>()), Int<130>(0));
-    expect_eq(Int<1>(wide_sum.at<130>()), Int<1>(1));
+    static_assert(std::is_same_v<decltype(wide_sum), Int<130>>);
+    expect_eq(wide_sum, Int<130>(0));
 
     Int<130> wide_c = 0;
     wide_c.at<129, 0>() = Int<130>(-1);
     auto wide_plus_s = wide_c + int8_t(-1);
     auto s_plus_wide = int8_t(-1) + wide_c;
-    static_assert(std::is_same_v<decltype(wide_plus_s), Int<131>>);
-    static_assert(std::is_same_v<decltype(s_plus_wide), Int<131>>);
-    expect_eq(Int<130>(wide_plus_s.at<129, 0>()), Int<130>((Int<130>(wide_c.at<129, 0>()) + Int<130>(int8_t(-1))).at<129, 0>()));
-    expect_eq(Int<1>(wide_plus_s.at<130>()), Int<1>(1));
+    static_assert(std::is_same_v<decltype(wide_plus_s), Int<130>>);
+    static_assert(std::is_same_v<decltype(s_plus_wide), Int<130>>);
+    expect_eq(wide_plus_s, Int<130>(-2));
     expect_eq(s_plus_wide, wide_plus_s);
 
     static_assert(HasFixintAdd<Int<8>, Int<4>>);
@@ -558,6 +555,41 @@ void test_unsigned_addition() {
                                 decltype(std::declval<Int<8>&>().template at<3, 0>())>);
     static_assert(!HasFixintAdd<decltype(std::declval<Int<8>>().sint()), int>);
     static_assert(!HasFixintAdd<int, decltype(std::declval<Int<8>>().sint())>);
+}
+
+void test_add_carry() {
+    Int<8> a = 255;
+    Int<8> b = 0;
+    auto two_args = AddCarry(a, b);
+    auto three_args = AddCarry(a, b, true);
+    auto explicit_width = AddCarry<8>(a, b, Int<1>(1));
+    auto explicit_two_args = AddCarry<8>(a, b);
+    static_assert(std::is_same_v<decltype(two_args), Int<9>>);
+    static_assert(std::is_same_v<decltype(three_args), Int<9>>);
+    expect_eq(two_args, Int<9>(255));
+    expect_eq(three_args, Int<9>(256));
+    expect_eq(explicit_width, three_args);
+    expect_eq(explicit_two_args, two_args);
+
+    auto one_bit = AddCarry(Int<1>(1), Int<1>(1), true);
+    static_assert(std::is_same_v<decltype(one_bit), Int<2>>);
+    expect_eq(one_bit, Int<2>(3));
+    expect_eq(AddCarry(Int<1>(1), Int<1>(1)), Int<2>(2));
+
+    Int<64> all_ones = ~uint64_t(0);
+    auto boundary = AddCarry(all_ones, Int<64>(0), true);
+    static_assert(std::is_same_v<decltype(boundary), Int<65>>);
+    expect_eq(boundary, Int<65>(all_ones) + Int<65>(1));
+
+    Int<130> wide = Int<130>(-1);
+    auto wide_result = AddCarry(wide, Int<130>(0), Int<1>(1));
+    static_assert(std::is_same_v<decltype(wide_result), Int<131>>);
+    expect_eq(wide_result, Int<131>(wide) + Int<131>(1));
+
+    Int<8> bits = 3;
+    auto from_bits = AddCarry(bits.at<0>(), bits.at<1>());
+    static_assert(std::is_same_v<decltype(from_bits), Int<2>>);
+    expect_eq(from_bits, Int<2>(2));
 }
 
 void test_unsigned_subtraction() {
@@ -1334,6 +1366,7 @@ int main() {
     test_signed_view_api_and_traits();
     test_signed_view_assignment();
     test_unsigned_addition();
+    test_add_carry();
     test_unsigned_subtraction();
     test_multiplication();
     test_bitwise_ops();

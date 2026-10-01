@@ -90,7 +90,9 @@ TICK_IMPL() {
         S2S3RegData s3;
 
         s3.low16 = s2.p0.at<15, 0>();
-        s3.mid = s2.p0.at<31, 16>() + s2.p1 + s2.p2; // 16wid + 32wid + 32wid = 34wid
+        Int<32> p0_high = s2.p0.at<31, 16>();
+        Int<33> mid_low = AddCarry(p0_high, s2.p1);
+        s3.mid = AddCarry(mid_low, Int<33>(s2.p2)); // 16-bit + 32-bit + 32-bit sum, retained in 34 bits
         s3.high_base = s2.p3;
 
         s3reg.setnext(s3);
@@ -102,7 +104,8 @@ TICK_IMPL() {
     if (s3valid) {
         S2S3RegData s3 = s3reg;
         
-        Int<33> high = s3.high_base + s3.mid.at<33, 16>();
+        Int<32> mid_high = s3.mid.at<33, 16>();
+        Int<33> high = AddCarry(s3.high_base, mid_high);
         Int<64> y = Cat(high.at<31, 0>(), s3.mid.at<15, 0>(), s3.low16);
         s3output(y.to<uint64_t>());
     };

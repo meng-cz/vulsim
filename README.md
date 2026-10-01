@@ -81,8 +81,8 @@ make -j8
 
 构建完成后会在 `build` 目录下生成如下文件：
 - `vulsimgen`：VulCPP 仿真代码生成工具，用于将 VulCPP 项目转换为可执行的仿真代码
-- `vulrtlgen`：VulCPP RTL代码生成工具，用于将 VulCPP 项目转换为可综合的RTL代码
-- `vullib`：VulCPP 仿真库目录，供生成的仿真代码链接使用，需要在使用工具时通过命令行参数指定该目录
+- `vulrtlgen`：VulCPP RTL 代码生成工具，用于将 VulCPP 项目转换为可综合的 RTL 代码
+- `vullib`：VulCPP 运行库目录，供生成的仿真/RTL代码使用；默认从当前目录下的 `./vullib` 读取，也可通过 `-l/--lib` 指定
 - `userguide`：用户手册文档目录
 - `example`：示例代码目录
 
@@ -91,29 +91,36 @@ make -j8
 ```bash
 # 生成仿真代码
 ./vulsimgen -m example/prodcon/Main.cpp
-# -m: 指定 Main 模块的头文件路径
-# -t: 可选，用于覆盖 Main 中通过 TOP(...) 声明的顶层模块路径
-# -p: 可选，用于覆盖 Main 中通过 PROJECT(...) 声明的项目根目录路径
-# -l: 指定 VulCPP 库文件的路径（默认./vullib/）
-# -o: 指定生成的仿真代码输出目录（默认./simout/）
-# -f/--force: 输出目录非空时不询问并自动清空；空目录可直接使用
+# -m/--main: 必需，指定 Main 测试文件
+# -t/--top: 可选，覆盖 Main 中 TOP(...) 声明的顶层模块路径
+# -p/--project: 可选，覆盖 Main 中 PROJECT(...) 声明的项目目录
+# -l/--lib: 运行库目录（默认 ./vullib）
+# -o/--out: 仿真代码输出目录（默认 ./simout）
+# -f/--force: 输出目录非空时跳过确认并清空；未指定时会询问
+# 可用 -T/--tracefile 或 --trace 配置追踪，用 -B/--breakfile 或 --break 配置断点
 
 # 编译生成的仿真代码 (build.sh 默认使用 g++)
 cd simout
 source build.sh
-# 运行仿真
+# 运行仿真（可执行文件名取 Main 文件的基本名）
 ./Main
 ```
 
 ```bash
-# 生成RTL代码
+# 生成 RTL 代码
 ./vulrtlgen -t example/prodcon/TopModule.hpp
-# -t: 指定顶层模块的路径
-# -l: 指定 VulCPP 库文件的路径（默认./vullib/）
-# -o: 指定生成的仿真代码输出目录（默认./rtlout/）
-# -f/--force: 输出目录非空时不询问并自动清空；空目录可直接使用
+# -t/--top: 指定顶层模块文件；也可用 -m/--main 指定带 TOP(...) 的 TestMain 文件
+# -p/--project: 项目目录（默认顶层模块文件所在目录）
+# -l/--lib: 运行库目录（默认 ./vullib）
+# -o/--out: RTL 输出目录（默认 ./rtlout）
+# -j: 并行模块生成数（默认 1）
+# -r/--release: 不保留中间 C++、调试文件和 TestMain C++ 文件
+# --circt: 通过 CIRCT HW/Comb 后端生成 RTL
+# -f/--force: 输出目录非空时跳过确认并清空；未指定时会询问
 ls -lah rtlout
 ```
+
+`vulrtlgen` 至少需要 `-t/--top` 或 `-m/--main` 之一；使用 `-m` 时，TestMain 中的 `TOP(...)` 可提供顶层模块路径。`-r/--release` 会省略中间文件，`--circt` 选择 CIRCT HW/Comb 后端。
 
 
 ## 开发文档：

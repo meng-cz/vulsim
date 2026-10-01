@@ -168,19 +168,22 @@ QUERY(status, Status);
 ```bash
 # 生成仿真代码
 ./vulsimgen -m example/prodcon/Main.cpp
-# -m: 指定 Main 模块的头文件路径
-# -t: 可选，用于覆盖 Main 中通过 TOP(...) 声明的顶层模块路径
-# -p: 可选，用于覆盖 Main 中通过 PROJECT(...) 声明的项目根目录路径
-# -l: 指定 VulCPP 库文件的路径（默认./vullib/）
-# -o: 指定生成的仿真代码输出目录（默认./sim_out/）
-# -f/--force: 输出目录非空时不询问并自动清空；空目录可直接使用
+# -m/--main: 必需，指定 Main 测试文件
+# -t/--top: 可选，覆盖 Main 中 TOP(...) 声明的顶层模块路径
+# -p/--project: 可选，覆盖 Main 中 PROJECT(...) 声明的项目目录
+# -l/--lib: 运行库目录（默认 ./vullib）
+# -o/--out: 仿真代码输出目录（默认 ./simout）
+# -f/--force: 输出目录非空时跳过确认并清空；未指定时会询问
+# 可用 -T/--tracefile 或 --trace 配置追踪，用 -B/--breakfile 或 --break 配置断点
 
 # 编译生成的仿真代码 (build.sh 默认使用 g++)
-cd sim_out
+cd simout
 source build.sh
-# 运行仿真
+# 运行仿真（可执行文件名取 Main 文件的基本名）
 ./Main
 ```
+
+生成器还支持 `-T/--tracefile` 或 `--trace` 指定追踪信号，`-B/--breakfile` 或 `--break` 指定断点；断点需要同时启用追踪。若输出目录非空，默认会询问是否清空，传入 `-f/--force` 可跳过询问并清空。`build.sh` 生成的可执行文件名是 Main 测试文件的基本名（例如 `Main.cpp` 对应 `Main`）。
 
 ## 1.4. 后续
 
