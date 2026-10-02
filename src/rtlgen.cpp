@@ -2446,6 +2446,7 @@ vector<string> genVerilatorTestMainCpp(
     out.push_back("#include <cstdlib>\n");
     out.push_back("#include <type_traits>\n");
     out.push_back("\n");
+    out.push_back("#include \"fixint.hpp\"\n");
     out.push_back("#include \"verilated.h\"\n");
     out.push_back("#include \"" + top_class_name + ".h\"\n");
     out.push_back("\n");

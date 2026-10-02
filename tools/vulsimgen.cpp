@@ -30,6 +30,19 @@
 #include <vector>
 #include <string>
 
+static std::string shellSingleQuote(const std::string &value) {
+    std::string quoted = "'";
+    for (char ch : value) {
+        if (ch == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += ch;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
 inline static void writeLinesToFile(const std::vector<std::string> &lines, const std::string &filepath) {
     const std::filesystem::path target_path(filepath);
     const std::filesystem::path parent_dir = target_path.parent_path();
@@ -283,6 +296,42 @@ int simgenStatic(const SimGenArgs &args) {
     build_script << build_cmd << "\n";
     build_script << "popd\n";
     build_script.close();
+
+    std::ofstream run_script((out_path / "run.sh").string());
+    if (!run_script.is_open()) {
+        throw VulException("Failed to create run script.");
+    }
+    run_script << "#!/usr/bin/env bash\n"
+                  "__vulsimgen_run_main() (\n"
+                  "set -euo pipefail\n"
+                  "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+                  "cd \"$SCRIPT_DIR\"\n"
+                  "echo \"Building " << projname << "\"\n"
+               << "g++ -std=c++20 -g -O2 main.cpp -I. -o " << shellSingleQuote(projname) << "\n"
+               << "exec " << shellSingleQuote("./" + projname) << " \"$@\"\n"
+                  ")\n"
+                  "__vulsimgen_run_dispatch() {\n"
+                  "  local status\n"
+                  "  if __vulsimgen_run_main \"$@\"; then status=0; else status=$?; fi\n"
+                  "  unset -f __vulsimgen_run_main __vulsimgen_run_dispatch\n"
+                  "  return \"$status\"\n"
+                  "}\n"
+                  "if [[ \"${BASH_SOURCE[0]}\" != \"$0\" ]]; then\n"
+                  "  if __vulsimgen_run_dispatch \"$@\"; then return 0; else return $?; fi\n"
+                  "fi\n"
+                  "__vulsimgen_run_dispatch \"$@\"\n"
+                  "exit $?\n";
+    run_script.close();
+    if (!run_script) {
+        throw VulException("Failed to write run script.");
+    }
+    std::filesystem::permissions(
+        out_path / "run.sh",
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+            std::filesystem::perms::owner_exec | std::filesystem::perms::group_read |
+            std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+            std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::replace);
 
     string build_cmd_o3 = "g++ -std=c++20 -O3 main.cpp -I. -o " + projname + "_O3";
     std::ofstream build_script_o3((out_path / "release.sh").string());

@@ -547,6 +547,82 @@ static int runVulRTLGen(int argc, char * argv[]) {
         }
     }
 
+    if (!release && !main_file.empty()) {
+        VulErrorContextGuard _err("generating Verilator run script");
+        const std::string top_module_name = project.top_module_instance->simClassName();
+        const std::filesystem::path script_path = out_path / "run.sh";
+        std::ofstream script(script_path);
+        if (!script.is_open()) {
+            throw VulException("Failed to create Verilator run script.");
+        }
+        script << "#!/usr/bin/env bash\n"
+                  "__vulrtlgen_run_main() (\n"
+                  "set -euo pipefail\n"
+                  "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+                  "cd \"$SCRIPT_DIR\"\n"
+                  "mapfile -d '' RTL_FILES < <(find . -type f -name '*.sv' -not -path './obj_dir/*' -print0 | sort -z)\n"
+                  "shopt -s nullglob\n"
+                  "DRIVER_SOURCES=(./*.cpp)\n"
+                  "shopt -u nullglob\n"
+                  "if (( ${#RTL_FILES[@]} == 0 )); then\n"
+                  "  echo 'No SystemVerilog files found in the output directory.' >&2\n"
+                  "  exit 1\n"
+                  "fi\n"
+                  "if (( ${#DRIVER_SOURCES[@]} != 1 )); then\n"
+                  "  echo \"Expected exactly one top-level C++ test driver, found ${#DRIVER_SOURCES[@]}.\" >&2\n"
+                  "  printf '  %s\\n' \"${DRIVER_SOURCES[@]}\" >&2\n"
+                  "  exit 1\n"
+                  "fi\n"
+                  "BUILD_LOG=\"$SCRIPT_DIR/verilator_build.log\"\n"
+                  "RUN_LOG=\"$SCRIPT_DIR/simulation.log\"\n"
+                  "DRIVER_SOURCE=\"${DRIVER_SOURCES[0]}\"\n"
+                  "echo \"Building Verilator simulation; log: $BUILD_LOG\"\n"
+                  "if verilator --cc --exe --build --top-module " << top_module_name
+               << " --Mdir obj_dir -CFLAGS '-std=c++20' \"${RTL_FILES[@]}\" \"$DRIVER_SOURCE\" >\"$BUILD_LOG\" 2>&1; then\n"
+                  "  :\n"
+                  "else\n"
+                  "  status=$?\n"
+                  "  echo \"Verilator build failed (exit $status); log: $BUILD_LOG\" >&2\n"
+                  "  cat \"$BUILD_LOG\" >&2\n"
+                  "  exit \"$status\"\n"
+                  "fi\n"
+                  "echo \"Running simulation; log: $RUN_LOG\"\n"
+                  "if \"$SCRIPT_DIR/obj_dir/V" << top_module_name
+               << "\" \"$@\" >\"$RUN_LOG\" 2>&1; then\n"
+                  "  status=0\n"
+                  "else\n"
+                  "  status=$?\n"
+                  "fi\n"
+                  "cat \"$RUN_LOG\"\n"
+                  "if (( status != 0 )); then\n"
+                  "  echo \"Simulation failed (exit $status); log: $RUN_LOG\" >&2\n"
+                  "fi\n"
+                  "exit \"$status\"\n"
+                  ")\n"
+                  "__vulrtlgen_run_dispatch() {\n"
+                  "  local status\n"
+                  "  if __vulrtlgen_run_main \"$@\"; then status=0; else status=$?; fi\n"
+                  "  unset -f __vulrtlgen_run_main __vulrtlgen_run_dispatch\n"
+                  "  return \"$status\"\n"
+                  "}\n"
+                  "if [[ \"${BASH_SOURCE[0]}\" != \"$0\" ]]; then\n"
+                  "  if __vulrtlgen_run_dispatch \"$@\"; then return 0; else return $?; fi\n"
+                  "fi\n"
+                  "__vulrtlgen_run_dispatch \"$@\"\n"
+                  "exit $?\n";
+        script.close();
+        if (!script) {
+            throw VulException("Failed to write Verilator run script.");
+        }
+        std::filesystem::permissions(
+            script_path,
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+                std::filesystem::perms::owner_exec | std::filesystem::perms::group_read |
+                std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+                std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::replace);
+    }
+
     const std::filesystem::path absolute_out_path =
         std::filesystem::absolute(out_path).lexically_normal();
     const std::filesystem::path top_rtl_path =
