@@ -580,6 +580,68 @@ size_t skipSpacesOnly(const std::string& s, size_t p) {
     return p;
 }
 
+bool isDigitForBase(char c, unsigned base) {
+    unsigned value;
+    if (c >= '0' && c <= '9') {
+        value = static_cast<unsigned>(c - '0');
+    } else if (c >= 'a' && c <= 'f') {
+        value = static_cast<unsigned>(c - 'a') + 10;
+    } else if (c >= 'A' && c <= 'F') {
+        value = static_cast<unsigned>(c - 'A') + 10;
+    } else {
+        return false;
+    }
+    return value < base;
+}
+
+// A single quote between digits in a pp-number is a C++ digit separator,
+// not the start of a character literal. Determine this before skipping
+// character literals so brace scanning remains correct for literals such as
+// 100'000 and 0xA'B.
+bool isDigitSeparator(const std::string& s, size_t p) {
+    if (p == 0 || p + 1 >= s.size()) {
+        return false;
+    }
+
+    size_t numberBegin = p;
+    while (numberBegin > 0) {
+        const char c = s[numberBegin - 1];
+        if (isIdentChar(c) || c == '.' || c == '\'') {
+            --numberBegin;
+        } else {
+            break;
+        }
+    }
+
+    if (numberBegin == p) {
+        return false;
+    }
+
+    // A preprocessing number starts with a digit, or with '.' followed by a
+    // digit. This excludes character literals with encoding prefixes (u'1',
+    // L'1', and so on), whose preceding token begins with an identifier.
+    const bool startsWithDigit = s[numberBegin] >= '0' && s[numberBegin] <= '9';
+    const bool startsWithDotDigit = s[numberBegin] == '.' &&
+        numberBegin + 1 < p && s[numberBegin + 1] >= '0' && s[numberBegin + 1] <= '9';
+    if (!startsWithDigit && !startsWithDotDigit) {
+        return false;
+    }
+
+    unsigned base = 10;
+    if (startsWithDigit && s[numberBegin] == '0' && numberBegin + 1 <= p) {
+        const char prefix = s[numberBegin + 1];
+        if (prefix == 'x' || prefix == 'X') {
+            base = 16;
+        } else if (prefix == 'b' || prefix == 'B') {
+            base = 2;
+        } else if ((prefix >= '0' && prefix <= '9') || prefix == '\'') {
+            base = 8;
+        }
+    }
+
+    return isDigitForBase(s[p - 1], base) && isDigitForBase(s[p + 1], base);
+}
+
 // 跳过普通字符串、字符字面量，以及形如 R"delim(...)delim" 的 raw string。
 // 如果当前位置不是字面量起点，则返回原位置。
 size_t skipLiteralIfAt(const std::string& s, size_t p) {
@@ -615,6 +677,10 @@ size_t skipLiteralIfAt(const std::string& s, size_t p) {
     // normal string / char literal
     if (s[p] != '"' && s[p] != '\'') {
         return p;
+    }
+
+    if (s[p] == '\'' && isDigitSeparator(s, p)) {
+        return p + 1;
     }
 
     char quote = s[p];
