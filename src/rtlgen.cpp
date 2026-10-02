@@ -2353,7 +2353,7 @@ static void emitVerilatorUnpack(
     }
     for (const auto &field : port.flat_fields) {
         out.push_back(
-            indent + field.name + " = static_cast<decltype(" + field.name + ")>(__vul_get_bits(" +
+            indent + field.name + " = static_cast<std::remove_cvref_t<decltype(" + field.name + ")>>(__vul_get_bits(" +
             src_expr + ", " + std::to_string(field.offset) + ", " + std::to_string(field.width) + "));\n"
         );
     }
@@ -2622,7 +2622,7 @@ vector<string> genVerilatorTestMainCpp(
                       apiinline::defaultValueExprForType(query.ret_type, bundlelib) + ";\n");
         for (const auto &field : flat_fields) {
             out.push_back(
-                "    " + field.name + " = static_cast<decltype(" + field.name + ")>(__vul_get_bits(" +
+                "    " + field.name + " = static_cast<std::remove_cvref_t<decltype(" + field.name + ")>>(__vul_get_bits(" +
                 verilatorTopExpr(queryPort(name)) + ", " + std::to_string(field.offset) + ", " +
                 std::to_string(field.width) + "));\n"
             );
