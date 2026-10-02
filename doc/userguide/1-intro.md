@@ -29,12 +29,8 @@ VulCPP 是一个基于 C++ 的硬件描述框架，旨在提供一种高效、�
 #include <defhelper.hpp>
 
 // 定义 Producer 模块中的两个寄存器
-REGISTER(cycle, uint8_t) { // cycle 寄存器，数据类型为 uint8_t，初始值为 0
-    cycle = 0; // 复位时的赋值代码
-}
-REGISTER(count, uint8_t) { // count 寄存器，数据类型为 uint8_t，初始值为 0
-    count = 0;
-}
+REGISTER(cycle, uint8_t); // cycle 寄存器，默认复位值为 0
+REGISTER(count, uint8_t); // count 寄存器，默认复位值为 0
 
 // 定义 Producer 模块对外的事务接口
 REQUEST_READY(send, ARG(uint8_t) d); // 这个模块可能会触发一个 send 事务，参数是一个 uint8_t 类型的数据 d，事务包含一个 bool 返回值作为 valid-ready 握手行为
@@ -55,12 +51,8 @@ TICK_IMPL() {
 #include <defhelper.hpp>
 
 // 定义 Consumer 模块中的寄存器
-REGISTER(cycle, uint8_t) {
-    cycle = 0;
-}
-REGISTER(sum, uint8_t) {
-    sum = 0;
-}
+REGISTER(cycle, uint8_t);
+REGISTER(sum, uint8_t);
 
 // 定义 Consumer 模块对外的事务接口
 REQUEST(output, void, ARG(uint8_t) s); // 这个模块可能会触发一个 output 事务，参数是一个 uint8_t 类型的数据 s，事务不包含 valid-ready 握手行为

@@ -297,12 +297,8 @@ void flatten_member(
             }
 
             if (!sub.enum_members.empty()) {
-                // enum → 用最小bit宽
-                uint32_t n = sub.enum_members.size();
-                uint32_t w = 0;
-                while ((1u << w) < n) ++w;
-                out.push_back({cur_name, offset, w, false, m.type.toString()});
-                offset += w;
+                // Use the same numeric-value width for scalar and nested enums.
+                flatten_bundle(sub, table, cur_name, offset, out);
                 return;
             }
 
@@ -331,15 +327,18 @@ void flatten_bundle(
         flatten_member(alias_member, table, prefix, offset, out);
         return;
     } else if(!bundle.enum_members.empty()) {
-        uint64_t n = bundle.enum_members.size();
+        uint64_t next_value = 0;
+        uint64_t max_value = 0;
         for (const auto& enum_member : bundle.enum_members) {
-            uint64_t value = static_cast<uint64_t>(enum_member.value);
-            if (enum_member.has_value && value > n) {
-                n = value + 1;
-            }
+            const uint64_t value = enum_member.has_value
+                ? static_cast<uint64_t>(enum_member.value) : next_value;
+            max_value = std::max(max_value, value);
+            next_value = value + 1;
         }
-        uint32_t w = 0;
-        while ((1u << w) < n) ++w;
+        // Zero is always representable, including a singleton enum. Negative
+        // values conservatively retain all 64 bits of their packed encoding.
+        uint32_t w = 1;
+        while (w < 64 && (max_value >> w) != 0) ++w;
         out.push_back({prefix, offset, w, false, bundle.name});
         offset += w;
         return;

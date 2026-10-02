@@ -88,7 +88,7 @@ Main 模块中无法定义 REGISTER 或 WIRE，取而代之的是与标准 C++ �
 
 三个特殊的函数可以被调用，用于推进仿真时钟、复位和退出：
 - `void sim_nextcycle()`：推进一个完整时钟周期，依次处理事务交互并提交寄存器状态更新
-- `void sim_reset()`：执行一次仿真复位，所有寄存器将被赋值为它们的复位值
+- `void sim_reset()`：执行一次仿真复位，所有寄存器将恢复其复位值：先将寄存器对象递归置零，再由声明中的可选复位块赋值决定最终复位值；未赋值域保持 0
 - `void sim_exit()`：退出仿真流程
 
 ## REQUEST_PORT(name, ret, ARG(type1) arg, ..., RESP(type2) resp, ...)

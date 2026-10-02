@@ -213,18 +213,16 @@ inline constexpr uint32_t inc(uint32_t x) {
 
 ## 3.4 状态组件
 
-### REGISTER(name, type, ports=1, dims=[...]) { ... }
+### REGISTER(name, type, ports=1, dims=[...]) [{可选复位块}];
 
-定义寄存器或寄存器数组：
+定义寄存器或寄存器数组。省略复位块时，声明以分号结束：
 
 ```cpp
-REGISTER(counter, uint32_t) {
-    counter = 0;
-}
+REGISTER(counter, uint32_t); // 默认复位为 0
 
 REGISTER(scoreboard, bool, dims=[32], ports=2) {
     for (uint32_t i = 0; i < 32; ++i) {
-        scoreboard[i] = false;
+        scoreboard[i] = true; // 复位时所有元素为 true
     }
 }
 ```
@@ -235,7 +233,22 @@ REGISTER(scoreboard, bool, dims=[32], ports=2) {
 - `type`：寄存器元素类型。
 - `ports`：写端口数量，默认 `1`。多端口寄存器通过 `setnext<P>(...)` 指定写端口优先级。
 - `dims`：数组维度。省略时是标量寄存器；`dims=[N]` 是一维寄存器数组。
-- `{ ... }`：复位赋值代码块。
+- `{ ... }`：可选复位赋值代码块；省略块的 `REGISTER(...);` 与空块 `REGISTER(...) {}` 等价。
+
+复位值计算时先将整个寄存器对象递归置零，再按源码顺序执行复位块。未赋值的结构体字段、数组元素和 `Int<N>` 位段都保持全 0；`bool` 为 `false`，内置整数和枚举的数值为 0。枚举即使没有值为 0 的成员，默认值仍为数值 0，而非首个枚举成员。
+
+复位块可以只覆盖部分值，也可以读取当前寄存器对象的默认零值，例如：
+
+```cpp
+REGISTER(status, Status) {
+    status.valid = true; // 其余字段保持 0
+}
+REGISTER(pipe, uint32_t, dims=[4]) {
+    pipe[1] = pipe[0] + 3; // pipe[0] 已为 0；其余元素保持 0
+}
+```
+
+C++ 仿真创建后的初始值、`sim_reset()`、RTL 硬件复位和寄存器 `resetnext()` 都使用上述复位值。硬件寄存器仍需由复位信号复位，不额外承诺未复位时的上电值。此规则针对寄存器复位对象；普通 C++ 局部变量仍需在读取前定义其值。
 
 标量寄存器使用示例：
 
@@ -648,7 +661,7 @@ REGISTER(name, type, ports=portnum) { ... }
 REGISTER(name, type, dims=[size], ports=portnum) { ... }
 ```
 
-旧的 `REGISTER(name, type, portnum, dim...)` 位置参数形式仍然兼容，但新代码建议显式写 `ports=` 和 `dims=`。
+旧的 `REGISTER(name, type, portnum, dim...)` 位置参数形式仍然兼容，但新代码建议显式写 `ports=` 和 `dims=`。`REGISTER_MUL` 和 `REGISTER_ARRAY1` 同样允许用分号结束的无块声明或部分赋值的复位块，默认未赋值域为 0。
 
 ### 握手请求端口
 

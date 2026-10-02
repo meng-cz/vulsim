@@ -677,9 +677,9 @@ void _procRegisters(RTLGenContext &ctx) {
         ctx.hls_reset_init.push_back("{\n");
         ctx.hls_reset_init_debug.push_back({});
         if (is_array) {
-            ctx.hls_reset_init.push_back("  std::array<" + element_type_str + ", " + size_str + "> " + reg.name + ";\n");
+            ctx.hls_reset_init.push_back("  std::array<" + element_type_str + ", " + size_str + "> " + reg.name + "{};\n");
         } else {
-            ctx.hls_reset_init.push_back("  " + element_type_str + " " + reg.name + ";\n");
+            ctx.hls_reset_init.push_back("  " + element_type_str + " " + reg.name + "{};\n");
         }
         ctx.hls_reset_init_debug.push_back({});
         vector<string> reset_codelines = substituteConfigConstants(reg.reset_codelines, ctx.local_configlib);
@@ -2496,7 +2496,10 @@ vector<string> genVerilatorTestMainCpp(
     out.push_back("template <typename T>\n");
     out.push_back("static inline typename std::enable_if<!(std::is_integral<T>::value || std::is_enum<T>::value), uint64_t>::type\n");
     out.push_back("__vul_port_word(const T &value, uint32_t word) {\n");
-    out.push_back("  return static_cast<uint64_t>(value[word]);\n");
+    out.push_back("  uint32_t index = word * 2;\n");
+    out.push_back("  uint64_t result = index < value.size() ? value[index] : 0;\n");
+    out.push_back("  if (index + 1 < value.size()) result |= static_cast<uint64_t>(value[index + 1]) << 32;\n");
+    out.push_back("  return result;\n");
     out.push_back("}\n");
     out.push_back("\n");
     out.push_back("template <typename T>\n");
@@ -2508,7 +2511,9 @@ vector<string> genVerilatorTestMainCpp(
     out.push_back("template <typename T>\n");
     out.push_back("static inline typename std::enable_if<!(std::is_integral<T>::value || std::is_enum<T>::value), void>::type\n");
     out.push_back("__vul_port_set_word(T &value, uint32_t word, uint64_t data) {\n");
-    out.push_back("  value[word] = data;\n");
+    out.push_back("  uint32_t index = word * 2;\n");
+    out.push_back("  if (index < value.size()) value[index] = static_cast<uint32_t>(data);\n");
+    out.push_back("  if (index + 1 < value.size()) value[index + 1] = static_cast<uint32_t>(data >> 32);\n");
     out.push_back("}\n");
     out.push_back("\n");
     out.push_back("template <typename T>\n");
@@ -2659,6 +2664,30 @@ vector<string> genVerilatorTestMainCpp(
     if (!test.services.empty()) {
         out.push_back("\n");
     }
+
+    out.push_back("  void sim_reset() {\n");
+    out.push_back("    top->rstn = 0;\n");
+    for (const auto &[name, top_serv] : top_module.services) {
+        if (test.requests.find(name) == test.requests.end()) continue;
+        if (top_serv.is_arrayed) {
+            for (uint32_t idx = 0; idx < static_cast<uint32_t>(top_serv.array_size); ++idx) {
+                out.push_back("    " + verilatorIndexedTopExpr(reqservVldPort(name), true, idx) + " = false;\n");
+            }
+            out.push_back("    __issued_" + name + ".fill(false);\n");
+        } else {
+            out.push_back("    " + verilatorIndexedTopExpr(reqservVldPort(name), false, 0) + " = false;\n");
+            out.push_back("    __issued_" + name + " = false;\n");
+        }
+    }
+    for (const auto &[name, temp_serv] : test.services) {
+        const auto &top_req = top_module.requests.at(name);
+        out.push_back("    __handled_" + name + (top_req.is_arrayed ? ".fill(false);\n" : " = false;\n"));
+    }
+    out.push_back("    for (int i = 0; i < 4; ++i) sim_commit_raw();\n");
+    out.push_back("    top->rstn = 1;\n");
+    out.push_back("    eval_and_process_services();\n");
+    out.push_back("  }\n");
+    out.push_back("\n");
 
     out.push_back("  void sim_execute() {\n");
     out.push_back("    eval_and_process_services();\n");

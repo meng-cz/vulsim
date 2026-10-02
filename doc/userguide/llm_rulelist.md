@@ -50,7 +50,8 @@ HELPER() { /* helper functions/types only; no runtime state */ }
 - 状态/组件：
 
 ```cpp
-REGISTER(name, type) { reset_assignments }
+REGISTER(name, type); // 默认零复位
+REGISTER(name, type) { reset_assignments } // 可选部分覆盖
 REGISTER_MUL(name, type, portnum) { reset_assignments }
 REGISTER_ARRAY1(name, type, size, portnum) { reset_loop_or_assignments }
 WIRE(name, type) { init_each_cycle }
@@ -87,7 +88,7 @@ TICK_IMPL() { ... }
 ## 4. 状态语义
 
 - 所有寄存器、队列、BRAM 写入都是 next-cycle 语义：本周期调用 `setnext/enqnext/deqnext/readreq/write/req`，`sim_nextcycle()` 后才提交。不要依赖同周期立即生效。
-- `REGISTER` 复位块必须完整初始化标量/结构体所有字段。
+- `REGISTER(...);` 可省略复位块；空块等价。复位对象先递归置零，再执行用户赋值，未赋值字段、数组元素和位段保持 0，枚举数值也为 0（不是首成员）。此规则同时用于仿真初始值、`sim_reset()`、RTL 复位和 `resetnext()`；普通局部变量仍须读前定义。
 - 读寄存器当前值：基础类型可隐式读或 `.get()`；结构体/数组字段必须先 `.get()`：
 
 ```cpp

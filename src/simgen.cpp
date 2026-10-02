@@ -1108,11 +1108,13 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
         sig_as_member.name = reg.name;
         sig_as_member.type = reg.signature;
         sig_as_member.dims = reg.dims;
-        impl_reg_reset_value_field.push_back("{\n");
-        impl_reg_reset_value_field.push_back(_genStaticMemberTypeStr(sig_as_member) + " " + reg.name + ";\n");
+        vulDebugAppendLine(impl_reg_reset_value_field, impl_reg_reset_value_field_debug, "{\n");
+        vulDebugAppendLine(impl_reg_reset_value_field, impl_reg_reset_value_field_debug,
+                           _genStaticMemberTypeStr(sig_as_member) + " " + reg.name + "{};\n");
         vulDebugAppendLines(impl_reg_reset_value_field, impl_reg_reset_value_field_debug, reg.reset_codelines, reg.reset_codelines_debug);
-        impl_reg_reset_value_field.push_back("this->" + reg.name + "._set_reset_value(" + reg.name + ");\n");
-        impl_reg_reset_value_field.push_back("}\n");
+        vulDebugAppendLine(impl_reg_reset_value_field, impl_reg_reset_value_field_debug,
+                           "this->" + reg.name + "._set_reset_value(" + reg.name + ");\n");
+        vulDebugAppendLine(impl_reg_reset_value_field, impl_reg_reset_value_field_debug, "}\n");
 
         impl_reg_reset_field.push_back("this->" + reg.name + "._reset();\n");
 
