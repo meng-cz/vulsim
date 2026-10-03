@@ -280,8 +280,12 @@ VulStaticProject parseVcppStaticProjectImpl(
         proj_dir = path(project_dir);
     } else if (!scanned_project_dir_path.empty()) {
         proj_dir = resolve_from_main(scanned_project_dir_path, "PROJECT");
+    } else if (!main_path.empty()) {
+        proj_dir = main_path.parent_path();
+        if (proj_dir.empty()) proj_dir = ".";
     } else {
         proj_dir = top_path.parent_path();
+        if (proj_dir.empty()) proj_dir = ".";
     }
     if (!exists(proj_dir) || !is_directory(proj_dir)) {
         throw VulException("Project directory does not exist or is not a directory: " + proj_dir.string());

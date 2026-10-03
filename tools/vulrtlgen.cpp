@@ -20,6 +20,7 @@
 #include "argparse.hpp"
 #include "vullib.hpp"
 #include "output_dir.hpp"
+#include "resource_utils.hpp"
 
 #include <filesystem>
 #include <algorithm>
@@ -397,12 +398,24 @@ static int runVulRTLGen(int argc, char * argv[]) {
             return 1;
         }
     }
-    if (proj_dir.empty() && !top_file.empty()) {
-        proj_dir = top_path.parent_path().string();
-    }
-
     VulErrorContextGuard _err{"generating project from " + proj_dir};
     VulStaticProject project = parseVcppStaticProject(proj_dir, top_file, main_file);
+
+    // parseVcppStaticProject resolves PROJECT(...) relative to Main.cpp, but
+    // resource copying below also needs that resolved directory. Keep an
+    // explicit project path here when --project was not supplied.
+    if (proj_dir.empty()) {
+        if (!main_file.empty() && !project.test_harness.project_dir_path.empty()) {
+            proj_dir = (std::filesystem::path(main_file).parent_path() /
+                        project.test_harness.project_dir_path).lexically_normal().string();
+        } else if (!main_file.empty()) {
+            auto main_parent = std::filesystem::path(main_file).parent_path();
+            proj_dir = (main_parent.empty() ? std::filesystem::path(".") : main_parent).string();
+        } else if (!top_file.empty()) {
+            auto top_parent = std::filesystem::path(top_file).parent_path();
+            proj_dir = (top_parent.empty() ? std::filesystem::path(".") : top_parent).string();
+        }
+    }
 
     std::filesystem::path out_path(out_dir);
     if (!prepareOutputDirectory(out_path, out_dir, force)) {
@@ -449,7 +462,8 @@ static int runVulRTLGen(int argc, char * argv[]) {
         // Shared resources are copied only by the coordinator, once per path.
         for (const auto& resource : codes.resource_files) {
             if (!copied_resources.insert(resource).second) continue;
-            const auto source = std::filesystem::path(proj_dir) / resource;
+            const auto source = vulresource::findShallowestProjectResource(
+                std::filesystem::path(proj_dir), resource);
             const auto destination = out_path / resource;
             std::filesystem::create_directories(destination.parent_path());
             std::filesystem::copy_file(source, destination);

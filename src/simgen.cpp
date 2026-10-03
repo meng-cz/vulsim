@@ -1160,6 +1160,7 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
     // generate rom
     for (const auto &rom : mod.roms) {
         VulErrorContextGuard context_guard("processing rom " + rom.name);
+        bram_resources_files.push_back(rom.init_path);
         string rom_class = ROMClassName + "<" +
             std::to_string(rom.data_width) + ", " +
             std::to_string(rom.addr_size) + ", " + 

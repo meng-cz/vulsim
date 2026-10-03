@@ -21,6 +21,7 @@
 #include "trace.hpp"
 #include "vullib.hpp"
 #include "output_dir.hpp"
+#include "resource_utils.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -123,8 +124,12 @@ int simgenStatic(const SimGenArgs &args) {
         proj_path = std::filesystem::path(proj_dir);
     } else if (!project.test_harness.project_dir_path.empty()) {
         proj_path = resolve_from_main(project.test_harness.project_dir_path);
+    } else if (!main_path.empty()) {
+        proj_path = main_path.parent_path();
+        if (proj_path.empty()) proj_path = ".";
     } else {
         proj_path = effective_top_path.parent_path();
+        if (proj_path.empty()) proj_path = ".";
     }
     if (!std::filesystem::exists(proj_path) || !std::filesystem::is_directory(proj_path)) {
         throw VulException("Project directory does not exist or is not a directory: " + proj_path.string());
@@ -210,6 +215,7 @@ int simgenStatic(const SimGenArgs &args) {
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
     std::unordered_set<std::string> generated_module_paths;
+    std::unordered_set<std::string> copied_resources;
     bfs_queue.push_back(project.top_module_instance);
     while (!bfs_queue.empty()) {
         auto mod_instance = bfs_queue.front();
@@ -232,10 +238,9 @@ int simgenStatic(const SimGenArgs &args) {
         writeLinesToFile(codes.impl, (out_path / impl_path).string());
         vulDebugWriteMapToFile(codes.impl_debug_lines, (out_path / (impl_path + ".dbgmap")).string());
         for (const auto &res_file : codes.resource_files) {
-            std::filesystem::path src_file = proj_path / res_file;
-            if (!std::filesystem::exists(src_file) || !std::filesystem::is_regular_file(src_file)) {
-                throw VulException("Resource file does not exist: " + src_file.string() + ", used in module: " + mod_instance->module_name);
-            }
+            if (!copied_resources.insert(res_file).second) continue;
+            const std::filesystem::path src_file =
+                vulresource::findShallowestProjectResource(proj_path, res_file);
             std::filesystem::path dst_file = out_path / res_file;
             std::filesystem::create_directories(dst_file.parent_path());
             std::filesystem::copy_file(src_file, dst_file);
