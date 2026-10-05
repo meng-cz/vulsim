@@ -25,14 +25,29 @@ fi
 
 shopt -s nullglob
 main_files=("$ROOT_DIR"/regression/*/Main.cpp)
-if (( ${#main_files[@]} == 0 )); then
-    echo "[regression] No regression/*/Main.cpp files found." >&2
+python_files=("$ROOT_DIR"/regression/*.py)
+if (( ${#main_files[@]} == 0 && ${#python_files[@]} == 0 )); then
+    echo "[regression] No regression/*/Main.cpp or regression/*.py files found." >&2
     exit 1
 fi
 
 declare -a summaries=()
 passed=0
 failed=0
+
+for python_file in "${python_files[@]}"; do
+    name="$(basename "$python_file")"
+    echo
+    echo "[regression] === $name ==="
+    if python3 "$python_file"; then
+        summaries+=("PASS $name (exit=0)")
+        ((passed += 1))
+    else
+        status=$?
+        summaries+=("FAIL $name (exit=$status)")
+        ((failed += 1))
+    fi
+done
 
 for main_file in "${main_files[@]}"; do
     case_dir="$(dirname "$main_file")"
