@@ -1043,6 +1043,30 @@ StaticModuleCodeHpp genStaticModuleCodeHpp(const VulStaticModuleInstance &mod, c
             }
         }
 
+        if (lb_iter == mod.serv_logic_blocks.end()) {
+            const VulReqServConnection *forward = nullptr;
+            for (const auto &conn : mod.req_connections) {
+                if (conn.req_instance.empty() && conn.req_name == serv_entry.first && !conn.serv_instance.empty()) {
+                    if (forward) throw VulException("Multiple forwarding connections for service " + serv_entry.first);
+                    forward = &conn;
+                }
+            }
+            if (!forward) throw VulException("Missing implementation for service " + serv_entry.first);
+            const string child_name = forward->serv_instance_base.empty() ? forward->serv_instance : forward->serv_instance_base;
+            const auto &target = findChildTemplateByName(mod, child_name);
+            string access = "__instptr_" + child_name;
+            for (const auto &idx : forward->serv_indices) {
+                access += "[" + (idx.kind == VulConnIndexKind::Wildcard ? string("IDX") : idx.expr) + "]";
+            }
+            if (is_arrayed) impl_field.push_back("template <uint32_t IDX>\n");
+            impl_field.push_back(rettype + " " + mod_class_name + "::" + serv_entry.first + "(" + arglists + ") {\n");
+            const string flag = call_guard_name + (is_arrayed ? "[IDX]" : "");
+            impl_field.push_back(CodeTab + "assert(!" + flag + " && \"" + service_assert_msg + "\");\n");
+            impl_field.push_back(CodeTab + flag + " = true;\n");
+            const string slot = target.services.at(forward->serv_name).is_arrayed ? "<IDX>" : "";
+            impl_field.push_back(CodeTab + (rettype == "void" ? "" : "return ") + access + "->" + forward->serv_name + slot + "(" + argnames + ");\n");
+            impl_field.push_back("}\n");
+        }
         decl_public_field.push_back("\n");
         impl_field.push_back("\n");
     }

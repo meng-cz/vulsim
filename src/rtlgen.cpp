@@ -1108,20 +1108,30 @@ void _procServicesAndTicks(RTLGenContext &ctx) {
             }
         };
 
+        // A service driven by a local child's request is an internal transaction,
+        // not an additional module input. Keep the logic ABI but declare local wires.
+        const bool internal = std::any_of(ctx.module.req_connections.begin(), ctx.module.req_connections.end(),
+            [&](const auto &conn) {
+                return !conn.req_instance.empty() && conn.serv_instance.empty() && conn.serv_name == serv_name;
+            });
+        auto emit_service_port = [&](const string &direction, const string &signal) {
+            if (internal) ctx.rtl_decl.push_back("wire " + signal + ";\n");
+            else ctx.rtl_ports.push_back(direction + " " + signal);
+        };
         // rtl ports
         string vld_port_name = reqservVldPort(serv_name);
         string rdy_port_name = reqservRdyPort(serv_name);
-        ctx.rtl_ports.push_back("input " + vld_port_name + sv_array_str);
+        emit_service_port("input", vld_port_name + sv_array_str);
         if (has_rdy) {
-            ctx.rtl_ports.push_back("output " + rdy_port_name + sv_array_str);
+            emit_service_port("output", rdy_port_name + sv_array_str);
         }
         for (const auto &arg : arg_ports) {
             string arg_port_name = reqservArgPort(serv_name, arg.name);
-            ctx.rtl_ports.push_back("input [" + std::to_string(arg.width - 1) + ":0] " + arg_port_name + sv_array_str);
+            emit_service_port("input", "[" + std::to_string(arg.width - 1) + ":0] " + arg_port_name + sv_array_str);
         }
         for (const auto &ret : ret_ports) {
             string ret_port_name = reqservArgPort(serv_name, ret.name);
-            ctx.rtl_ports.push_back("output [" + std::to_string(ret.width - 1) + ":0] " + ret_port_name + sv_array_str);
+            emit_service_port("output", "[" + std::to_string(ret.width - 1) + ":0] " + ret_port_name + sv_array_str);
         }
 
         // a service should be:
@@ -1384,7 +1394,7 @@ void _procChildrenAndConnection(RTLGenContext &ctx) {
                 if (!connected) {
                     throw VulException("Request " + req_name + " of instance " + child_instance_name + " is not connected");
                 }
-                if (conn.conn.serv_instance != "" || ctx.module.services.find(conn.conn.serv_name) != ctx.module.services.end()) {
+                if (conn.conn.serv_instance != "") {
                     string conn_str = conn_to_str(conn);
                     ctx.rtl_decl.push_back("wire " + conn_str + "_valid" + sv_array_str + ";\n");
                     child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + conn_str + "_valid)");
@@ -2617,7 +2627,8 @@ vector<string> genVerilatorTestMainCpp(
         vector<FlatField> flat_fields;
         flatten_type_signature(query.ret_type, bundlelib, "value", width, flat_fields);
         out.push_back("  " + query.ret_type.toString() + " " + name + "() {\n");
-        out.push_back("    eval_and_process_services();\n");
+        // QUERY observes combinational outputs without consuming next-cycle requests.
+        out.push_back("    top->eval();\n");
         out.push_back("    " + query.ret_type.toString() + " value = " +
                       apiinline::defaultValueExprForType(query.ret_type, bundlelib) + ";\n");
         for (const auto &field : flat_fields) {

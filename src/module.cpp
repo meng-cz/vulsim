@@ -499,7 +499,15 @@ void instantiateModule(
     }
     for (const auto &entry : service_declarations) {
         if (!entry.second.implemented) {
-            throw VulException("SERVICE forward declaration for '" + entry.first + "' has no matching implementation");
+            const bool forwarded = std::any_of(temp.req_connections.begin(), temp.req_connections.end(),
+                [&](const auto &conn) {
+                    return conn.req_instance.empty() && conn.req_name == entry.first && !conn.serv_instance.empty();
+                });
+            if (!forwarded) {
+                throw VulException("SERVICE forward declaration for '" + entry.first + "' has no matching implementation");
+            }
+            // A boundary service can be implemented by CONNECT_S_CS instead of a body.
+            instance.services[entry.first] = entry.second.signature;
         }
     }
 
@@ -1114,6 +1122,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         bfs_queue.pop_front();
 
         instance_id_map[cur_inst->instance_id] = cur_inst;
+        for (const auto &child : cur_inst->children) bfs_queue.push_back(child);
 
         VulErrorContextGuard inst_guard("Parsing connection from instance '" + cur_inst->simClassName() + "' (IID: " + std::to_string(cur_inst->instance_id) + ")");
 
@@ -1189,6 +1198,9 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
                 throw VulException("Cyclic call or repeated call detected in logic block call graph: " + loop_str);
             }
             visited.insert(cur_lb_id);
+            if (cur_lb_id != tick_lb_id) {
+                instance_tick_to_lb_call_graph[inst_id].push_back(cur_lb_id);
+            }
             const auto &called_lbs_set = logic_block_call_graph.find(cur_lb_id);
             if (called_lbs_set != logic_block_call_graph.end()) {
                 for (const auto &called_lb_id : called_lbs_set->second) {
@@ -1226,6 +1238,7 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         auto cur_inst = bfs_queue.front();
         bfs_queue.pop_front();
         VulInstanceID cur_inst_id = cur_inst->instance_id;
+        for (const auto &child : cur_inst->children) bfs_queue.push_back(child);
         map<int32_t, vector<VulInstanceID>> priority_to_callee_instances;
         priority_to_callee_instances[0].push_back(cur_inst_id); // tick block has default priority 0
 
@@ -1250,8 +1263,8 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             priority_to_callee_instances[serv_lb.priority].push_back(callee_inst_id);
         }
         
-        unordered_set<VulInstanceID> lower_priority_instance_set;
-        vector<VulInstanceID> lower_priority_instances;
+        unordered_set<VulInstanceID> higher_priority_instance_set;
+        vector<VulInstanceID> higher_priority_instances;
         for (auto prio_it = priority_to_callee_instances.rbegin(); prio_it != priority_to_callee_instances.rend(); ++prio_it) {
             auto &same_priority_instances = prio_it->second;
             if (same_priority_instances.empty()) {
@@ -1260,10 +1273,10 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             std::sort(same_priority_instances.begin(), same_priority_instances.end());
             same_priority_instances.erase(std::unique(same_priority_instances.begin(), same_priority_instances.end()), same_priority_instances.end());
 
-            if (!lower_priority_instances.empty()) {
-                for (VulInstanceID from_inst_id : same_priority_instances) {
+            if (!higher_priority_instances.empty()) {
+                for (VulInstanceID from_inst_id : higher_priority_instances) {
                     auto &out_edges = instance_order_graph[from_inst_id];
-                    for (VulInstanceID to_inst_id : lower_priority_instances) {
+                    for (VulInstanceID to_inst_id : same_priority_instances) {
                         if (from_inst_id != to_inst_id) {
                             out_edges.insert(to_inst_id);
                         }
@@ -1272,8 +1285,8 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             }
 
             for (VulInstanceID inst_id : same_priority_instances) {
-                if (lower_priority_instance_set.insert(inst_id).second) {
-                    lower_priority_instances.push_back(inst_id);
+                if (higher_priority_instance_set.insert(inst_id).second) {
+                    higher_priority_instances.push_back(inst_id);
                 }
             }
         }
@@ -1326,6 +1339,15 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
             }
 
             shared_ptr<VulStaticModuleInstance> common_ancestor = former_ancestor;
+            // An endpoint equal to the LCA denotes that ancestor's local tick.
+            // Otherwise it denotes the direct child subtree containing the endpoint.
+            auto update_node = [&](shared_ptr<VulStaticModuleInstance> endpoint) {
+                if (endpoint == common_ancestor) return endpoint->instance_id;
+                while (endpoint->parent != common_ancestor) endpoint = endpoint->parent;
+                return endpoint->instance_id;
+            };
+            former_last_id = update_node(former_inst_ptr);
+            latter_last_id = update_node(latter_inst_ptr);
             if (former_last_id != latter_last_id) {
                 child_instance_order_graph[common_ancestor->instance_id][former_last_id].insert(latter_last_id);
             }

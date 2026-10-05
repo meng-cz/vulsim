@@ -398,7 +398,7 @@ SERVICE(write, priority=1, ARG(uint8_t) data) {
 
 - `handshake`：是否包含 valid-ready 握手，默认 `0`。
 - `ready`：握手 ready 条件。提供 `ready` 时等价于 `handshake=1`；如果显式写 `handshake=1`，必须提供 `ready`。
-- `priority`：服务逻辑块优先级。较小值优先级更高。
+- `priority`：服务逻辑块的周期内执行顺序。值越大越先执行；正值在 Tick 前，负值在 Tick 后，Tick 的值为 0。同值之间不保证顺序。
 - `array`：阵列化服务端口数量。
 - `ARG/RESP`：端口参数列表。
 - `{ ... }`：事务成功触发时执行的逻辑。
@@ -413,7 +413,7 @@ SERVICE(recv, handshake=1, ready=((cycle & 1) == 0), ARG(uint8_t) data) {
 
 实现代码中读取 `RESP` 参数是非法的，`RESP` 参数进入逻辑函数时值未定义，只能由服务逻辑写出。
 
-SERVICE 也支持前置声明。前置声明使用不带 `{ ... }` 代码块的 `SERVICE(...);`，用于先声明端口签名，之后必须由同名 `SERVICE(...) { ... }` 实现：
+SERVICE 也支持前置声明。前置声明使用不带 `{ ... }` 代码块的 `SERVICE(...);`，用于先声明端口签名，之后必须由同名 `SERVICE(...) { ... }` 实现，或通过 `CONNECT_S_CS` 转发给签名一致的子模块服务；两种实现方式不能同时使用：
 
 ```cpp
 SERVICE(recv, handshake=1, ARG(uint8_t) data);
@@ -429,7 +429,7 @@ SERVICE(recv, handshake=1, ready=q.deqvalid(), ARG(uint8_t) data) {
 
 ### 带有优先级的服务事务接口
 
-- `priority`：相对于Tick和其他服务的优先级整数值，值越小表示越靠后被执行（即后执行的会覆盖先执行的），负值表示执行顺序后于 Tick，正值表示执行顺序先于 Tick
+- `priority`：相对于 Tick 和其他服务的顺序整数值，值越大越先执行，正值表示先于 Tick，负值表示后于 Tick。它不改变寄存器写端口的优先级，也不允许同周期重复写同一个端口。
 
 服务优先级指定了一个周期内服务被触发时的顺序约束。但尽量通过寄存器优先级赋值和合理的模块划分来避免依赖优先级保证行为正确性，因为顺序约束会随着潜在的事务调用被传递，很容易导致循环依赖。
 

@@ -479,6 +479,12 @@ VulStaticProject parseVcppStaticProjectImpl(
         sim_top->req_connections.push_back(conn);
     }
     for (const auto &serv_entry: project.top_module_instance->services) {
+        // CR-S services already have a hardware caller inside the top module.
+        // Do not invent a second TestMain caller for these internal transactions.
+        const auto &connections = project.top_module_instance->req_connections;
+        if (std::any_of(connections.begin(), connections.end(), [&](const auto &conn) {
+                return !conn.req_instance.empty() && conn.serv_instance.empty() && conn.serv_name == serv_entry.first;
+            })) continue;
         fake_main->requests[serv_entry.first] = serv_entry.second;
         LogicBlockCall call;
         call.instance = "";

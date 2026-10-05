@@ -268,10 +268,10 @@
 
 **主要函数**
 - `staticalizeReqServ(...)`：静态化 request/service 定义。
-- `instantiateModule(...)`：递归实例化模块及其子模块。
+- `instantiateModule(...)`：静态化模块参数、状态和子实例声明；Service 可由逻辑实现或通过 `CONNECT_S_CS` 转发。
 - `detectRequestCallInLogicBlocks(...)`：扫描逻辑块中的 request/service 调用。
 - `findConnectedLogicBlockID(...)`：定位请求连接到的服务逻辑块。
-- `setupUpdateSequence(...)`：计算模块仿真的更新顺序。
+- `setupUpdateSequence(...)`：遍历完整层次，收集 Tick 的递归事务调用源，诊断重复调用和多调用源，并将 Service priority 的先后约束投影到公共祖先的 Tick／直接子树，计算仿真更新顺序。
 
 ## src/module.h
 
@@ -304,12 +304,12 @@
 - `_procWires(...)`：生成 wire 相关 HLS 初始化和 RTL 声明。
 - `_procRegisters(...)`：生成寄存器端口、代理/helper 和 RTL 实例；复位值临时对象先 `{}` 零初始化，再执行用户复位块并打包。
 - `_procRequests(...)`：生成 request 端口和调用包装。
-- `_procServicesAndTicks(...)`：生成 service/tick 逻辑入口和返回端口。
+- `_procServicesAndTicks(...)`：生成 service/tick 逻辑入口和返回端口，按 priority 从大到小执行；子 Request 驱动的本地 Service 使用内部线网。
 - `_procQueries(...)`：生成 query 端口和打包逻辑。
-- `_procChildrenAndConnection(...)`：生成子模块连接、服务转发和查询转发。
+- `_procChildrenAndConnection(...)`：生成子模块连接、服务转发和查询转发；`CONNECT_CR_S` 直接接入本地 Service 的握手及参数线网。
 - `_procQueues(...)`：生成 Queue/QueueMP 端口、helper 和 RTL 实例。
 - `_procBRAMAndROM(...)`：生成 BRAM/ROM 端口、helper 和 RTL 实例。
-- `genVerilatorTestMainCpp(...)`：生成 Verilator 顶层测试绑定代码，支持与 C++ 仿真一致的 `sim_reset()` 测试入口；宽 Verilator 端口按 32 位存储字转换为 64 位访问。
+- `genVerilatorTestMainCpp(...)`：生成 Verilator 顶层测试绑定代码，支持与 C++ 仿真一致的 `sim_reset()` 测试入口，Main 的 QUERY 仅求值读取、不触发 Service 回调；宽 Verilator 端口按 32 位存储字转换为 64 位访问。
 
 ## src/rtlgen.h
 
@@ -354,7 +354,7 @@
 - `genStaticBundle(...)`：生成单个静态 bundle 的 C++ 定义。
 - `genStaticBundleHeaderCode(...)`：生成 bundle 头文件代码。
 - `genStaticProjectHeaderCode(...)`：生成工程公共头文件代码。
-- `genStaticModuleCodeHpp(...)`：生成单个模块实例的声明和实现代码；寄存器复位值先递归零初始化，再执行可选用户复位赋值。
+- `genStaticModuleCodeHpp(...)`：生成单个模块实例的声明和实现代码，包含连接到子服务的边界 Service 转发函数；寄存器复位值先递归零初始化，再执行可选用户复位赋值。
 - `genStaticTestHarnessCodeHpp(...)`：生成测试 harness 声明和实现代码。
 - `genStaticTestHarnessHpp(...)`：生成测试 harness 聚合头文件。
 - `genStaticTestMainHpp(...)`：生成仿真 main 入口代码。
@@ -467,3 +467,9 @@
 ## example/register_zero_init/ 与 tests/register_zero_init_test.py
 
 **文件功能**：共用 Main 断言验证无块、空块、部分字段/元素/位段、枚举零值、宽整数和兼容寄存器声明。Python 驱动分别运行生成的 C++ 仿真及 native/CIRCT RTL，并检查再次复位和 resetnext 后的候选状态。
+
+## src/vulcpp/project_parser.cpp
+
+**文件功能**：读取 VULC++ 工程、递归实例化模块，并建立仿真 harness 与顶层的连接。
+
+- `parseVcppStaticProjectImpl(...)`：解析工程与模块层次，构建用于更新顺序分析的 TestMain；子 Request 驱动的顶层内部 Service 不添加虚构的外部调用源。
