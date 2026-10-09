@@ -64,7 +64,18 @@ bool parseRequestCall(
     int cursor = name_idx + 1;
     idx_expr = "0";
     if (cursor < static_cast<int>(tokens.size()) && tokens[cursor].spelling == "<") {
-        int close_angle = findMatching(tokens, cursor, "<", ">");
+        // A comparison inside a parenthesized non-type argument is not the closing angle.
+        int close_angle = -1;
+        int parentheses = 0;
+        int brackets = 0;
+        for (int i = cursor + 1; i < static_cast<int>(tokens.size()); ++i) {
+            const auto &token = tokens[i].spelling;
+            if (token == "(") ++parentheses;
+            else if (token == ")") --parentheses;
+            else if (token == "[") ++brackets;
+            else if (token == "]") --brackets;
+            else if (token == ">" && parentheses == 0 && brackets == 0) { close_angle = i; break; }
+        }
         if (close_angle < 0) {
             return false;
         }

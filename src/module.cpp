@@ -21,6 +21,9 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <regex>
+#include <set>
+#include "instance_graph.h"
 
 using std::make_shared;
 
@@ -112,11 +115,7 @@ static ParsedInstanceExpr parseInstanceExpr(const string &expr_raw) {
 }
 
 static string arrayInstanceName(const string &base_name, const vector<ConfigRealValue> &indices) {
-    string out = base_name;
-    for (ConfigRealValue idx : indices) {
-        out += "__" + std::to_string(idx);
-    }
-    return out;
+    return concreteInstanceName(base_name, indices);
 }
 
 static string replaceLoopVars(const string &expr, const vector<ConfigRealValue> &loop_vars) {
@@ -393,6 +392,17 @@ void instantiateModule(
     const VulStaticConfigLib &global_config,
     const VulStaticBundleLib &global_bundles
 ) {
+    auto reject_internal = [](const vector<string> &lines) {
+        const std::regex reserved(R"(\b__vul_(?:idx_|array_idx_)\w*)");
+        for (const auto &line : cppparse::stripComments(lines).lines)
+            if (std::regex_search(line, reserved)) throw VulException("Internal array coordinate names are not a user API");
+    };
+    reject_internal(temp.helper_codes);
+    for (const auto &reg : temp.registers) reject_internal(reg.reset_codelines);
+    for (const auto &wire : temp.wires) reject_internal(wire.reset_codelines);
+    for (const auto &block : temp.tick_blocks) reject_internal(block);
+    for (const auto &service : temp.services) reject_internal(service.codelines);
+    for (const auto &query : temp.queries) reject_internal(query.codelines);
     instance.filepath = temp.filepath;
     instance.module_name = temp.name;
 
@@ -628,9 +638,20 @@ void instantiateModule(
             }
             static_inst.array_dims.push_back(dim_value);
         }
+        std::unordered_set<string> bound_names;
+        for (const auto &[dim_expr, name] : inst.coordinate_bindings) {
+            const auto dim = calculateConstexprValue(dim_expr, local_config_lib);
+            if (dim < 0 || dim >= static_cast<ConfigRealValue>(static_inst.array_dims.size()))
+                throw VulException("COORD dimension out of range for '" + inst.name + "'");
+            if (!static_inst.coordinate_bindings.emplace(static_cast<uint32_t>(dim), name).second || !bound_names.insert(name).second)
+                throw VulException("Duplicate COORD binding for '" + inst.name + "'");
+        }
         for (const auto &param_override : inst.parameter_overrides) {
             const string &param_name = param_override.first;
             const string &param_value_str = param_override.second;
+            if (bound_names.contains(param_name))
+                throw VulException("COORD-bound parameter cannot be overridden: " + param_name);
+            static_inst.parameter_expressions[param_name] = param_value_str;
             ConfigRealValue param_value = calculateConstexprValue(param_value_str, local_config_lib);
             static_inst.parameter_overrides[param_name] = param_value;
         }
@@ -648,6 +669,8 @@ void instantiateModule(
         }
         instance.tick_blocks.push_back(std::move(tick_block));
     }
+
+    instance.connection_config = local_config_lib;
 
     // req-serv connections
     instance.req_connections.clear();
@@ -987,246 +1010,269 @@ void detectRequestCallInLogicBlocks(VulStaticModuleInstance &module_instance) {
     }
 }
 
-uint64_t findConnectedLogicBlockID(shared_ptr<VulStaticModuleInstance> instance, const LogicBlockCall &call) {
-    // 顺着指针关系和req_connections成员找到这个call最终连接到的serv_logic_block的ID，返回这个ID（高32位为instance_id，低32位为block_id）。由于连接的单一性，一个call最多只能连接到一个serv_logic_block，如果找不到连接的serv_logic_block，抛出异常并退出
-
-    auto find_child_ptr_by_name = [](shared_ptr<VulStaticModuleInstance> &mod, const InstanceName &child_name) -> shared_ptr<VulStaticModuleInstance> {
-        for (auto &child : mod->children) {
-            if (!child->instance_path.empty() && child->instance_path.back() == child_name) {
-                return child;
-            }
-        }
-        for (const auto &[inst_name, inst] : mod->instances) {
-            if (!inst.isArrayed()) {
-                continue;
-            }
-            if (child_name == inst_name || child_name.rfind(inst_name + "__", 0) == 0) {
-                for (auto &child : mod->children) {
-                    if (!child->instance_path.empty() && child->instance_path.back() == inst_name) {
-                        return child;
-                    }
-                }
-            }
-        }
-        return nullptr;
-    };
-    auto child_req_name_match = [](const shared_ptr<VulStaticModuleInstance> &child, const InstanceName &conn_req_instance) -> bool {
-        if (conn_req_instance == child->instance_path.back()) {
-            return true;
-        }
-        if (child->parent) {
-            auto inst_it = child->parent->instances.find(child->instance_path.back());
-            if (inst_it != child->parent->instances.end() && inst_it->second.isArrayed()) {
-                return conn_req_instance.rfind(child->instance_path.back() + "__", 0) == 0;
-            }
-        }
-        return false;
-    };
-    auto pack_lb_id = [](uint32_t instance_id, uint32_t block_id) -> uint64_t {
-        return ((uint64_t)instance_id << 32) | block_id;
-    };
-
-    shared_ptr<VulStaticModuleInstance> cur = instance;
-    ReqServName port;
-    bool is_serv_call = false;
-
-    if (call.instance.empty()) {
-        // it's a request call
-        is_serv_call = false;
-        port = call.port;
-    } else {
-        // it's a service call
-        is_serv_call = true;
-        port = call.port;
-        cur = find_child_ptr_by_name(cur, call.instance);
-        if (cur == nullptr) {
-            throw VulException("Invalid LogicBlockCall: instance '" + call.instance + "' not found in instance '" + instance->instance_path.back() + "'");
+namespace {
+string joinCode(const vector<string> &lines) {
+    string out;
+    const auto stripped = cppparse::stripComments(lines);
+    uint32_t line_number = 1;
+    for (size_t i = 0; i < stripped.lines.size(); ++i) {
+        while (line_number < stripped.mapping[i]) { out += "\n"; ++line_number; }
+        out += stripped.lines[i] + "\n"; ++line_number;
+    }
+    return out;
+}
+size_t balancedEnd(const string &text, size_t start, char open, char close) {
+    int depth = 0;
+    bool quoted = false; char quote = 0;
+    for (size_t i = start; i < text.size(); ++i) {
+        if (quoted) { if (text[i] == '\\') ++i; else if (text[i] == quote) quoted = false; continue; }
+        if (text[i] == '"' || text[i] == '\'') { quoted = true; quote = text[i]; continue; }
+        if (text[i] == open) ++depth;
+        if (text[i] == close && --depth == 0) return i;
+    }
+    throw VulException("Unbalanced constexpr conditional in transaction analysis");
+}
+string maskQuotedText(string text) {
+    // Ignore names in literal text; retain offsets for source diagnostics.
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '"' && text[i] != '\'') continue;
+        const char quote = text[i]; text[i++] = ' ';
+        for (; i < text.size(); ++i) {
+            const char c = text[i]; text[i] = c == '\n' ? '\n' : ' ';
+            if (c == '\\') { if (++i < text.size()) text[i] = ' '; }
+            else if (c == quote) break;
         }
     }
-
-    for (uint32_t hop = 0; hop < 4096; hop ++) {
-        VulErrorContextGuard hop_guard("Entering instance '" + cur->simClassName() + "' with port '" + port + "'");
-        if (is_serv_call) {
-            // impl as code block here, or connected to a child service
-            auto lb_iter = cur->serv_logic_blocks.find(port);
-            if (lb_iter != cur->serv_logic_blocks.end()) {
-                return pack_lb_id(cur->instance_id, lb_iter->second.block_id);
-            } else {
-                // find connected child service
-                bool found_conn = false;
-                for (const auto &conn : cur->req_connections) {
-                    if (conn.req_instance == "" && conn.req_name == port) {
-                        const string &target_name = conn.serv_instance_base.empty() ? conn.serv_instance : conn.serv_instance_base;
-                        cur = find_child_ptr_by_name(cur, target_name);
-                        if (cur == nullptr) {
-                            throw VulException("Invalid Req-Serv connection: instance '" + target_name + "' not found in instance '" + instance->instance_path.back() + "'");
-                        }
-                        port = conn.serv_name;
-                        found_conn = true;
-                        break;
-                    }
-                }
-                if (!found_conn) {
-                    throw VulException("No connected service found for LogicBlockCall to service '" + port + "' in instance '" + instance->instance_path.back() + "'");
-                }
+    return text;
+}
+vector<std::pair<size_t, string>> transactionCallIndices(string text, const string &name) {
+    text = maskQuotedText(std::move(text));
+    vector<std::pair<size_t, string>> out;
+    const std::regex identifier("\\b" + name + "\\b");
+    for (std::sregex_iterator it(text.begin(), text.end(), identifier), end; it != end; ++it) {
+        size_t position = it->position() + it->length();
+        position = text.find_first_not_of(" \t\r\n", position);
+        if (position == string::npos) continue;
+        string expression;
+        if (text[position] == '<') {
+            const size_t begin = ++position;
+            int parens = 0;
+            for (; position < text.size(); ++position) {
+                if (text[position] == '(') ++parens;
+                else if (text[position] == ')') --parens;
+                else if (text[position] == '>' && parens == 0) break;
             }
-            continue;
+            if (position == text.size()) continue;
+            expression = text.substr(begin, position - begin);
+            position = text.find_first_not_of(" \t\r\n", position + 1);
         }
-        // request call, should be connected at parent level
-        auto parent = cur->parent;
-        // CR-R: connected to parent's request
-        // CR-S: connected to parent's service
-        // CR-CS: connected to another child's service
-        bool found_conn = false;
-        for (const auto &conn : parent->req_connections) {
-            const string &req_name_match = conn.req_instance_base.empty() ? conn.req_instance : conn.req_instance_base;
-            if (child_req_name_match(cur, req_name_match) && conn.req_name == port) {
-                if (conn.serv_instance == "") {
-                    // connected to parent's service/request
-                    cur = parent;
-                    port = conn.serv_name;
-                    is_serv_call = (parent->requests.find(conn.serv_name) == parent->requests.end());
-                } else {
-                    // connected to another child's service
-                    const string &target_name = conn.serv_instance_base.empty() ? conn.serv_instance : conn.serv_instance_base;
-                    cur = find_child_ptr_by_name(parent, target_name);
-                    if (cur == nullptr) {
-                        throw VulException("Invalid Req-Serv connection: instance '" + target_name + "' not found in instance '" + parent->instance_path.back() + "'");
-                    }
-                    port = conn.serv_name;
-                    is_serv_call = true;
-                }
-                found_conn = true;
-                break;
-            }
-        }
-        if (!found_conn) {
-            throw VulException("No connected service found for LogicBlockCall to request '" + port + "' in instance '" + instance->instance_path.back() + "'");
-        }
+        if (position < text.size() && text[position] == '(') out.push_back({it->position(), expression});
     }
-    throw VulException("Exceeded maximum hop count while finding connected logic block for LogicBlockCall to '" + port + "' in instance '" + instance->instance_path.back() + "'. Possible cyclic connections.");
+    return out;
+}
+
+bool keywordAt(const string &text, size_t position, const string &keyword) {
+    return text.compare(position, keyword.size(), keyword) == 0 &&
+        (position + keyword.size() == text.size() || !isIdentChar(text[position + keyword.size()]));
+}
+size_t statementEnd(const string &text, size_t position) {
+    position = text.find_first_not_of(" \t\r\n", position);
+    if (position == string::npos) throw VulException("Missing constexpr statement body");
+    if (text[position] == '{') return balancedEnd(text, position, '{', '}') + 1;
+    if (keywordAt(text, position, "if")) {
+        const size_t open = text.find('(', position + 2);
+        if (open == string::npos) throw VulException("Invalid conditional statement");
+        size_t end = statementEnd(text, balancedEnd(text, open, '(', ')') + 1);
+        size_t next = text.find_first_not_of(" \t\r\n", end);
+        if (next != string::npos && keywordAt(text, next, "else")) end = statementEnd(text, next + 4);
+        return end;
+    }
+    if (keywordAt(text, position, "for") || keywordAt(text, position, "while")) {
+        const size_t open = text.find('(', position);
+        return statementEnd(text, balancedEnd(text, open, '(', ')') + 1);
+    }
+    for (size_t i = position; i < text.size(); ++i) {
+        if (text[i] == '(') i = balancedEnd(text, i, '(', ')');
+        else if (text[i] == '{') i = balancedEnd(text, i, '{', '}');
+        else if (text[i] == '[') i = balancedEnd(text, i, '[', ']');
+        else if (text[i] == ';') return i + 1;
+    }
+    throw VulException("Unterminated constexpr statement");
+}
+string activeConstexprCode(string text, const VulStaticConfigLib &config) {
+    const std::regex pattern(R"(\bif\s+constexpr\s*\()");
+    const string searchable = maskQuotedText(text);
+    std::smatch match;
+    size_t search = 0;
+    while (search < text.size()) {
+        const string tail = searchable.substr(search);
+        if (!std::regex_search(tail, match, pattern)) break;
+        const size_t begin = search + match.position();
+        const size_t paren = begin + match.length() - 1;
+        const size_t endparen = balancedEnd(text, paren, '(', ')');
+        const size_t body = text.find_first_not_of(" \t\r\n", endparen + 1);
+        const size_t body_end = statementEnd(text, body);
+        size_t end = body_end;
+        size_t other = end;
+        size_t next = text.find_first_not_of(" \t\r\n", end);
+        if (next != string::npos && keywordAt(text, next, "else")) {
+            other = text.find_first_not_of(" \t\r\n", next + 4);
+            end = statementEnd(text, other);
+        }
+        const bool enabled = calculateConstexprValue(text.substr(paren + 1, endparen - paren - 1), config) != 0;
+        size_t selected = enabled ? body : other;
+        size_t selected_end = enabled ? body_end : end;
+        if (selected < selected_end && text[selected] == '{') { ++selected; --selected_end; }
+        string chosen = activeConstexprCode(text.substr(selected, selected_end - selected), config);
+        string replacement = text.substr(begin, end - begin);
+        for (auto &c : replacement) if (c != '\n') c = ' ';
+        replacement.replace(selected - begin, chosen.size(), chosen);
+        text.replace(begin, end - begin, replacement);
+        search = end;
+    }
+    return text;
+}
 }
 
 void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
-
     VulErrorContextGuard top_guard("Setting up update sequence for instance '" + top->simClassName() + "'");
-
-    unordered_set<uint64_t> all_logic_block_ids;
-    unordered_map<uint64_t, unordered_set<uint64_t>> logic_block_call_graph;
     unordered_map<VulInstanceID, shared_ptr<VulStaticModuleInstance>> instance_id_map;
-
-    std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
-    bfs_queue.push_back(top);
+    std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue{top};
+    struct ServiceNode { string port; uint32_t index; const VulLogicBlock *logic; };
+    unordered_map<uint64_t, ServiceNode> service_nodes;
+    unordered_map<uint64_t, string> node_names;
+    std::map<std::tuple<VulInstanceID, string, uint32_t>, uint64_t> endpoint_ids;
     while (!bfs_queue.empty()) {
-        auto cur_inst = bfs_queue.front();
-        bfs_queue.pop_front();
-
-        instance_id_map[cur_inst->instance_id] = cur_inst;
-        for (const auto &child : cur_inst->children) bfs_queue.push_back(child);
-
-        VulErrorContextGuard inst_guard("Parsing connection from instance '" + cur_inst->simClassName() + "' (IID: " + std::to_string(cur_inst->instance_id) + ")");
-
-        for (const auto &serv_lb_entry : cur_inst->serv_logic_blocks) {
-            const auto &serv_lb = serv_lb_entry.second;
-            VulErrorContextGuard lb_guard("Parsing service logic block '" + serv_lb_entry.first + "' (BID: " + std::to_string(serv_lb.block_id) + ")");
-            uint64_t lb_id = ((uint64_t)cur_inst->instance_id << 32) | serv_lb.block_id;
-            all_logic_block_ids.insert(lb_id);
-            for (const auto &req_call : serv_lb.call_requests) {
-                uint64_t called_lb_id = findConnectedLogicBlockID(cur_inst, req_call);
-                logic_block_call_graph[lb_id].insert(called_lb_id);
-            }
-        }
-        for (const auto &tick_lb : cur_inst->tick_blocks) {
-            VulErrorContextGuard lb_guard("Parsing tick logic block (BID: 0)");
-            uint64_t lb_id = ((uint64_t)cur_inst->instance_id << 32);
-            all_logic_block_ids.insert(lb_id);
-            for (const auto &req_call : tick_lb.call_requests) {
-                uint64_t called_lb_id = findConnectedLogicBlockID(cur_inst, req_call);
-                logic_block_call_graph[lb_id].insert(called_lb_id);
+        auto inst = bfs_queue.front(); bfs_queue.pop_front();
+        instance_id_map[inst->instance_id] = inst;
+        for (const auto &child : inst->children) bfs_queue.push_back(child);
+        const string path = inst->concatInstancePath("::", true);
+        node_names[uint64_t(inst->instance_id) << 32] = path + ".<tick>";
+        uint32_t block = 1;
+        for (const auto &[name, logic] : inst->serv_logic_blocks) {
+            auto decl = inst->services.find(name);
+            const uint32_t count = decl == inst->services.end() ? 1 : decl->second.array_size;
+            for (uint32_t idx = 0; idx < count; ++idx) {
+                const uint64_t id = (uint64_t(inst->instance_id) << 32) | block++;
+                endpoint_ids[{inst->instance_id, name, idx}] = id;
+                service_nodes[id] = {name, idx, &logic};
+                node_names[id] = path + "." + name + (count > 1 ? "[" + std::to_string(idx) + "]" : "");
             }
         }
     }
-
-    auto debug_lb_name_by_id = [&](uint64_t lb_id) -> string {
-        VulInstanceID inst_id = lb_id >> 32;
-        uint32_t block_id = lb_id & 0xFFFFFFFF;
-        auto inst_iter = instance_id_map.find(inst_id);
-        if (inst_iter == instance_id_map.end()) {
-            return "<unknown instance " + std::to_string(inst_id) + ">";
-        }
-        auto &inst_ptr = inst_iter->second;
-        string instance_path_str;
-        for (const auto &path_elem : inst_ptr->instance_path) {
-            if (!instance_path_str.empty()) instance_path_str += "::";
-            instance_path_str += path_elem;
-        }
-        if (block_id == 0) {
-            return instance_path_str + ".<tick>";
-        }
-        for (auto &serv_lb_entry : inst_ptr->serv_logic_blocks) {
-            auto &serv_lb = serv_lb_entry.second;
-            if (serv_lb.block_id == block_id) {
-                return instance_path_str + "." + serv_lb_entry.first;
-            }
-        }
-        return instance_path_str + ".<unknown>";
+    auto debug_lb_name_by_id = [&](uint64_t id) { return node_names.at(id); };
+    auto childByName = [](const shared_ptr<VulStaticModuleInstance> &parent, const string &name) {
+        for (const auto &child : parent->children) if (child->instance_path.back() == name) return child;
+        throw VulException("Concrete child instance not found: " + name);
     };
-
-    VulErrorContextGuard graph_guard("Checking logic block call graph");
-    unordered_map<VulInstanceID, vector<uint64_t>> instance_tick_to_lb_call_graph;
-    // logic_block_call_graph 是 {tick_code_blocks, serv_logic_blocks} 之间的调用关系图，instance_tick_to_lb_call_graph 是从实例的 tick_code_block 到被所有可能被递归调用的 logic_block 的调用关系图
-    for (const auto &inst_entry : instance_id_map) {
-        const auto &inst_id = inst_entry.first;
-        const auto &inst_ptr = inst_entry.second;
-        uint64_t tick_lb_id = ((uint64_t)inst_id << 32);
-        unordered_set<uint64_t> visited;
-        struct CallPathNode {
-            uint64_t lb_id;
-            vector<uint64_t> call_path; // for debugging
-        };
-        std::deque<CallPathNode> bfs_queue;
-        bfs_queue.push_back({tick_lb_id, {tick_lb_id}});
-        while (!bfs_queue.empty()) {
-            auto [cur_lb_id, call_path] = bfs_queue.front();
-            bfs_queue.pop_front();
-            if (visited.find(cur_lb_id) != visited.end()) {
-                string loop_str;
-                for (const auto &lb_id : call_path) {
-                    if (!loop_str.empty()) loop_str += " -> ";
-                    loop_str += debug_lb_name_by_id(lb_id);
+    std::function<vector<uint64_t>(shared_ptr<VulStaticModuleInstance>, string, uint32_t, bool, std::set<string>)> resolve;
+    resolve = [&](auto inst, string port, uint32_t index, bool service, std::set<string> path) -> vector<uint64_t> {
+        const string key = std::to_string(inst->instance_id) + ":" + port + ":" + std::to_string(index) + (service ? ":S" : ":R");
+        if (!path.insert(key).second) throw VulException("Cyclic transaction forwarding at " + inst->concatInstancePath("::", true) + "." + port);
+        const auto &ports = service ? inst->services : inst->requests;
+        auto decl = ports.find(port);
+        if (decl == ports.end() || index >= decl->second.array_size)
+            throw VulException("Invalid transaction endpoint: " + inst->concatInstancePath("::", true) + "." + port + "[" + std::to_string(index) + "]");
+        if (service) {
+            auto found = endpoint_ids.find({inst->instance_id, port, index});
+            if (found != endpoint_ids.end()) return {found->second};
+        }
+        auto scope = service ? inst : inst->parent;
+        if (!scope) throw VulException("Unconnected root request: " + port);
+        vector<uint64_t> out;
+        for (const auto &conn : scope->concrete_connections) {
+            if (conn.req_instance != (service ? "" : inst->instance_path.back()) || conn.req_name != port) continue;
+            if (conn.req_port_index >= 0 && uint32_t(conn.req_port_index) != index) continue;
+            auto destination = conn.serv_instance.empty() ? scope : childByName(scope, conn.serv_instance);
+            bool next_service = !conn.serv_instance.empty() || !scope->requests.contains(conn.serv_name);
+            const auto &dstports = next_service ? destination->services : destination->requests;
+            auto dstdecl = dstports.find(conn.serv_name);
+            if (dstdecl == dstports.end()) throw VulException("Missing destination transaction: " + conn.serv_name);
+            const uint32_t dstindex = conn.serv_port_index >= 0 ? conn.serv_port_index : (dstdecl->second.is_arrayed ? index : 0);
+            auto targets = resolve(destination, conn.serv_name, dstindex, next_service, path);
+            out.insert(out.end(), targets.begin(), targets.end());
+        }
+        if (out.empty()) throw VulException("No connected service found for " + inst->concatInstancePath("::", true) + "." + port);
+        return out;
+    };
+    unordered_map<uint64_t, vector<uint64_t>> logic_block_call_graph;
+    auto scan = [&](const shared_ptr<VulStaticModuleInstance> &inst, uint64_t source, const vector<string> &lines, uint32_t slot, const VulDebugLocs &locations) {
+        auto config = inst->connection_config;
+        config["IDX"] = slot;
+        const string text = activeConstexprCode(joinCode(lines), config);
+        vector<string> names;
+        for (const auto &[name, _] : inst->requests) names.push_back(name);
+        for (const auto &use : inst->child_service_uses)
+            if (std::find(names.begin(), names.end(), use.alias_name) == names.end()) names.push_back(use.alias_name);
+        for (const auto &name : names) {
+            for (const auto &[offset, expression] : transactionCallIndices(text, name)) {
+                LogicBlockCall call;
+                call.port = name;
+                call.index_expression = expression;
+                const size_t line_index = std::count(text.begin(), text.begin() + offset, '\n');
+                if (line_index < locations.size()) call.source_location = locations[line_index];
+                const string location = call.source_location.valid() ? " at " + call.source_location.file + ":" + std::to_string(call.source_location.line) : "";
+                VulErrorContextGuard call_guard("Analyzing transaction call '" + name + "' in " + inst->concatInstancePath("::", true) + location);
+                uint32_t idx = 0;
+                if (!call.index_expression.empty()) {
+                    auto value = calculateConstexprValue(call.index_expression, config);
+                    if (value < 0 || value > UINT32_MAX) throw VulException("Transaction index out of range: " + name);
+                    idx = value;
                 }
-                throw VulException("Cyclic call or repeated call detected in logic block call graph: " + loop_str);
+                vector<uint64_t> targets;
+                if (inst->requests.contains(name)) targets = resolve(inst, name, idx, false, {});
+                else {
+                    bool found = false;
+                    for (const auto &use : inst->child_service_uses) {
+                        if (use.alias_name != name || (use.alias_indexed && use.alias_index != idx)) continue;
+                        auto child = childByName(inst, use.instance_name);
+                        auto result = resolve(child, use.service_name, use.alias_indexed ? 0 : idx, true, {});
+                        targets.insert(targets.end(), result.begin(), result.end()); found = true;
+                    }
+                    if (!found) throw VulException("Child service alias index out of range: " + name);
+                }
+                auto &edges = logic_block_call_graph[source];
+                edges.insert(edges.end(), targets.begin(), targets.end());
             }
-            visited.insert(cur_lb_id);
-            if (cur_lb_id != tick_lb_id) {
-                instance_tick_to_lb_call_graph[inst_id].push_back(cur_lb_id);
-            }
-            const auto &called_lbs_set = logic_block_call_graph.find(cur_lb_id);
-            if (called_lbs_set != logic_block_call_graph.end()) {
-                for (const auto &called_lb_id : called_lbs_set->second) {
-                    vector<uint64_t> new_call_path = call_path;
-                    new_call_path.push_back(called_lb_id);
-                    bfs_queue.push_back({called_lb_id, new_call_path});
+        }
+    };
+    for (const auto &[id, inst] : instance_id_map) {
+        for (const auto &tick : inst->tick_blocks) {
+            const uint64_t source = uint64_t(id) << 32;
+            scan(inst, source, tick.codelines, 0, tick.codelines_debug);
+            // TestMain's externally callable services have synthetic callers.
+            if (inst->module_name == "TestMain") for (const auto &call : tick.call_requests) {
+                for (uint32_t idx = 0; idx < inst->requests.at(call.port).array_size; ++idx) {
+                    auto result = resolve(inst, call.port, idx, false, {});
+                    logic_block_call_graph[source].insert(logic_block_call_graph[source].end(), result.begin(), result.end());
                 }
             }
         }
     }
-
+    for (const auto &[id, node] : service_nodes) scan(instance_id_map.at(id >> 32), id, node.logic->codelines, node.index, node.logic->codelines_debug);
+    unordered_map<VulInstanceID, vector<uint64_t>> instance_tick_to_lb_call_graph;
     unordered_map<uint64_t, VulInstanceID> logic_block_id_to_instance_id;
-    // 反向映射一下，同时保证每一个serv codeblock仅会被最多一个tick codeblock调用，否则这个重复调用行为在硬件上是无法实现的
-    for (const auto &entry : instance_tick_to_lb_call_graph) {
-        const auto &inst_id = entry.first;
-        const auto &called_lb_ids = entry.second;
-        for (const auto &lb_id : called_lb_ids) {
-            auto iter = logic_block_id_to_instance_id.find(lb_id);
-            if (iter != logic_block_id_to_instance_id.end() && iter->second != inst_id) {
-                string called_inst1 = debug_lb_name_by_id(static_cast<uint64_t>(iter->second) << 32);
-                string called_inst2 = debug_lb_name_by_id(static_cast<uint64_t>(inst_id) << 32);
-                string lb_name = debug_lb_name_by_id(lb_id);
-                throw VulException("Logic block '" + lb_name + "' is called by multiple instances: '" + called_inst1 + "' and '" + called_inst2 + "'. This is not allowed because it cannot be implemented in hardware.");
+    for (const auto &[instid, inst] : instance_id_map) {
+        std::set<uint64_t> active, visited;
+        vector<uint64_t> path;
+        std::function<void(uint64_t)> visit = [&](uint64_t id) {
+            path.push_back(id);
+            if (active.contains(id) || visited.contains(id)) {
+                string diagnostic;
+                for (auto p : path) { if (!diagnostic.empty()) diagnostic += " -> "; diagnostic += debug_lb_name_by_id(p); }
+                throw VulException(string(active.contains(id) ? "Cyclic call" : "Repeated call") + " detected in logic block call graph: " + diagnostic);
             }
-            logic_block_id_to_instance_id[lb_id] = inst_id;
-        }
+            active.insert(id); visited.insert(id);
+            if ((id & 0xFFFFFFFF) != 0) {
+                instance_tick_to_lb_call_graph[instid].push_back(id);
+                auto [previous, inserted] = logic_block_id_to_instance_id.emplace(id, instid);
+                if (!inserted && previous->second != instid)
+                    throw VulException("Logic block '" + debug_lb_name_by_id(id) + "' is called by multiple instances: '" + debug_lb_name_by_id(uint64_t(previous->second) << 32) + "' and '" + debug_lb_name_by_id(uint64_t(instid) << 32) + "'.");
+            }
+            for (auto target : logic_block_call_graph[id]) visit(target);
+            active.erase(id); path.pop_back();
+        };
+        visit(uint64_t(instid) << 32);
     }
 
     VulErrorContextGuard order_guard("Determining instance update order");
@@ -1242,25 +1288,18 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         map<int32_t, vector<VulInstanceID>> priority_to_callee_instances;
         priority_to_callee_instances[0].push_back(cur_inst_id); // tick block has default priority 0
 
-        VulErrorContextGuard inst_guard("Processing instance '" + cur_inst->simClassName() + "' (IID: " + std::to_string(cur_inst_id) + ") for update order");
+        VulErrorContextGuard inst_guard("Processing instance '" + cur_inst->concatInstancePath("::", true) + "' (IID: " + std::to_string(cur_inst_id) + ") for update order");
 
-        for (const auto &serv_lb_entry : cur_inst->serv_logic_blocks) {
-            const auto &serv_lb = serv_lb_entry.second;
-            if (!serv_lb.with_priority) {
-                continue;
-            }
-            uint64_t lb_id = ((uint64_t)cur_inst->instance_id << 32) | serv_lb.block_id;
-            auto callee_inst_iter = logic_block_id_to_instance_id.find(lb_id);
-            if (callee_inst_iter == logic_block_id_to_instance_id.end()) {
-                // not called by any tick block, skip
-                continue;
-            }
-            VulInstanceID callee_inst_id = callee_inst_iter->second;
-            if (callee_inst_id == cur_inst_id) {
-                string lb_name = debug_lb_name_by_id(lb_id);
-                throw VulException("Logic block '" + lb_name + "' is called by its own tick block.");
-            }
-            priority_to_callee_instances[serv_lb.priority].push_back(callee_inst_id);
+        for (const auto &[lb_id, node] : service_nodes) {
+            if ((lb_id >> 32) != cur_inst_id) continue;
+            const auto &serv_lb = *node.logic;
+            if (!serv_lb.with_priority) continue;
+            auto caller = logic_block_id_to_instance_id.find(lb_id);
+            if (caller == logic_block_id_to_instance_id.end()) continue;
+            const auto caller_id = caller->second;
+            if (caller_id == cur_inst_id)
+                throw VulException("Logic block '" + debug_lb_name_by_id(lb_id) + "' is called by its own tick block.");
+            priority_to_callee_instances[serv_lb.priority].push_back(caller_id);
         }
         
         unordered_set<VulInstanceID> higher_priority_instance_set;
@@ -1429,7 +1468,25 @@ void setupUpdateSequence(shared_ptr<VulStaticModuleInstance> &top) {
         }
 
         if (cur_inst->update_seq.size() != update_nodes.size()) {
-            throw VulException("Cyclic update constraints found in instance update order graph for instance ID " + std::to_string(cur_inst_id));
+            std::set<VulInstanceID> blocked;
+            string diagnostic = "Cyclic update constraints found in instance update order graph at " + cur_inst->concatInstancePath("::", true) + ":";
+            for (auto id : update_nodes) if (indegree.at(id) > 0) {
+                blocked.insert(id);
+                diagnostic += " " + instance_id_map.at(id)->concatInstancePath("::", true);
+            }
+            vector<string> calls;
+            for (const auto &[id, node] : service_nodes) {
+                auto caller = logic_block_id_to_instance_id.find(id);
+                if (!node.logic->with_priority || caller == logic_block_id_to_instance_id.end()) continue;
+                auto projected = instance_id_map.at(caller->second);
+                while (projected && projected != cur_inst && projected->parent != cur_inst) projected = projected->parent;
+                if (!projected || !blocked.contains(projected->instance_id)) continue;
+                calls.push_back(debug_lb_name_by_id(uint64_t(caller->second) << 32) + " -> " + debug_lb_name_by_id(id)
+                    + " (priority=" + std::to_string(node.logic->priority) + ")");
+            }
+            std::sort(calls.begin(), calls.end());
+            for (const auto &call : calls) diagnostic += "\n  " + call;
+            throw VulException(diagnostic);
         }
     }
 

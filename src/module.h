@@ -94,6 +94,9 @@ struct VulReqServConnection {
     InstanceName    serv_instance_base;
     vector<VulConnIndexExpr> serv_indices;
 
+    int32_t req_port_index = -1;
+    int32_t serv_port_index = -1;
+
     inline string toString() const {
         string req_side = "'" + req_instance + "'.'" + req_name + "'";
         if (!req_indices.empty()) {
@@ -240,6 +243,7 @@ struct VulTempInstance {
     string module_name;
     vector<string> array_dims;
     vector<pair<string, string>> parameter_overrides; // pair of parameter name and value
+    vector<pair<string, string>> coordinate_bindings; // dimension expression -> parameter name
 };
 
 struct VulTempChildServiceUse {
@@ -316,6 +320,8 @@ using VulLogicBlockID = uint32_t;
 struct LogicBlockCall {
     InstanceName instance; // empty if call is in the module itself
     ReqServName port; // request port for self-call, or service port for child instance call
+    string index_expression;
+    VulDebugLoc source_location;
 };
 
 struct VulLogicBlock {
@@ -325,7 +331,7 @@ struct VulLogicBlock {
     VulDebugLocs cond_codelines_debug;
     vector<LogicBlockCall> call_requests; // all transaction ports called within this block
     VulLogicBlockID block_id; // instance-unique block id, assigned during module tree construction
-    int32_t priority; // only for service logic block, smaller value means higher priority, default 0
+    int32_t priority; // only for service logic block, larger value means higher priority, default 0
     bool with_priority = false; // whether the priority is specified by user
 };
 
@@ -340,6 +346,8 @@ struct VulStaticInstanceDecl {
     ModuleName          module_name;
     vector<ConfigRealValue> array_dims;
     VulStaticConfigLib parameter_overrides;
+    std::map<uint32_t, string> coordinate_bindings;
+    std::map<string, string> parameter_expressions;
 
     inline bool isArrayed() const {
         return !array_dims.empty();
@@ -494,6 +502,12 @@ struct VulStaticQueue {
     ConfigRealValue deq_width;
 };
 
+inline string concreteInstanceName(const string &name, const vector<ConfigRealValue> &indices) {
+    string out = indices.empty() ? name : "__vul_instance_" + name;
+    for (auto index : indices) out += "__" + std::to_string(index);
+    return out;
+}
+
 struct VulStaticModuleInstance {
 
     inline vector<string> normalizedInstancePath() const {
@@ -562,13 +576,54 @@ struct VulStaticModuleInstance {
         return path.substr(1) + ".sv";
     }
     inline string concatInstancePath(const string &sep, bool include_topsim = false) const {
-        string path = "";
-        uint64_t i = (include_topsim ? 0 : 1);
-        for (; i < instance_path.size(); ++i) {
-            path += (path.empty() ? "" : sep) + instance_path[i];
+        auto path = instance_path;
+        for (const auto *node = this; node != nullptr; node = node->parent.get()) {
+            if (node->instance_path.empty()) continue;
+            string segment = node->instance_decl_name.empty() ? node->instance_path.back() : node->instance_decl_name;
+            for (auto index : node->instance_array_indices) segment += "[" + std::to_string(index) + "]";
+            path.at(node->instance_path.size() - 1) = segment;
         }
-        return path;
+        string out;
+        size_t begin = !include_topsim && !path.empty() && path.front() == "sim" ? 1 : 0;
+        for (size_t i = begin; i < path.size(); ++i) out += (out.empty() ? "" : sep) + path[i];
+        return out;
     }
+
+    vector<ConfigRealValue> coordinateContext() const {
+        vector<ConfigRealValue> out = parent ? parent->coordinateContext() : vector<ConfigRealValue>{};
+        out.insert(out.end(), instance_array_indices.begin(), instance_array_indices.end());
+        return out;
+    }
+    string simConcreteClassName() const {
+        string out = simClassName();
+        const auto coords = coordinateContext();
+        if (!coords.empty()) {
+            out += "<";
+            for (size_t i = 0; i < coords.size(); ++i) {
+                if (i) out += ", ";
+                out += std::to_string(coords[i]);
+            }
+            out += ">";
+        }
+        return out;
+    }
+    string rtlConcreteClassName() const {
+        return simClassName() + (coordinateContext().empty() ? "" : "__v" + std::to_string(instance_id));
+    }
+    string rtlConcreteHlsPath() const {
+        string out = rtlHlsPath();
+        if (!coordinateContext().empty()) out.insert(out.size() - 10, "__v" + std::to_string(instance_id));
+        return out;
+    }
+    string rtlConcreteSvPath() const {
+        string out = rtlSvPath();
+        if (!coordinateContext().empty()) out.insert(out.size() - 3, "__v" + std::to_string(instance_id));
+        return out;
+    }
+    std::map<string, size_t> parameter_coordinate_indices;
+    // The concrete tree retains declaration names separately for generation identity.
+    vector<VulReqServConnection> concrete_connections;
+    VulStaticConfigLib connection_config;
 
     VulStaticConfigLib local_parameters;
     VulStaticConfigLib local_consts;
@@ -634,3 +689,5 @@ struct VulStaticTestHarnessModule {
     vector<string> globalCodes;
     VulDebugLocs globalCodes_debug;
 };
+
+void materializeConcreteConnections(const shared_ptr<VulStaticModuleInstance> &root);

@@ -112,12 +112,12 @@ run_case("call-cycle", {
     "Top.hpp": "CHILD_INSTANCE(Source, source);\nCHILD_INSTANCE(Sink, sink);\nCONNECT_CR_CS(source, send, sink, receive);\nCONNECT_CR_CS(sink, back, source, again);\n",
     "Source.hpp": "REQUEST(send);\nSERVICE(again) { send(); }\nTICK_IMPL() { send(); }\n",
     "Sink.hpp": "REQUEST(back);\nSERVICE(receive) { back(); }\n",
-}, "Cyclic call or repeated call")
+}, "Cyclic call")
 run_case("repeated-call", {
     "Top.hpp": "CHILD_INSTANCE(Branch, a);\nCHILD_INSTANCE(Branch, b);\nCHILD_INSTANCE(Sink, sink);\nUSE_CHILD_SERVICE(a, enter, enter_a);\nUSE_CHILD_SERVICE(b, enter, enter_b);\nCONNECT_CR_CS(a, send, sink, receive);\nCONNECT_CR_CS(b, send, sink, receive);\nTICK_IMPL() { enter_a(); enter_b(); }\n",
     "Branch.hpp": "REQUEST(send);\nSERVICE(enter) { send(); }\n",
     "Sink.hpp": "SERVICE(receive) { }\n",
-}, "Cyclic call or repeated call")
+}, "Repeated call")
 run_case("update-cycle", {
     "Top.hpp": "CHILD_INSTANCE(Source, a);\nCHILD_INSTANCE(Source, b);\nCHILD_INSTANCE(Sink, x);\nCHILD_INSTANCE(Sink, y);\nCONNECT_CR_CS(a, first, x, low);\nCONNECT_CR_CS(a, second, y, high);\nCONNECT_CR_CS(b, first, x, high);\nCONNECT_CR_CS(b, second, y, low);\n",
     "Source.hpp": "REQUEST(first);\nREQUEST(second);\nTICK_IMPL() { first(); second(); }\n",

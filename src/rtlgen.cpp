@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "rtlgen.h"
+#include "instance_graph.h"
 #include "apiinline/apiinline.hpp"
 #include "apiinline/register_usage_check.hpp"
 #include "debugmap.hpp"
@@ -213,210 +214,6 @@ vector<string> substituteConfigConstants(
     return result;
 }
 
-template<typename Fn>
-void forEachIndexTuple(const vector<ConfigRealValue> &dims, Fn fn) {
-    vector<ConfigRealValue> indices(dims.size(), 0);
-    std::function<void(size_t)> dfs = [&](size_t dim) {
-        if (dim == dims.size()) {
-            fn(indices);
-            return;
-        }
-        for (ConfigRealValue idx = 0; idx < dims[dim]; ++idx) {
-            indices[dim] = idx;
-            dfs(dim + 1);
-        }
-    };
-    if (dims.empty()) {
-        fn(indices);
-    } else {
-        dfs(0);
-    }
-}
-
-struct ResolvedReqServConnection {
-    VulReqServConnection conn;
-    string req_instance_name;
-    vector<ConfigRealValue> req_instance_indices;
-    string serv_instance_name;
-    vector<ConfigRealValue> serv_instance_indices;
-};
-
-static string connEndpointBaseName(const string &raw_name, const string &base_name) {
-    return base_name.empty() ? raw_name : base_name;
-}
-
-static vector<ConfigRealValue> parseConcreteChildIndices(
-    const VulStaticModuleInstance &module,
-    const string &base_name,
-    const string &concrete_name
-) {
-    vector<ConfigRealValue> indices;
-    auto inst_it = module.instances.find(base_name);
-    if (inst_it == module.instances.end()) {
-        throw VulException("Instance " + base_name + " not found while resolving RTL child connection");
-    }
-    const auto &decl = inst_it->second;
-    if (!decl.isArrayed()) {
-        if (concrete_name != base_name) {
-            throw VulException("Unexpected concrete child name " + concrete_name + " for scalar instance " + base_name);
-        }
-        return indices;
-    }
-    string prefix = base_name + "__";
-    if (concrete_name.rfind(prefix, 0) != 0) {
-        throw VulException("Concrete child name " + concrete_name + " does not match array base " + base_name);
-    }
-    string rest = concrete_name.substr(prefix.size());
-    size_t pos = 0;
-    while (pos < rest.size()) {
-        size_t next = rest.find("__", pos);
-        string token = (next == string::npos) ? rest.substr(pos) : rest.substr(pos, next - pos);
-        if (token.empty()) {
-            throw VulException("Invalid concrete child name " + concrete_name);
-        }
-        indices.push_back(std::stoll(token));
-        if (next == string::npos) {
-            break;
-        }
-        pos = next + 2;
-    }
-    if (indices.size() != decl.array_dims.size()) {
-        throw VulException("Dimension mismatch while resolving concrete child name " + concrete_name);
-    }
-    return indices;
-}
-
-static bool matchConcreteEndpoint(
-    const vector<ConfigRealValue> &concrete_indices,
-    const vector<VulConnIndexExpr> &endpoint_indices,
-    const VulStaticConfigLib &config_lib,
-    vector<std::optional<ConfigRealValue>> &loop_vars
-) {
-    if (concrete_indices.size() != endpoint_indices.size()) {
-        return false;
-    }
-    for (size_t dim = 0; dim < endpoint_indices.size(); ++dim) {
-        const auto &idx = endpoint_indices[dim];
-        ConfigRealValue concrete_idx = concrete_indices[dim];
-        if (idx.kind == VulConnIndexKind::Wildcard) {
-            continue;
-        }
-        if (idx.kind == VulConnIndexKind::ConstantExpr) {
-            if (calculateConstexprValue(idx.expr, config_lib) != concrete_idx) {
-                return false;
-            }
-            continue;
-        }
-        if (idx.kind == VulConnIndexKind::GeneralExpr) {
-            return false;
-        }
-        if (idx.kind == VulConnIndexKind::LoopVar) {
-            if (idx.loop_dim < 0 || static_cast<size_t>(idx.loop_dim) >= loop_vars.size()) {
-                return false;
-            }
-            ConfigRealValue loop_value = concrete_idx - idx.offset;
-            auto &slot = loop_vars[idx.loop_dim];
-            if (slot.has_value()) {
-                if (*slot != loop_value) {
-                    return false;
-                }
-            } else {
-                slot = loop_value;
-            }
-            continue;
-        }
-    }
-    return true;
-}
-
-static string replaceLoopVarsForRTLExpr(const string &expr) {
-    string out;
-    out.reserve(expr.size() * 2);
-    for (char c : expr) {
-        if (c == '$') {
-            out += "__v0";
-        } else if (c == '?') {
-            out += "__v1";
-        } else {
-            out.push_back(c);
-        }
-    }
-    return out;
-}
-
-static ConfigRealValue evalRTLExprWithLoopVars(
-    const string &expr,
-    const VulStaticConfigLib &config_lib,
-    const vector<std::optional<ConfigRealValue>> &loop_vars
-) {
-    VulStaticConfigLib eval_cfg = config_lib;
-    if (loop_vars.size() > 0 && loop_vars[0].has_value()) eval_cfg["__v0"] = *loop_vars[0];
-    if (loop_vars.size() > 1 && loop_vars[1].has_value()) eval_cfg["__v1"] = *loop_vars[1];
-    return calculateConstexprValue(replaceLoopVarsForRTLExpr(expr), eval_cfg);
-}
-
-static bool materializeConcreteEndpoint(
-    const VulStaticModuleInstance &module,
-    const string &base_name,
-    const vector<VulConnIndexExpr> &endpoint_indices,
-    const VulStaticConfigLib &config_lib,
-    const vector<std::optional<ConfigRealValue>> &loop_vars,
-    string &concrete_name,
-    vector<ConfigRealValue> &concrete_indices
-) {
-    concrete_name = base_name;
-    concrete_indices.clear();
-    if (base_name.empty()) {
-        return true;
-    }
-    auto inst_it = module.instances.find(base_name);
-    if (inst_it == module.instances.end()) {
-        throw VulException("Instance " + base_name + " not found while materializing RTL child connection");
-    }
-    const auto &decl = inst_it->second;
-    if (!decl.isArrayed()) {
-        return endpoint_indices.empty();
-    }
-    if (endpoint_indices.size() != decl.array_dims.size()) {
-        return false;
-    }
-    for (size_t dim = 0; dim < endpoint_indices.size(); ++dim) {
-        const auto &idx = endpoint_indices[dim];
-        if (idx.kind == VulConnIndexKind::Wildcard) {
-            return false;
-        }
-        ConfigRealValue value = 0;
-        if (idx.kind == VulConnIndexKind::ConstantExpr) {
-            value = calculateConstexprValue(idx.expr, config_lib);
-        } else if (idx.kind == VulConnIndexKind::GeneralExpr) {
-            value = evalRTLExprWithLoopVars(idx.expr, config_lib, loop_vars);
-        } else {
-            if (idx.loop_dim < 0 || static_cast<size_t>(idx.loop_dim) >= loop_vars.size() || !loop_vars[idx.loop_dim].has_value()) {
-                return false;
-            }
-            value = *loop_vars[idx.loop_dim] + idx.offset;
-        }
-        if (value < 0 || value >= decl.array_dims[dim]) {
-            return false;
-        }
-        concrete_indices.push_back(value);
-        concrete_name += "__" + std::to_string(value);
-    }
-    return true;
-}
-
-static string wildcardTopPortSuffix(
-    const vector<VulConnIndexExpr> &endpoint_indices,
-    const vector<ConfigRealValue> &concrete_indices
-) {
-    for (size_t dim = 0; dim < endpoint_indices.size(); ++dim) {
-        if (endpoint_indices[dim].kind == VulConnIndexKind::Wildcard) {
-            return "[" + std::to_string(concrete_indices[dim]) + "]";
-        }
-    }
-    return "";
-}
-
 static string childServiceSignalBase(const string &instance_name, const string &service_name) {
     return instance_name + "_" + service_name;
 }
@@ -434,90 +231,8 @@ static const VulStaticModuleInstance &findChildTemplateByName(
             return *child;
         }
     }
-    for (const auto &[inst_name, inst] : mod.instances) {
-        if (inst.isArrayed() && (name == inst_name || name.starts_with(inst_name + "__"))) {
-            for (const auto &child : mod.children) {
-                if (child->instance_path.back() == inst_name) {
-                    return *child;
-                }
-            }
-        }
-    }
     throw VulException("Child instance template not found: " + name);
 }
-
-static bool resolveConnectionForConcreteRequest(
-    const VulStaticModuleInstance &module,
-    const VulStaticConfigLib &config_lib,
-    const string &concrete_name,
-    const string &req_name,
-    ResolvedReqServConnection &resolved
-) {
-    string base_name = concrete_name;
-    auto pos = concrete_name.find("__");
-    if (pos != string::npos) {
-        base_name = concrete_name.substr(0, pos);
-    }
-    vector<ConfigRealValue> req_indices = parseConcreteChildIndices(module, base_name, concrete_name);
-    for (const auto &conn : module.req_connections) {
-        if (conn.req_name != req_name) continue;
-        string conn_base = connEndpointBaseName(conn.req_instance, conn.req_instance_base);
-        if (conn_base != base_name) continue;
-        vector<std::optional<ConfigRealValue>> loop_vars(2);
-        if (!matchConcreteEndpoint(req_indices, conn.req_indices, config_lib, loop_vars)) continue;
-        resolved.conn = conn;
-        resolved.req_instance_name = concrete_name;
-        resolved.req_instance_indices = req_indices;
-        if (conn.serv_instance.empty()) {
-            resolved.serv_instance_name.clear();
-            resolved.serv_instance_indices.clear();
-            return true;
-        }
-        string serv_base = connEndpointBaseName(conn.serv_instance, conn.serv_instance_base);
-        if (!materializeConcreteEndpoint(module, serv_base, conn.serv_indices, config_lib, loop_vars, resolved.serv_instance_name, resolved.serv_instance_indices)) {
-            continue;
-        }
-        return true;
-    }
-    return false;
-}
-
-static bool resolveConnectionForConcreteService(
-    const VulStaticModuleInstance &module,
-    const VulStaticConfigLib &config_lib,
-    const string &concrete_name,
-    const string &srv_name,
-    ResolvedReqServConnection &resolved
-) {
-    string base_name = concrete_name;
-    auto pos = concrete_name.find("__");
-    if (pos != string::npos) {
-        base_name = concrete_name.substr(0, pos);
-    }
-    vector<ConfigRealValue> serv_indices = parseConcreteChildIndices(module, base_name, concrete_name);
-    for (const auto &conn : module.req_connections) {
-        if (conn.serv_name != srv_name) continue;
-        string conn_base = connEndpointBaseName(conn.serv_instance, conn.serv_instance_base);
-        if (conn_base != base_name) continue;
-        vector<std::optional<ConfigRealValue>> loop_vars(2);
-        if (!matchConcreteEndpoint(serv_indices, conn.serv_indices, config_lib, loop_vars)) continue;
-        resolved.conn = conn;
-        resolved.serv_instance_name = concrete_name;
-        resolved.serv_instance_indices = serv_indices;
-        if (conn.req_instance.empty()) {
-            resolved.req_instance_name.clear();
-            resolved.req_instance_indices.clear();
-            return true;
-        }
-        string req_base = connEndpointBaseName(conn.req_instance, conn.req_instance_base);
-        if (!materializeConcreteEndpoint(module, req_base, conn.req_indices, config_lib, loop_vars, resolved.req_instance_name, resolved.req_instance_indices)) {
-            continue;
-        }
-        return true;
-    }
-    return false;
-}
-
 
 void _procConstAndBundle(RTLGenContext &ctx){
     VulErrorContextGuard guard("processing local configlib and bundlelib");
@@ -1330,9 +1045,10 @@ void _procQueries(RTLGenContext &ctx) {
             throw VulException("Missing logic block for query " + query_name);
         }
 
+        const string query_value = "__vul_query_value_" + query_name;
         uint32_t width = 0;
         vector<FlatField> flat_fields;
-        flatten_type_signature(query.ret_type, ctx.local_bundlelib, "value", width, flat_fields);
+        flatten_type_signature(query.ret_type, ctx.local_bundlelib, query_value, width, flat_fields);
 
         const string port_name = queryPort(query_name);
         const string ret_type_str = query.ret_type.toString();
@@ -1346,7 +1062,7 @@ void _procQueries(RTLGenContext &ctx) {
         ctx.hls_blocks.push_back("};\n");
 
         ctx.hls_body.push_back("{\n");
-        ctx.hls_body.push_back("  " + ret_type_str + " value = " + query_name + "();\n");
+        ctx.hls_body.push_back("  " + ret_type_str + " " + query_value + " = " + query_name + "();\n");
         ctx.hls_body.push_back("  Int<" + std::to_string(width) + "> packed = 0;\n");
         for (const auto &field : flat_fields) {
             ctx.hls_body.push_back("  " + uintExtractExpr("packed", field.offset + field.width - 1, field.offset) + " = " + packFlatFieldExpr(field, field.name) + ";\n");
@@ -1358,209 +1074,108 @@ void _procQueries(RTLGenContext &ctx) {
 
 void _procChildrenAndConnection(RTLGenContext &ctx) {
 
-    auto conn_to_str = [](const ResolvedReqServConnection &conn) -> string {
-        return conn.serv_instance_name + "_" + conn.conn.serv_name + "_" + conn.req_instance_name + "_" + conn.conn.req_name;
-    };
-
     // CR-CS 需要wire，子实例-子实例
     // CR-S 需要wire，子实例-逻辑子模块
     // CR-R 不需要wire，直接从子实例端口连到模块端口
     // S-CS 不需要wire，直接从子实例端口连到模块端口
     // L-CS 需要wire，逻辑子模块-子实例
 
-    for (const auto child_ptr : ctx.module.children) {
-        const auto &child = *child_ptr;
-        string child_class_name = child.simClassName();
-        string child_decl_name = child.instance_path.back();
-        VulErrorContextGuard child_guard("processing child instance " + child_class_name);
-
-        if (ctx.module.instances.find(child_decl_name) == ctx.module.instances.end()) {
-            throw VulException("Instance " + child_decl_name + " not found in module instances");
-        }
-        const auto &inst = ctx.module.instances.at(child_decl_name);
-
-        auto emit_child_instance = [&](const string &child_instance_name) {
-            vector<string> child_port_lines;
-            child_port_lines.push_back(".clk(clk)");
-            child_port_lines.push_back(".rstn(rstn)");
-
-            for (const auto &req_entry : child.requests) {
-                const auto &req = req_entry.second;
-                const string &req_name = req_entry.first;
-                string sv_array_str = req.is_arrayed ? ("[" + std::to_string(req.array_size) + "]") : "";
-                ResolvedReqServConnection conn;
-                bool connected = false;
-                connected = resolveConnectionForConcreteRequest(ctx.module, ctx.local_configlib, child_instance_name, req_name, conn);
-                if (!connected) {
-                    throw VulException("Request " + req_name + " of instance " + child_instance_name + " is not connected");
-                }
-                if (conn.conn.serv_instance != "") {
-                    string conn_str = conn_to_str(conn);
-                    ctx.rtl_decl.push_back("wire " + conn_str + "_valid" + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + conn_str + "_valid)");
-                    if (req.has_handshake) {
-                        ctx.rtl_decl.push_back("wire " + conn_str + "_ready" + sv_array_str + ";\n");
-                        child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + conn_str + "_ready)");
+    // Concrete child ports and wiring use the same endpoint expansion as analysis.
+    auto childNamed = [&](const string &name) -> const VulStaticModuleInstance & {
+        for (const auto &child : ctx.module.children) if (child->instance_path.back() == name) return *child;
+        throw VulException("Concrete RTL child not found: " + name);
+    };
+    for (const auto &ptr : ctx.module.children) {
+        const auto &child = *ptr;
+        const string name = child.instance_path.back();
+        vector<string> bindings{ ".clk(clk)", ".rstn(rstn)" };
+        auto emitPorts = [&](const auto &ports, bool service) {
+            for (const auto &[portname, port] : ports) {
+                const bool internal = service && std::any_of(child.concrete_connections.begin(), child.concrete_connections.end(), [&](const auto &conn) {
+                    return !conn.req_instance.empty() && conn.serv_instance.empty() && conn.serv_name == portname;
+                });
+                if (internal) continue;
+                const string base = childServiceSignalBase(name, portname);
+                const string dims = port.is_arrayed ? "[" + std::to_string(port.array_size) + "]" : "";
+                const bool logic_ref = service && std::any_of(ctx.module.child_service_uses.begin(), ctx.module.child_service_uses.end(), [&](const auto &use) {
+                    return use.instance_name == name && use.service_name == portname;
+                });
+                auto arrayType = [&](string type) { return port.is_arrayed ? "std::array<" + type + ", " + std::to_string(port.array_size) + ">" : type; };
+                auto emit = [&](const string &childport, const string &signal, uint32_t width, bool hls_input) {
+                    ctx.rtl_decl.push_back("wire " + (width == 1 ? "" : "[" + std::to_string(width - 1) + ":0] ") + signal + dims + ";\n");
+                    bindings.push_back("." + childport + "(" + signal + ")");
+                    if (logic_ref) {
+                        const bool boolean = childport == reqservVldPort(portname) || childport == reqservRdyPort(portname);
+                        const string type = arrayType(boolean ? "bool" : "Int<" + std::to_string(width) + ">");
+                        ctx.hls_arguments.push_back((hls_input ? "const " : "") + type + " & " + signal);
+                        ctx.rtl_logicports.push_back("." + signal + "(" + signal + ")");
                     }
-                    for (const auto &arg : req.args) {
-                        uint32_t offset = 0;
-                        std::vector<FlatField> out;
-                        flatten_type_signature(arg.type, ctx.local_bundlelib, arg.name, offset, out);
-                        ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_arg_" + arg.name + sv_array_str + ";\n");
-                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")");
-                    }
-                    for (const auto &ret : req.rets) {
-                        uint32_t offset = 0;
-                        std::vector<FlatField> out;
-                        flatten_type_signature(ret.type, ctx.local_bundlelib, ret.name, offset, out);
-                        ctx.rtl_decl.push_back("wire [" + std::to_string(offset - 1) + ":0] " + conn_str + "_ret_" + ret.name + sv_array_str + ";\n");
-                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")");
-                    }
-                } else {
-                    string top_suffix = wildcardTopPortSuffix(conn.conn.req_indices, conn.req_instance_indices);
-                    child_port_lines.push_back(string(".") + reqservVldPort(req_name) + "(" + reqservVldPort(conn.conn.serv_name) + top_suffix + ")");
-                    if (req.has_handshake) {
-                        child_port_lines.push_back(string(".") + reqservRdyPort(req_name) + "(" + reqservRdyPort(conn.conn.serv_name) + top_suffix + ")");
-                    }
-                    for (const auto &arg : req.args) {
-                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, arg.name) + "(" + reqservArgPort(conn.conn.serv_name, arg.name) + top_suffix + ")");
-                    }
-                    for (const auto &ret : req.rets) {
-                        child_port_lines.push_back(string(".") + reqservArgPort(req_name, ret.name) + "(" + reqservArgPort(conn.conn.serv_name, ret.name) + top_suffix + ")");
-                    }
-                }
-            }
-            for (const auto &srv_entry : child.services) {
-                const auto &srv = srv_entry.second;
-                const string &srv_name = srv_entry.first;
-                ResolvedReqServConnection conn;
-                bool connected = false;
-                connected = resolveConnectionForConcreteService(ctx.module, ctx.local_configlib, child_instance_name, srv_name, conn);
-                bool logic_ref = false;
-                for (const auto &use : ctx.module.child_service_uses) {
-                    if (use.instance_name == child_instance_name && use.service_name == srv_name) {
-                        logic_ref = true;
-                        break;
-                    }
-                }
-                if (!connected && !logic_ref) {
-                    continue;
-                }
-                if (connected && conn.conn.req_instance == "") {
-                    string top_suffix = wildcardTopPortSuffix(conn.conn.serv_indices, conn.serv_instance_indices);
-                    child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(conn.conn.req_name) + top_suffix + ")");
-                    if (srv.has_handshake) {
-                        child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(conn.conn.req_name) + top_suffix + ")");
-                    }
-                    for (const auto &arg : srv.args) {
-                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(conn.conn.req_name, arg.name) + top_suffix + ")");
-                    }
-                    for (const auto &ret : srv.rets) {
-                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(conn.conn.req_name, ret.name) + top_suffix + ")");
-                    }
-                } else if (connected) {
-                    string conn_str = conn_to_str(conn);
-                    child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + conn_str + "_valid)");
-                    if (srv.has_handshake) {
-                        child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + conn_str + "_ready)");
-                    }
-                    for (const auto &arg : srv.args) {
-                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + conn_str + "_arg_" + arg.name + ")");
-                    }
-                    for (const auto &ret : srv.rets) {
-                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + conn_str + "_ret_" + ret.name + ")");
-                    }
-                } else {
-                    string sv_array_str = srv.is_arrayed ? ("[" + std::to_string(srv.array_size) + "]") : "";
-                    auto arrayed_port_decl = [&](const string &base_name) -> string {
-                        if (srv.is_arrayed) {
-                            return "std::array<" + base_name + ", " + std::to_string(srv.array_size) + ">";
-                        } else {
-                            return base_name;
-                        }
-                    };
-                    string child_serv_name = childServiceSignalBase(child_instance_name, srv_name);
-                    ctx.rtl_decl.push_back("wire " + reqservVldPort(child_serv_name) + sv_array_str + ";\n");
-                    child_port_lines.push_back(string(".") + reqservVldPort(srv_name) + "(" + reqservVldPort(child_serv_name) + ")");
-                    ctx.hls_arguments.push_back(arrayed_port_decl("bool") + " & " + reqservVldPort(child_serv_name));
-                    ctx.rtl_logicports.push_back("." + reqservVldPort(child_serv_name) + "(" + reqservVldPort(child_serv_name) + ")");
-                    if (srv.has_handshake) {
-                        ctx.rtl_decl.push_back("wire " + reqservRdyPort(child_serv_name) + sv_array_str + ";\n");
-                        child_port_lines.push_back(string(".") + reqservRdyPort(srv_name) + "(" + reqservRdyPort(child_serv_name) + ")");
-                        ctx.hls_arguments.push_back("const " + arrayed_port_decl("bool") + " & " + reqservRdyPort(child_serv_name));
-                        ctx.rtl_logicports.push_back("." + reqservRdyPort(child_serv_name) + "(" + reqservRdyPort(child_serv_name) + ")");
-                    }
-                    vector<ArgPort> arg_ports;
-                    vector<ArgPort> ret_ports;
-                    for (const auto &arg : srv.args) {
-                        arg_ports.push_back(procArg(arg, ctx.local_bundlelib));
-                    }
-                    for (const auto &ret : srv.rets) {
-                        ret_ports.push_back(procArg(ret, ctx.local_bundlelib));
-                    }
-                    for (const auto &arg : arg_ports) {
-                        ctx.rtl_decl.push_back("wire [" + std::to_string(arg.width - 1) + ":0] " + reqservArgPort(child_serv_name, arg.name) + sv_array_str + ";\n");
-                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")");
-                        ctx.hls_arguments.push_back(arrayed_port_decl("Int<" + std::to_string(arg.width) + ">") + " & " + reqservArgPort(child_serv_name, arg.name));
-                        ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, arg.name) + "(" + reqservArgPort(child_serv_name, arg.name) + ")");
-                    }
-                    for (const auto &ret : ret_ports) {
-                        ctx.rtl_decl.push_back("wire [" + std::to_string(ret.width - 1) + ":0] " + reqservArgPort(child_serv_name, ret.name) + sv_array_str + ";\n");
-                        child_port_lines.push_back(string(".") + reqservArgPort(srv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")");
-                        ctx.hls_arguments.push_back("const " + arrayed_port_decl("Int<" + std::to_string(ret.width) + ">") + " & " + reqservArgPort(child_serv_name, ret.name));
-                        ctx.rtl_logicports.push_back("." + reqservArgPort(child_serv_name, ret.name) + "(" + reqservArgPort(child_serv_name, ret.name) + ")");
-                    }
-                    if (srv.is_arrayed) {
-                        for (uint32_t idx = 0; idx < srv.array_size; ++idx) {
-                            ctx.hls_init.push_back(reqservVldPort(child_serv_name) + "[" + std::to_string(idx) + "] = false;\n");
-                        }
-                    } else {
-                        ctx.hls_init.push_back(reqservVldPort(child_serv_name) + " = false;\n");
-                    }
-                }
-            }
-            for (const auto &query_entry : child.queries) {
-                const string &query_name = query_entry.first;
-                const auto &query = query_entry.second;
-                const string signal_base = childQuerySignalBase(child_instance_name, query_name);
-                const string port_name = queryPort(signal_base);
-                const string child_port_name = queryPort(query_name);
-
-                uint32_t width = 0;
-                vector<FlatField> flat_fields;
-                flatten_type_signature(query.ret_type, ctx.local_bundlelib, "value", width, flat_fields);
-                ctx.rtl_decl.push_back("wire [" + std::to_string(width - 1) + ":0] " + port_name + ";\n");
-                child_port_lines.push_back(string(".") + child_port_name + "(" + port_name + ")");
-
-                bool logic_ref = false;
-                for (const auto &use : ctx.module.child_query_uses) {
-                    if (use.instance_name == child_instance_name && use.query_name == query_name) {
-                        logic_ref = true;
-                        break;
-                    }
-                }
+                };
+                emit(reqservVldPort(portname), reqservVldPort(base), 1, false);
+                if (port.has_handshake) emit(reqservRdyPort(portname), reqservRdyPort(base), 1, true);
+                for (const auto &arg : port.args) emit(reqservArgPort(portname, arg.name), reqservArgPort(base, arg.name), procArg(arg, ctx.local_bundlelib).width, false);
+                for (const auto &ret : port.rets) emit(reqservArgPort(portname, ret.name), reqservArgPort(base, ret.name), procArg(ret, ctx.local_bundlelib).width, true);
                 if (logic_ref) {
-                    ctx.hls_arguments.push_back("const Int<" + std::to_string(width) + "> " + port_name);
-                    ctx.rtl_logicports.push_back("." + port_name + "(" + port_name + ")");
+                    for (uint32_t idx = 0; idx < port.array_size; ++idx) {
+                        const string suffix = port.is_arrayed ? "[" + std::to_string(idx) + "]" : "";
+                        ctx.hls_init.push_back(reqservVldPort(base) + suffix + " = false;\n");
+                        for (const auto &arg : port.args) ctx.hls_init.push_back(reqservArgPort(base, arg.name) + suffix + " = 0;\n");
+                    }
+                } else if (service) {
+                    for (uint32_t idx = 0; idx < port.array_size; ++idx) {
+                        const bool connected = std::any_of(ctx.module.req_connections.begin(), ctx.module.req_connections.end(), [&](const auto &conn) {
+                            return conn.serv_instance == name && conn.serv_name == portname && (conn.serv_port_index < 0 || uint32_t(conn.serv_port_index) == idx);
+                        });
+                        if (!connected) {
+                            const string suffix = port.is_arrayed ? "[" + std::to_string(idx) + "]" : "";
+                            ctx.rtl_logic.push_back("assign " + reqservVldPort(base) + suffix + " = 1'b0;\n");
+                            for (const auto &arg : port.args) ctx.rtl_logic.push_back("assign " + reqservArgPort(base, arg.name) + suffix + " = '0;\n");
+                        }
+                    }
                 }
             }
-            ctx.rtl_inst.push_back(child_class_name + " " + child_instance_name + " (\n");
-            for (size_t i = 0; i < child_port_lines.size(); i++) {
-                ctx.rtl_inst.push_back("  " + child_port_lines[i] + (i == child_port_lines.size() - 1 ? "" : ",") + "\n");
-            }
-            ctx.rtl_inst.push_back(");\n");
         };
-
-        if (inst.isArrayed()) {
-            forEachIndexTuple(inst.array_dims, [&](const vector<ConfigRealValue> &indices) {
-                string concrete_name = child_decl_name;
-                for (ConfigRealValue idx : indices) {
-                    concrete_name += "__" + std::to_string(idx);
-                }
-                emit_child_instance(concrete_name);
-            });
-        } else {
-            emit_child_instance(child_decl_name);
+        emitPorts(child.requests, false);
+        emitPorts(child.services, true);
+        for (const auto &[queryname, query] : child.queries) {
+            const string signal = queryPort(childQuerySignalBase(name, queryname));
+            uint32_t width = 0; vector<FlatField> fields;
+            flatten_type_signature(query.ret_type, ctx.local_bundlelib, "value", width, fields);
+            ctx.rtl_decl.push_back("wire [" + std::to_string(width - 1) + ":0] " + signal + ";\n");
+            bindings.push_back("." + queryPort(queryname) + "(" + signal + ")");
+            if (std::any_of(ctx.module.child_query_uses.begin(), ctx.module.child_query_uses.end(), [&](const auto &use) { return use.instance_name == name && use.query_name == queryname; })) {
+                ctx.hls_arguments.push_back("const Int<" + std::to_string(width) + "> " + signal);
+                ctx.rtl_logicports.push_back("." + signal + "(" + signal + ")");
+            }
+        }
+        string parameters;
+        auto coords = child.coordinateContext();
+        for (size_t idx = 0; idx < coords.size(); ++idx) {
+            if (idx) parameters += ", ";
+            parameters += ".__vul_idx_" + std::to_string(idx) + "(" + std::to_string(coords[idx]) + ")";
+        }
+        ctx.rtl_inst.push_back(child.simClassName() + (parameters.empty() ? "" : " #(" + parameters + ")") + " " + name + " (\n");
+        for (size_t idx = 0; idx < bindings.size(); ++idx) ctx.rtl_inst.push_back("  " + bindings[idx] + (idx + 1 == bindings.size() ? "" : ",") + "\n");
+        ctx.rtl_inst.push_back(");\n");
+    }
+    for (const auto &conn : ctx.module.req_connections) {
+        const auto &source = conn.req_instance.empty() ? ctx.module.services.at(conn.req_name) : childNamed(conn.req_instance).requests.at(conn.req_name);
+        const auto &dest = conn.serv_instance.empty()
+            ? (ctx.module.requests.contains(conn.serv_name) ? ctx.module.requests.at(conn.serv_name) : ctx.module.services.at(conn.serv_name))
+            : childNamed(conn.serv_instance).services.at(conn.serv_name);
+        const string srcbase = conn.req_instance.empty() ? conn.req_name : childServiceSignalBase(conn.req_instance, conn.req_name);
+        const string dstbase = conn.serv_instance.empty() ? conn.serv_name : childServiceSignalBase(conn.serv_instance, conn.serv_name);
+        uint32_t count = conn.req_port_index >= 0 ? 1 : source.array_size;
+        for (uint32_t idx = 0; idx < count; ++idx) {
+            const uint32_t si = conn.req_port_index >= 0 ? conn.req_port_index : idx;
+            const uint32_t di = conn.serv_port_index >= 0 ? conn.serv_port_index : idx;
+            const string ss = source.is_arrayed ? "[" + std::to_string(si) + "]" : "";
+            const string ds = dest.is_arrayed ? "[" + std::to_string(di) + "]" : "";
+            auto wire = [&](string dst, string src) { ctx.rtl_logic.push_back("assign " + dst + " = " + src + ";\n"); };
+            wire(reqservVldPort(dstbase) + ds, reqservVldPort(srcbase) + ss);
+            if (source.has_handshake) wire(reqservRdyPort(srcbase) + ss, reqservRdyPort(dstbase) + ds);
+            for (size_t a = 0; a < source.args.size(); ++a) wire(reqservArgPort(dstbase, dest.args[a].name) + ds, reqservArgPort(srcbase, source.args[a].name) + ss);
+            for (size_t r = 0; r < source.rets.size(); ++r) wire(reqservArgPort(srcbase, source.rets[r].name) + ss, reqservArgPort(dstbase, dest.rets[r].name) + ds);
         }
     }
 
@@ -2150,11 +1765,12 @@ void _procBRAMAndROM(RTLGenContext &ctx) {
 }
 
 RTLGenResult genModuleRTL(
-    const VulStaticModuleInstance &module,
+    const VulStaticModuleInstance &original,
     const VulStaticConfigLib &configlib,
     const VulStaticBundleLib &bundlelib,
     const vector<string> &global_helper_codes
 ) {
+    const auto module = concreteGenerationView(original);
     VulStaticConfigLib local_configlib = configlib;
     for (const auto &entry : module.local_parameters) {
         local_configlib[entry.first] = entry.second;
@@ -2207,7 +1823,7 @@ RTLGenResult genModuleRTL(
             connection.substr(open + 1, connection.size() - open - 2));
     }
 
-    const string module_name = module.simClassName();
+    const string module_name = module.rtlConcreteClassName();
     const string logic_module_name = LogicSubModuleName(module_name);
 
     auto append_lines = [](vector<string> &dst, VulDebugLocs &dst_debug, vector<string> &src, VulDebugLocs &src_debug) {
@@ -2575,16 +2191,6 @@ vector<string> genVerilatorTestMainCpp(
     out.push_back("    delete top;\n");
     out.push_back("  }\n");
     out.push_back("\n");
-    out.push_back("  void simulation() {\n");
-    for (const auto &line : test.test_codelines) {
-        out.push_back("    " + line);
-        if (line.empty() || line.back() != '\n') {
-            out.push_back("\n");
-        }
-    }
-    out.push_back("  }\n");
-    out.push_back("\n");
-
     for (const auto &[name, top_serv] : top_module.services) {
         auto req_iter = test.requests.find(name);
         if (req_iter == test.requests.end()) {
@@ -2597,9 +2203,12 @@ vector<string> genVerilatorTestMainCpp(
         const bool is_arrayed = top_serv.is_arrayed;
         const uint32_t array_size = static_cast<uint32_t>(top_serv.array_size);
         const uint32_t emit_count = is_arrayed ? array_size : 1;
+        if (is_arrayed) out.push_back("  template<uint32_t IDX = 0>\n");
         out.push_back("  " + top_serv.signatureFull() + " {\n");
+        if (is_arrayed) out.push_back("    static_assert(IDX < " + std::to_string(array_size) + ", \"Request index out of range\");\n");
         for (uint32_t idx = 0; idx < emit_count; ++idx) {
-            string branch = idx == 0 ? "    " : "    ";
+            if (is_arrayed) out.push_back("    if constexpr (IDX == " + std::to_string(idx) + ") {\n");
+            string branch = is_arrayed ? "      " : "    ";
             const string issued = is_arrayed ? ("__issued_" + name + "[" + std::to_string(idx) + "]") : ("__issued_" + name);
             out.push_back(branch + "assert(!" + issued + " && \"TestMain request '" + name + "' called more than once before sim_nextcycle()\");\n");
             out.push_back(branch + issued + " = true;\n");
@@ -2616,6 +2225,7 @@ vector<string> genVerilatorTestMainCpp(
             } else {
                 out.push_back(branch + "return;\n");
             }
+            if (is_arrayed) out.push_back("    }\n");
             if (!is_arrayed) break;
         }
         out.push_back("  }\n");
@@ -2780,13 +2390,13 @@ vector<string> genVerilatorTestMainCpp(
             }
             const string call_names = top_req.signatureArgNameList();
             if (serv.has_handshake) {
-                out.push_back("        bool ready = __cond_" + name + "(" + call_names + ");\n");
+                out.push_back("        bool ready = __cond_" + name + (is_arrayed ? "<" + std::to_string(idx) + ">" : "") + "(" + call_names + ");\n");
                 out.push_back("        " + verilatorIndexedTopExpr(reqservRdyPort(name), is_arrayed, idx) + " = ready;\n");
                 out.push_back("        if (" + valid + " && ready && !" + handled + ") {\n");
             } else {
                 out.push_back("        if (" + valid + " && !" + handled + ") {\n");
             }
-            out.push_back("          __impl_" + name + "(" + call_names + ");\n");
+            out.push_back("          __impl_" + name + (is_arrayed ? "<" + std::to_string(idx) + ">" : "") + "(" + call_names + ");\n");
             for (const auto &ret : ret_ports) {
                 emitVerilatorPack(out, ret, verilatorIndexedTopExpr(reqservArgPort(name, ret.name), is_arrayed, idx), ret.name, "          ");
             }
@@ -2805,6 +2415,7 @@ vector<string> genVerilatorTestMainCpp(
     for (const auto &[name, temp_serv] : test.services) {
         const auto &top_req = top_module.requests.at(name);
         VulStaticReqServ serv = staticalizeReqServ(temp_serv, project.global_configlib);
+        if (top_req.is_arrayed) out.push_back("  template<uint32_t IDX>\n");
         out.push_back("  void __impl_" + name + "(" + top_req.signatureArgOnly() + ") {\n");
         for (const auto &line : temp_serv.codelines) {
             out.push_back("    " + line);
@@ -2813,12 +2424,24 @@ vector<string> genVerilatorTestMainCpp(
         out.push_back("  }\n");
         if (serv.has_handshake) {
             out.push_back("\n");
+            if (top_req.is_arrayed) out.push_back("  template<uint32_t IDX>\n");
             out.push_back("  bool __cond_" + name + "(" + top_req.signatureArgOnly() + ") {\n");
             out.push_back("    return (" + temp_serv.cond + ");\n");
             out.push_back("  }\n");
         }
         out.push_back("\n");
     }
+
+    out.push_back("public:\n");
+    out.push_back("  void simulation() {\n");
+    for (const auto &line : test.test_codelines) {
+        out.push_back("    " + line);
+        if (line.empty() || line.back() != '\n') {
+            out.push_back("\n");
+        }
+    }
+    out.push_back("  }\n");
+    out.push_back("\n");
 
     out.push_back("};\n");
     out.push_back("\n");

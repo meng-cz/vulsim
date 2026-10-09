@@ -66,6 +66,8 @@ void VCPPModuleContext::declareName(
         (declared_name.empty() ? string("<empty>") : declared_name) +
         "' at " + position
     };
+    if (declared_name.starts_with("__vul_"))
+        throw VulException("Reserved generator name: " + declared_name);
     if (declared_name.empty()) {
         throw VulException(kind + " name cannot be empty at " + position);
     }

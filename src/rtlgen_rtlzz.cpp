@@ -53,7 +53,7 @@ LogicRTLResult appendLogicRTL(
     }
 
     VulErrorContextGuard rtlzz_err("running RTLzz for logic submodule: " + module.simClassName());
-    const auto logic_module_name = LogicSubModuleName(module.simClassName());
+    const auto logic_module_name = LogicSubModuleName(module.rtlConcreteClassName());
     RTLzzLogicRTLResult logic_rtl = generateLogicRTLWithRTLzz(
         logic_hls_filepath,
         logic_module_name,

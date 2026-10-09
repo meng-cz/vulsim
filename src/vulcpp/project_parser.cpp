@@ -357,7 +357,7 @@ VulStaticProject parseVcppStaticProjectImpl(
         auto [instance_ptr, config_overrides] = todo_queue.front();
         todo_queue.pop_front();
 
-        VulErrorContextGuard _err{"parsing instance " + instance_ptr->simClassName() + " of module " + instance_ptr->module_name};
+        VulErrorContextGuard _err{"parsing instance " + instance_ptr->concatInstancePath("::", true) + " of module " + instance_ptr->module_name};
         const ModuleName& mod_name = instance_ptr->module_name;
         VulTempModule *temp_mod_ptr = nullptr;
 
@@ -391,27 +391,46 @@ VulStaticProject parseVcppStaticProjectImpl(
             project.global_configlib,
             project.global_bundlelib
         );
+        for (const auto &[name, value] : config_overrides) {
+            if (!instance_ptr->local_parameters.contains(name))
+                throw VulException("Unknown child PARAMETER: " + name);
+        }
         detectRequestCallInLogicBlocks(*instance_ptr);
 
         instance_ptr->instance_id = instance_count++;
 
-        // process child instances
-        for (const auto& [child_name, child_instance_decl] : instance_ptr->instances) {
-            shared_ptr<VulStaticModuleInstance> child_instance = std::make_shared<VulStaticModuleInstance>();
-            child_instance->instance_path = instance_ptr->instance_path;
-            child_instance->instance_path.push_back(child_name);
-            child_instance->module_name = child_instance_decl.module_name;
-            child_instance->parent = instance_ptr;
-            instance_ptr->children.push_back(child_instance);
-            todo_queue.push_back({child_instance, child_instance_decl.parameter_overrides});
-
-            if (child_instance_decl.array_dims.size() > 2) {
-                throw VulException("Only up to 2 child instance array dimensions are currently supported");
-            }
+        // Expand physical instances; their declaration paths still identify shared generated definitions.
+        for (const auto& [child_name, decl] : instance_ptr->instances) {
+            if (decl.array_dims.size() > 2) throw VulException("Only up to 2 child instance array dimensions are currently supported");
+            vector<ConfigRealValue> coords;
+            std::function<void(size_t)> expand = [&](size_t dim) {
+                if (dim < decl.array_dims.size()) {
+                    for (ConfigRealValue i = 0; i < decl.array_dims[dim]; ++i) {
+                        coords.push_back(i); expand(dim + 1); coords.pop_back();
+                    }
+                    return;
+                }
+                auto child = std::make_shared<VulStaticModuleInstance>();
+                child->instance_path = instance_ptr->instance_path;
+                child->instance_path.push_back(concreteInstanceName(child_name, coords));
+                child->instance_decl_name = child_name;
+                child->instance_array_indices = coords;
+                child->module_name = decl.module_name;
+                child->parent = instance_ptr;
+                auto overrides = decl.parameter_overrides;
+                for (const auto &[axis, name] : decl.coordinate_bindings) {
+                    overrides[name] = coords.at(axis);
+                    child->parameter_coordinate_indices[name] = instance_ptr->coordinateContext().size() + axis;
+                }
+                instance_ptr->children.push_back(child);
+                todo_queue.push_back({child, overrides});
+            };
+            expand(0);
         }
     }
     project.top_module_instance = top_instance;
 
+    materializeConcreteConnections(project.top_module_instance);
     validateStaticProject(project);
 
     printf("Successfully parsed project. Summary:\n");
@@ -430,13 +449,7 @@ VulStaticProject parseVcppStaticProjectImpl(
         for (size_t i = 0; i < depth; ++i) {
             putchar(' ');
         }
-        std::string instance_path_str;
-        for (const auto& name : node->instance_path) {
-            if (!instance_path_str.empty()) {
-                instance_path_str += "::";
-            }
-            instance_path_str += name;
-        }
+        const std::string instance_path_str = node->concatInstancePath("::", true);
         printf("%s [%s]\n", instance_path_str.c_str(), node->module_name.c_str());
 
         for (size_t i = node->children.size(); i > 0; --i) {
@@ -513,6 +526,7 @@ VulStaticProject parseVcppStaticProjectImpl(
     fake_main->parent = sim_top;
     project.top_module_instance->parent = sim_top;
 
+    materializeConcreteConnections(sim_top);
     setupUpdateSequence(sim_top);
 
     printf("Setup complete.\n");

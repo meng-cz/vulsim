@@ -95,7 +95,7 @@ bool matchSegmentWithIndexRule(const string &lhs, const string &rhs) {
     // 若两侧均有索引，则比较共同前缀索引（允许一侧有更多维）。
     size_t common = std::min(a.indices.size(), b.indices.size());
     for (size_t i = 0; i < common; ++i) {
-        if (a.indices[i] != b.indices[i]) return false;
+        if (a.indices[i] != "*" && b.indices[i] != "*" && a.indices[i] != b.indices[i]) return false;
     }
     return true;
 }
@@ -141,7 +141,7 @@ string firstSignalSegmentBase(const string &signal_path) {
 
 vector<ConfigRealValue> currentInstanceArrayDims(const shared_ptr<VulStaticModuleInstance> &instance_ptr) {
     if (!instance_ptr->parent) return {};
-    auto it = instance_ptr->parent->instances.find(instance_ptr->instance_path.back());
+    auto it = instance_ptr->parent->instances.find(instance_ptr->instance_decl_name.empty() ? instance_ptr->instance_path.back() : instance_ptr->instance_decl_name);
     if (it == instance_ptr->parent->instances.end()) return {};
     return it->second.array_dims;
 }
@@ -163,7 +163,7 @@ vector<std::optional<ConfigRealValue>> extractInstanceIndexFilter(
     if (leaf.base == "*") {
         return {};
     }
-    if (leaf.base != instance_ptr->instance_path.back()) {
+    if (leaf.base != (instance_ptr->instance_decl_name.empty() ? instance_ptr->instance_path.back() : instance_ptr->instance_decl_name)) {
         return {};
     }
     if (leaf.indices.empty()) {
@@ -222,7 +222,7 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
             bfs_queue.push_back(child);
         }
 
-        VulErrorContextGuard instance_context_guard("processing instance " + instance_ptr->simClassName());
+        VulErrorContextGuard instance_context_guard("processing instance " + instance_ptr->concatInstancePath("::", true));
 
         VulStaticBundleLib local_bundlelib = instance_ptr->local_bundles;
         local_bundlelib.insert(local_bundlelib.end(), project.global_bundlelib.begin(), project.global_bundlelib.end());
@@ -270,7 +270,7 @@ VulTraceTable parseTraceOptions(const VulStaticProject &project, const vector<Vu
 
         std::unordered_set<string> child_instance_names;
         for (const auto &child : instance_ptr->children) {
-            child_instance_names.insert(child->instance_path.back());
+            child_instance_names.insert(child->instance_decl_name.empty() ? child->instance_path.back() : child->instance_decl_name);
         }
 
         for (const auto &matcher : trace_matchers) {

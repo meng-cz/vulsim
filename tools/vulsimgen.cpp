@@ -214,7 +214,8 @@ int simgenStatic(const SimGenArgs &args) {
 
     // gen module
     std::deque<shared_ptr<VulStaticModuleInstance>> bfs_queue;
-    std::unordered_set<std::string> generated_module_paths;
+    std::map<std::string, simgen::StaticModuleCodeHpp> grouped_codes;
+    std::map<std::string, std::string> grouped_impl_paths;
     std::unordered_set<std::string> copied_resources;
     bfs_queue.push_back(project.top_module_instance);
     while (!bfs_queue.empty()) {
@@ -225,18 +226,15 @@ int simgenStatic(const SimGenArgs &args) {
         }
 
         const std::string decl_path = mod_instance->simDeclPath();
-        if (!generated_module_paths.insert(decl_path).second) {
-            continue;
-        }
-
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
         auto codes = simgen::genStaticModuleCodeHpp(*mod_instance, trace_table[mod_instance->instance_id]);
-        writeLinesToFile(codes.decl, (out_path / decl_path).string());
-        vulDebugWriteMapToFile(codes.decl_debug_lines, (out_path / (decl_path + ".dbgmap")).string());
-        const auto impl_path = mod_instance->simImplPath();
-        writeLinesToFile(codes.impl, (out_path / impl_path).string());
-        vulDebugWriteMapToFile(codes.impl_debug_lines, (out_path / (impl_path + ".dbgmap")).string());
+        auto &group = grouped_codes[decl_path];
+        group.decl.insert(group.decl.end(), codes.decl.begin(), codes.decl.end());
+        group.decl_debug.insert(group.decl_debug.end(), codes.decl_debug.begin(), codes.decl_debug.end());
+        group.impl.insert(group.impl.end(), codes.impl.begin(), codes.impl.end());
+        group.impl_debug.insert(group.impl_debug.end(), codes.impl_debug.begin(), codes.impl_debug.end());
+        grouped_impl_paths[decl_path] = mod_instance->simImplPath();
         for (const auto &res_file : codes.resource_files) {
             if (!copied_resources.insert(res_file).second) continue;
             const std::filesystem::path src_file =
@@ -245,6 +243,13 @@ int simgenStatic(const SimGenArgs &args) {
             std::filesystem::create_directories(dst_file.parent_path());
             std::filesystem::copy_file(src_file, dst_file);
         }
+    }
+
+    for (auto &[path, codes] : grouped_codes) {
+        writeLinesToFile(codes.decl, (out_path / path).string());
+        writeLinesToFile(codes.impl, (out_path / grouped_impl_paths.at(path)).string());
+        vulDebugWriteMapToFile(vulDebugBuildGeneratedMap(codes.decl_debug), (out_path / (path + ".dbgmap")).string());
+        vulDebugWriteMapToFile(vulDebugBuildGeneratedMap(codes.impl_debug), (out_path / (grouped_impl_paths.at(path) + ".dbgmap")).string());
     }
 
     // gen test harness module

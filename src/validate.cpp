@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "validate.hpp"
+#include "instance_graph.h"
 
 #include "errormsg.hpp"
 
@@ -185,9 +186,6 @@ const VulStaticModuleInstance *findChildModule(
     for (const auto &child : module.children) {
         if (!child || child->instance_path.empty()) continue;
         if (child->instance_path.back() == child_name) return child.get();
-        if (!child->instance_decl_name.empty() && child->instance_decl_name == child_name) {
-            return child.get();
-        }
     }
     return nullptr;
 }
@@ -225,9 +223,29 @@ bool hasServiceImplementation(const VulStaticModuleInstance &module, const std::
     return module.serv_logic_blocks.find(service_name) != module.serv_logic_blocks.end();
 }
 
-void validateModuleConnections(const VulStaticModuleInstance &module) {
+void validateModuleConnections(const VulStaticModuleInstance &original) {
+    const auto module = concreteGenerationView(original);
     const std::string scope = "in module " + instanceLabel(module);
     VulErrorContextGuard guard("validating transaction connectivity " + scope);
+
+    std::unordered_map<std::string, const VulStaticReqServ *> alias_services;
+    for (const auto &use : module.child_service_uses) {
+        const auto &child = requireChildModule(module, use.instance_name, scope);
+        const auto &service = requirePort(child.services, use.service_name, "child service", scope);
+        auto [first, inserted] = alias_services.emplace(use.alias_name, &service);
+        if (!inserted && !first->second->match(service))
+            throw VulException("USE_CHILD_SERVICE signature mismatch for alias " + use.alias_name +
+                               " at " + child.concatInstancePath("::", true) + "." + use.service_name);
+    }
+    for (const auto &use : module.child_query_uses) {
+        const auto &child = requireChildModule(module, use.instance_name, scope);
+        auto query = child.queries.find(use.query_name);
+        if (query == child.queries.end())
+            throw VulException("Child QUERY not found: " + child.concatInstancePath("::", true) + "." + use.query_name);
+        if (use.ret_type != query->second.ret_type)
+            throw VulException("USE_CHILD_QUERY return type mismatch for alias " + use.alias_name +
+                               " at " + child.concatInstancePath("::", true) + "." + use.query_name);
+    }
 
     std::unordered_map<std::string, size_t> source_connection_counts;
     std::unordered_map<std::string, const VulStaticReqServ *> source_ports;
@@ -238,18 +256,18 @@ void validateModuleConnections(const VulStaticModuleInstance &module) {
 
         const VulStaticReqServ *src = nullptr;
         const VulStaticReqServ *dst = nullptr;
-        bool wildcard_connection = hasWildcard(conn.req_indices) || hasWildcard(conn.serv_indices);
+        bool wildcard_connection = conn.req_port_index >= 0 || conn.serv_port_index >= 0;
         std::string source_key;
 
         if (conn.req_instance.empty()) {
             src = &requirePort(module.services, conn.req_name, "source service", scope);
-            source_key = endpointKey("", {}, conn.req_name);
+            source_key = endpointKey("", {}, conn.req_name) + "[" + std::to_string(conn.req_port_index) + "]";
             forwarded_services.insert(conn.req_name);
         } else {
             const std::string req_base = conn.req_instance_base.empty() ? conn.req_instance : conn.req_instance_base;
             const auto &child = requireChildModule(module, req_base, scope);
             src = &requirePort(child.requests, conn.req_name, "source child request", scope);
-            source_key = endpointKey(req_base, conn.req_indices, conn.req_name);
+            source_key = endpointKey(req_base, conn.req_indices, conn.req_name) + "[" + std::to_string(conn.req_port_index) + "]";
         }
 
         if (conn.serv_instance.empty()) {
@@ -274,6 +292,9 @@ void validateModuleConnections(const VulStaticModuleInstance &module) {
             dst = &requirePort(child.services, conn.serv_name, "destination child service", scope);
         }
 
+        if ((conn.req_port_index >= 0 && static_cast<uint32_t>(conn.req_port_index) >= src->array_size) ||
+            (conn.serv_port_index >= 0 && static_cast<uint32_t>(conn.serv_port_index) >= dst->array_size))
+            throw VulException("Transaction array boundary index out of range " + scope);
         if (!compatibleConnection(*src, *dst, wildcard_connection)) {
             throw VulException(
                 scope + ": transaction port signature mismatch between " +

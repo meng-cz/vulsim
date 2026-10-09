@@ -537,6 +537,20 @@ public:
 };
 static VCPPModuleAutoRegisterHandler<VCPPModuleTICK_IMPL> _auto_register_TICK_IMPL_handler;
 
+static void appendInstanceParameter(VulTempInstance &inst, const string &raw, const string &macro) {
+    auto attr = parseKeyValueArg(raw);
+    if (!attr) throw VulException("Invalid instance parameter: " + raw);
+    const string key = trim(attr->first);
+    if (key.starts_with("COORD(") && key.back() == ')') {
+        inst.coordinate_bindings.push_back({key.substr(6, key.size() - 7), trim(attr->second)});
+    } else {
+        auto override = parseParameterOverrideArg(raw, macro);
+        for (const auto &existing : inst.parameter_overrides)
+            if (existing.first == override.first) throw VulException("Duplicate parameter override: " + override.first);
+        inst.parameter_overrides.push_back(std::move(override));
+    }
+}
+
 class VCPPModuleCHILD_INSTANCE : public VCPPModuleHandler {
 public:
     virtual string name() const { return "CHILD_INSTANCE"; }
@@ -558,7 +572,7 @@ public:
                 appendDimList(inst.array_dims, attr->second);
                 continue;
             }
-            inst.parameter_overrides.push_back(parseParameterOverrideArg(param_override_raw, "CHILD_INSTANCE"));
+            appendInstanceParameter(inst, param_override_raw, "CHILD_INSTANCE");
         }
         context.temp.instances.push_back(std::move(inst));
     }
@@ -583,7 +597,7 @@ public:
             if (split_pos == string::npos) {
                 throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
             }
-            inst.parameter_overrides.push_back(parseParameterOverrideArg(param_override_raw, "CHILD_INSTANCE_ARRAY1"));
+            appendInstanceParameter(inst, param_override_raw, "CHILD_INSTANCE_ARRAY1");
         }
         context.temp.instances.push_back(std::move(inst));
     }
@@ -609,7 +623,7 @@ public:
             if (split_pos == string::npos) {
                 throw VulException("invalid parameter override '" + param_override_raw + "' at " + context.getOriginalPosition(entry.pos));
             }
-            inst.parameter_overrides.push_back(parseParameterOverrideArg(param_override_raw, "CHILD_INSTANCE_ARRAY2"));
+            appendInstanceParameter(inst, param_override_raw, "CHILD_INSTANCE_ARRAY2");
         }
         context.temp.instances.push_back(std::move(inst));
     }

@@ -16,6 +16,7 @@
 
 #include "simgen.h"
 #include "rtlgen.h"
+#include <regex>
 #include "debugmap.hpp"
 #include "argparse.hpp"
 #include "vullib.hpp"
@@ -331,6 +332,85 @@ inline static std::string joinNames(const std::vector<std::string> &names) {
     return out;
 }
 
+namespace {
+struct ArrayRTLVariant {
+    shared_ptr<VulStaticModuleInstance> module;
+    vector<string> ports;
+    string implementation;
+};
+string coordinateCondition(const VulStaticModuleInstance &module) {
+    string out;
+    const auto coords = module.coordinateContext();
+    for (size_t i = 0; i < coords.size(); ++i) {
+        if (i) out += " && ";
+        out += "__vul_idx_" + std::to_string(i) + " == " + std::to_string(coords[i]);
+    }
+    return out;
+}
+vector<string> arrayRTLWrapper(const vector<ArrayRTLVariant> &variants) {
+    const auto &first = *variants.front().module;
+    struct Port { string direction, high, name, length; bool packed = false; };
+    vector<vector<Port>> shapes;
+    const std::regex syntax(R"(^\s*(input|output)\s+(?:\[([^:]+):0\]\s+)?([A-Za-z_][A-Za-z_0-9]*)(?:\[([^\]]+)\])?\s*,?\s*$)");
+    for (const auto &variant : variants) {
+        vector<Port> ports;
+        for (const auto &line : variant.ports) {
+            std::smatch match;
+            if (!std::regex_match(line, match, syntax)) throw VulException("Cannot parameterize RTL port: " + line);
+            ports.push_back({match[1], match[2].matched ? match[2].str() : "0", match[3], match[4], match[2].matched});
+        }
+        if (!shapes.empty() && ports.size() != shapes.front().size()) throw VulException("Coordinate-dependent interface port names are inconsistent");
+        shapes.push_back(std::move(ports));
+    }
+    vector<string> out{"`timescale 1ns/1ps\n", "module " + first.simClassName() + " #(\n"};
+    const auto coords = first.coordinateContext();
+    for (size_t i = 0; i < coords.size(); ++i)
+        out.push_back("parameter int unsigned __vul_idx_" + std::to_string(i) + " = 0" + (i + 1 == coords.size() ? "" : ",") + "\n");
+    out.push_back(") (\n");
+    auto select = [&](size_t port, bool length) {
+        const string fallback = length ? shapes.back()[port].length : shapes.back()[port].high;
+        bool same = true;
+        for (const auto &shape : shapes) if ((length ? shape[port].length : shape[port].high) != fallback) same = false;
+        if (same) return fallback;
+        string expression = fallback;
+        for (size_t i = variants.size() - 1; i-- > 0;) {
+            const string value = length ? shapes[i][port].length : shapes[i][port].high;
+            expression = "((" + coordinateCondition(*variants[i].module) + ") ? " + value + " : " + expression + ")";
+        }
+        return expression;
+    };
+    for (size_t p = 0; p < shapes.front().size(); ++p) {
+        const auto &port = shapes.front()[p];
+        bool packed = false;
+        for (const auto &shape : shapes) {
+            if (shape[p].name != port.name || shape[p].direction != port.direction || shape[p].length.empty() != port.length.empty())
+                throw VulException("Coordinate-dependent interface shape is incompatible: " + port.name);
+            packed |= shape[p].packed;
+        }
+        out.push_back(port.direction + " " + (packed ? "[" + select(p, false) + ":0] " : "") + port.name
+            + (port.length.empty() ? "" : "[" + select(p, true) + "]") + (p + 1 == shapes.front().size() ? "" : ",") + "\n");
+    }
+    out.push_back(");\n");
+    for (const auto &[name, index] : first.parameter_coordinate_indices)
+        out.push_back("localparam " + name + " = __vul_idx_" + std::to_string(index) + ";\n");
+    string valid;
+    for (size_t v = 0; v < variants.size(); ++v) {
+        const string condition = coordinateCondition(*variants[v].module);
+        if (!valid.empty()) valid += " || ";
+        valid += "(" + condition + ")";
+        out.push_back("generate if (" + condition + ") begin : __vul_variant_" + std::to_string(v) + "\n");
+        out.push_back(variants[v].implementation + " __implementation (\n");
+        for (size_t p = 0; p < shapes.front().size(); ++p) {
+            const auto &name = shapes.front()[p].name;
+            out.push_back("." + name + "(" + name + ")" + (p + 1 == shapes.front().size() ? "" : ",") + "\n");
+        }
+        out.push_back(");\nend endgenerate\n");
+    }
+    out.push_back("initial begin if (!(" + valid + ")) $fatal(1, \"Invalid array coordinate parameters\"); end\nendmodule\n");
+    return out;
+}
+}
+
 static int runVulRTLGen(int argc, char * argv[]) {
 
     argparse::ArgumentParser parser("vulrtlgen", "Vul RTL Generator");
@@ -436,16 +516,18 @@ static int runVulRTLGen(int argc, char * argv[]) {
             bfs_queue.push_back(child);
         }
 
-        const std::string hls_path = mod_instance->rtlHlsPath();
+        const std::string hls_path = mod_instance->rtlConcreteHlsPath();
         if (!generated_module_paths.insert(hls_path).second) {
             continue;
         }
         modules.push_back(std::move(mod_instance));
     }
 
+    std::map<string, vector<ArrayRTLVariant>> array_variants;
+    std::map<string, string> shared_implementations;
     ModuleTasks tasks(processes, static_cast<unsigned>(modules.size()));
     for (const auto &mod_instance : modules) {
-        const std::string hls_path = mod_instance->rtlHlsPath();
+        const std::string hls_path = mod_instance->rtlConcreteHlsPath();
 
         VulErrorContextGuard _err("generating code for module instance: " + mod_instance->simClassName());
 
@@ -459,6 +541,36 @@ static int runVulRTLGen(int argc, char * argv[]) {
             project.global_bundlelib,
             project.global_helper_codes
         );
+        string implementation = mod_instance->rtlConcreteClassName();
+        bool duplicate_implementation = false;
+        if (!mod_instance->coordinateContext().empty()) {
+            const std::regex own_logic("\\bLogicSubModule_" + implementation + "\\b");
+            const std::regex own_module("\\b" + implementation + "\\b");
+            string signature = mod_instance->rtlSvPath();
+            auto normalized = [&](const string &line) {
+                return std::regex_replace(std::regex_replace(line, own_logic, "__vul_logic"), own_module, "__vul_implementation");
+            };
+            for (const auto &line : codes.logic_hls_codes) signature += normalized(line);
+            signature += "\n// Framework\n";
+            for (const auto &line : codes.rtl_skeleten_codes) signature += normalized(line);
+            auto [shared, inserted] = shared_implementations.emplace(signature, implementation);
+            duplicate_implementation = !inserted;
+            implementation = shared->second;
+        }
+        if (!mod_instance->coordinateContext().empty()) {
+            ArrayRTLVariant variant{mod_instance, {}, implementation};
+            bool in_ports = false;
+            for (const auto &line : codes.rtl_skeleten_codes) {
+                if (line.starts_with("module ")) { in_ports = true; continue; }
+                if (in_ports && line.starts_with(");")) break;
+                if (in_ports) {
+                    string port = line;
+                    while (!port.empty() && (port.back() == '\n' || port.back() == '\r')) port.pop_back();
+                    variant.ports.push_back(std::move(port));
+                }
+            }
+            array_variants[mod_instance->rtlSvPath()].push_back(std::move(variant));
+        }
         // Shared resources are copied only by the coordinator, once per path.
         for (const auto& resource : codes.resource_files) {
             if (!copied_resources.insert(resource).second) continue;
@@ -469,6 +581,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
             std::filesystem::copy_file(source, destination);
         }
         tasks.launch(mod_instance->simClassName(), [&](TaskReporter &reporter) -> int {
+        if (duplicate_implementation) return 0;
         const auto hls_out_path = out_path / hls_path;
         // The frontend still needs a source file; remove it on every exit in release mode.
         struct IntermediateCleanup {
@@ -480,7 +593,7 @@ static int runVulRTLGen(int argc, char * argv[]) {
         } cleanup{hls_out_path, release};
         writeLinesToFile(codes.logic_hls_codes, hls_out_path.string());
         if (!release) vulDebugWriteMapToFile(codes.logic_hls_debug_lines, (out_path / (hls_path + ".dbgmap")).string());
-        const auto sv_path = mod_instance->rtlSvPath();
+        const auto sv_path = mod_instance->rtlConcreteSvPath();
         rtlgen::LogicRTLResult rtlzz_result =
             rtlgen::appendLogicRTL(codes, *mod_instance, hls_out_path.string(), lib_dir,
                                   1024, release, use_circt,
@@ -533,6 +646,9 @@ static int runVulRTLGen(int argc, char * argv[]) {
         }
         return 1;
     }
+
+    for (const auto &[path, variants] : array_variants)
+        writeLinesToFile(arrayRTLWrapper(variants), (out_path / path).string());
 
     std::cout << "[vulrtlgen] Summary:\n";
 

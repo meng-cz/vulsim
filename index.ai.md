@@ -262,6 +262,13 @@
 - `VulErrorContextGuard`：进入作用域时压入错误上下文，离开时弹出。
 - `EStr(...)`：构造 `ErrorMsg`。
 
+## src/instance_graph.cpp / src/instance_graph.h
+
+**文件功能**：共享具体实例端点展开，保留声明路径生成身份。
+
+- `materializeConcreteConnections(...)`：绑定源坐标并求值目标索引，展开边界通配到事务索引；分析、验证和两种生成器使用相同连接结果。
+- `concreteGenerationView(...)`：将具体子节点和连接转换为生成视图，不改变声明路径及坐标上下文。
+
 ## src/module.cpp
 
 **文件功能**：将临时模块实例化为静态模块层次，并分析连接和更新顺序。
@@ -270,8 +277,7 @@
 - `staticalizeReqServ(...)`：静态化 request/service 定义。
 - `instantiateModule(...)`：静态化模块参数、状态和子实例声明；Service 可由逻辑实现或通过 `CONNECT_S_CS` 转发。
 - `detectRequestCallInLogicBlocks(...)`：扫描逻辑块中的 request/service 调用。
-- `findConnectedLogicBlockID(...)`：定位请求连接到的服务逻辑块。
-- `setupUpdateSequence(...)`：遍历完整层次，收集 Tick 的递归事务调用源，诊断重复调用和多调用源，并将 Service priority 的先后约束投影到公共祖先的 Tick／直接子树，计算仿真更新顺序。
+- `setupUpdateSequence(...)`：按具体实例与事务索引建图，静态求值调用索引及 `if constexpr`，区分真实调用环、重复调用和多更新源；将 priority 约束投影到公共祖先，保存具体子实例更新序列。
 
 ## src/module.h
 
@@ -309,7 +315,7 @@
 - `_procChildrenAndConnection(...)`：生成子模块连接、服务转发和查询转发；`CONNECT_CR_S` 直接接入本地 Service 的握手及参数线网。
 - `_procQueues(...)`：生成 Queue/QueueMP 端口、helper 和 RTL 实例。
 - `_procBRAMAndROM(...)`：生成 BRAM/ROM 端口、helper 和 RTL 实例。
-- `genVerilatorTestMainCpp(...)`：生成 Verilator 顶层测试绑定代码，支持与 C++ 仿真一致的 `sim_reset()` 测试入口，Main 的 QUERY 仅求值读取、不触发 Service 回调；宽 Verilator 端口按 32 位存储字转换为 64 位访问。
+- `genVerilatorTestMainCpp(...)`：生成 Verilator 顶层测试绑定代码，支持数组 Request/Service 的模板索引及与 C++ 仿真一致的 `sim_reset()` 测试入口，Main 的 QUERY 仅求值读取、不触发 Service 回调；宽 Verilator 端口按 32 位存储字转换为 64 位访问。
 
 ## src/rtlgen.h
 
@@ -354,12 +360,10 @@
 - `genStaticBundle(...)`：生成单个静态 bundle 的 C++ 定义。
 - `genStaticBundleHeaderCode(...)`：生成 bundle 头文件代码。
 - `genStaticProjectHeaderCode(...)`：生成工程公共头文件代码。
-- `genStaticModuleCodeHpp(...)`：生成单个模块实例的声明和实现代码，包含连接到子服务的边界 Service 转发函数；寄存器复位值先递归零初始化，再执行可选用户复位赋值。
+- `genStaticModuleCodeHpp(...)`：生成具体实例的声明和实现，数组上下文使用按声明路径命名的坐标模板特化，父类型直接确定；包含边界 Service 转发函数；寄存器复位值先递归零初始化，再执行可选用户复位赋值。
 - `genStaticTestHarnessCodeHpp(...)`：生成测试 harness 声明和实现代码。
 - `genStaticTestHarnessHpp(...)`：生成测试 harness 聚合头文件。
 - `genStaticTestMainHpp(...)`：生成仿真 main 入口代码。
-- `parseConcreteInstanceIndices(...)`：解析具体子实例索引。
-- `buildExplicitArrayWrapperLines(...)`：为数组子实例生成显式 wrapper。
 
 ## src/simgen.h
 
@@ -472,4 +476,8 @@
 
 **文件功能**：读取 VULC++ 工程、递归实例化模块，并建立仿真 harness 与顶层的连接。
 
-- `parseVcppStaticProjectImpl(...)`：解析工程与模块层次，构建用于更新顺序分析的 TestMain；子 Request 驱动的顶层内部 Service 不添加虚构的外部调用源。
+- `parseVcppStaticProjectImpl(...)`：解析工程并逐坐标展开具体实例，落实 COORD 绑定和普通参数覆盖，保留声明路径用于共享模板文件；构建用于更新顺序分析的 TestMain；子 Request 驱动的顶层内部 Service 不添加虚构的外部调用源。
+
+## regression/generator_array_instances.py / regression/array_instances
+
+**文件功能**：验证五组声明路径与 25 个具体实例、COORD 合法性、嵌套结构变化、用户参数隔离、调用诊断与 priority，严格检查原始 systolic2d 双路径输出、RTL 实现去重及具体 Trace 路径；硬件回归逐周期验证参数化截断、队列容量、事务连接和复位，并同时运行 C++/RTL。
